@@ -1,0 +1,39 @@
+{
+  "name": "cres-dynamics-crm",
+  "version": "1.0.0",
+  "description": "Internal CRM / Business Operating System for Cres Dynamics Ltd",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "db:migrate": "node src/db/migrate.js",
+    "db:seed": "node src/db/seed.js",
+    "db:setup": "node src/db/migrate.js && node src/db/seed.js",
+    "worker": "node src/queues/workers.js",
+    "health": "curl -s http://localhost:3000/api/health | python3 -m json.tool"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "bullmq": "^5.34.5",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
+    "imapflow": "^1.7.1",
+    "ioredis": "^5.4.2",
+    "jsonwebtoken": "^9.0.2",
+    "mailparser": "^3.9.15",
+    "morgan": "^1.10.0",
+    "multer": "^2.2.0",
+    "pdf-parse": "^2.4.5",
+    "pg": "^8.13.1",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
+    "uuid": "^11.0.5",
+    "zod": "^3.24.1"
+  }
+}

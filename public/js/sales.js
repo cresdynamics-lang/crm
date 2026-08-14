@@ -1,0 +1,859 @@
+/**
+ * Step 3 - Sales module faces
+ */
+const CresSales = (() => {
+  let chart;
+  let leadModalId = null;
+  let resubmitProjectId = null;
+
+  function esc(str) {
+    return String(str ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function fmtDate(v) {
+    if (!v) return '-';
+    return new Date(v).toLocaleDateString();
+  }
+
+  function fmtMoney(n) {
+    const num = Number(n);
+    if (Number.isNaN(num)) return '-';
+    return num.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+  }
+
+  function statusPill(s) {
+    return `<span class="status-pill ${esc(s || '')}">${esc((s || '').replace(/_/g, ' '))}</span>`;
+  }
+
+  function flash(el, msg, ok = true) {
+    if (!el) return;
+    el.textContent = msg;
+    el.className = `flash visible ${ok ? 'ok' : 'err'}`;
+    setTimeout(() => el.classList.remove('visible'), 3500);
+  }
+
+  // ---------- Dashboard ----------
+  async function mountHome() {
+    const host = document.getElementById('sales-dashboard');
+    if (!host) return;
+
+    try {
+      const res = await CresAPI.request('/api/sales/dashboard');
+      const { kpis, chart: chartData } = res.data;
+      host.innerHTML = `
+        <div class="kpi-grid">
+          <div class="kpi-card"><div class="kpi-label">Leads in contact</div><div class="kpi-value">${kpis.leadsInContact}</div></div>
+          <div class="kpi-card"><div class="kpi-label">Prospects</div><div class="kpi-value">${kpis.prospects}</div></div>
+          <div class="kpi-card"><div class="kpi-label">Deals</div><div class="kpi-value">${kpis.deals}</div></div>
+          <a href="#/leads" class="kpi-card kpi-link" id="kpi-followups-due" title="View follow-up leads">
+            <div class="kpi-label">Follow-ups due</div>
+            <div class="kpi-value">${kpis.followUpsDue}</div>
+          </a>
+          <div class="kpi-card"><div class="kpi-label">Projects created</div><div class="kpi-value">${kpis.projectsCreated}</div></div>
+          <div class="kpi-card"><div class="kpi-label">Leads converted</div><div class="kpi-value">${kpis.leadsConverted}</div></div>
+        </div>
+        <div class="chart-panel">
+          <h3>Leads contacted this week</h3>
+          <div class="chart-wrap"><canvas id="sales-leads-chart"></canvas></div>
+        </div>`;
+
+      document.getElementById('kpi-followups-due')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        sessionStorage.setItem('cres_leads_status', 'follow_up');
+        location.hash = '#/leads';
+      });
+
+      const ctx = document.getElementById('sales-leads-chart');
+      if (chart) chart.destroy();
+      chart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: chartData.labels,
+          datasets: [{
+            label: 'Engagements',
+            data: chartData.values,
+            backgroundColor: 'rgba(31, 167, 160, 0.65)',
+            borderRadius: 6,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { color: '#8b9aab' }, grid: { color: 'rgba(42,52,65,0.5)' } },
+            y: {
+              beginAtZero: true,
+              ticks: { color: '#8b9aab', precision: 0 },
+              grid: { color: 'rgba(42,52,65,0.5)' },
+            },
+          },
+        },
+      });
+    } catch (err) {
+      host.innerHTML = `<div class="placeholder-card">${esc(err.message)}</div>`;
+    }
+  }
+
+  // ---------- Leads ----------
+  async function mountLeads() {
+    const statusFilter = sessionStorage.getItem('cres_leads_status');
+    if (statusFilter) {
+      const sel = document.getElementById('leads-status');
+      if (sel) sel.value = statusFilter;
+      sessionStorage.removeItem('cres_leads_status');
+    }
+    const q = document.getElementById('leads-search')?.value || '';
+    const status = document.getElementById('leads-status')?.value || '';
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (status) params.set('status', status);
+    const res = await CresAPI.request(`/api/leads?${params}`);
+    const tbody = document.getElementById('leads-tbody');
+    if (!res.data.length) {
+      tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No leads yet. Add your first lead.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = res.data
+      .map(
+        (l) => `<tr data-id="${l.id}">
+          <td>${esc(l.name)}</td>
+          <td>${esc(l.phone || '-')}</td>
+          <td>${esc(l.email || '-')}</td>
+          <td>${esc(l.business_name || '-')}</td>
+          <td>${esc(l.business_type || '-')}</td>
+          <td>${statusPill(l.status)}</td>
+          <td>${fmtDate(l.last_engagement_at)}</td>
+        </tr>`
+      )
+      .join('');
+    tbody.querySelectorAll('tr[data-id]').forEach((tr) => {
+      tr.addEventListener('click', () => openLeadDetail(tr.dataset.id));
+    });
+  }
+
+  async function openLeadDetail(id) {
+    leadModalId = id;
+    const [leadRes, engRes, msgRes] = await Promise.all([
+      CresAPI.request(`/api/leads/${id}`),
+      CresAPI.request(`/api/leads/${id}/engagements`),
+      CresAPI.request(`/api/leads/${id}/messages`).catch(() => ({ data: [] })),
+    ]);
+    const lead = leadRes.data;
+    document.getElementById('lead-detail-title').textContent = lead.name;
+    document.getElementById('lead-edit-name').value = lead.name || '';
+    document.getElementById('lead-edit-phone').value = lead.phone || '';
+    document.getElementById('lead-edit-email').value = lead.email || '';
+    document.getElementById('lead-edit-business').value = lead.business_name || '';
+    const typeEl = document.getElementById('lead-edit-business-type');
+    if (typeEl) typeEl.value = lead.business_type || '';
+    document.getElementById('lead-edit-status').value = lead.status;
+
+    const list = document.getElementById('engagement-list');
+    list.innerHTML = engRes.data.length
+      ? engRes.data
+          .map(
+            (e) => `<li>
+              <div class="meta">${esc(e.created_by_name || '')} · ${new Date(e.created_at).toLocaleString()}${
+                e.follow_up_date ? ` · follow-up ${fmtDate(e.follow_up_date)}` : ''
+              }</div>
+              <div>${esc(e.note)}</div>
+            </li>`
+          )
+          .join('')
+      : `<li class="empty-state">No engagements yet.</li>`;
+
+    const msgList = document.getElementById('lead-messages-list');
+    if (msgList) {
+      msgList.innerHTML = msgRes.data.length
+        ? msgRes.data
+            .map(
+              (m) => `<li>
+                <div class="meta">${statusPill(m.status)} · scheduled ${new Date(m.scheduled_for).toLocaleString()}${
+                  m.sent_at ? ` · sent ${new Date(m.sent_at).toLocaleString()}` : ''
+                }</div>
+                <div><strong>${esc(m.subject)}</strong></div>
+                <div style="white-space:pre-wrap;margin-top:4px;">${esc(m.body)}</div>
+                ${
+                  m.status === 'pending' || m.status === 'failed'
+                    ? `<div style="margin-top:8px;">
+                        <button type="button" class="btn btn-ghost btn-sm" data-send-msg="${esc(m.id)}" style="padding:4px 8px;font-size:0.75rem;">Send now</button>
+                      </div>`
+                    : ''
+                }
+                ${m.error ? `<div class="meta" style="color:#ffb4b4;">${esc(m.error)}</div>` : ''}
+              </li>`
+            )
+            .join('')
+        : `<li class="empty-state">No scheduled emails yet.</li>`;
+
+      msgList.querySelectorAll('[data-send-msg]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          try {
+            await CresAPI.request(`/api/leads/${leadModalId}/messages/${btn.dataset.sendMsg}/send`, {
+              method: 'POST',
+              body: {},
+              idempotencyKey: `lead-send-${btn.dataset.sendMsg}-${Date.now()}`,
+            });
+            flash(document.getElementById('lead-detail-flash'), 'Email queued to lead');
+            await openLeadDetail(leadModalId);
+          } catch (err) {
+            flash(document.getElementById('lead-detail-flash'), err.message, false);
+          }
+        });
+      });
+    }
+
+    document.getElementById('lead-detail-modal').classList.add('open');
+  }
+
+  async function saveLeadEdit(e) {
+    e.preventDefault();
+    await CresAPI.request(`/api/leads/${leadModalId}`, {
+      method: 'PATCH',
+      body: {
+        name: document.getElementById('lead-edit-name').value,
+        phone: document.getElementById('lead-edit-phone').value,
+        email: document.getElementById('lead-edit-email').value,
+        business_name: document.getElementById('lead-edit-business').value,
+        business_type: document.getElementById('lead-edit-business-type')?.value || null,
+        status: document.getElementById('lead-edit-status').value,
+      },
+    });
+    await mountLeads();
+    flash(document.getElementById('lead-detail-flash'), 'Lead updated');
+  }
+
+  async function addEngagement(e) {
+    e.preventDefault();
+    const note = document.getElementById('eng-note').value.trim();
+    const follow_up_date = document.getElementById('eng-followup').value || null;
+    const status = document.getElementById('eng-status').value || undefined;
+    const res = await CresAPI.request(`/api/leads/${leadModalId}/engagements`, {
+      method: 'POST',
+      body: { note, follow_up_date, status },
+      idempotencyKey: `eng-${leadModalId}-${Date.now()}`,
+    });
+    document.getElementById('eng-note').value = '';
+    document.getElementById('eng-followup').value = '';
+    document.getElementById('eng-status').value = '';
+    if (res.data.client) {
+      flash(document.getElementById('lead-detail-flash'), 'Lead converted to client');
+    } else {
+      flash(document.getElementById('lead-detail-flash'), 'Engagement logged');
+    }
+    await openLeadDetail(leadModalId);
+    await mountLeads();
+  }
+
+  async function createLead(e) {
+    e.preventDefault();
+    const body = {
+      name: document.getElementById('new-lead-name').value.trim(),
+      phone: document.getElementById('new-lead-phone').value.trim(),
+      email: document.getElementById('new-lead-email').value.trim(),
+      business_name: document.getElementById('new-lead-business').value.trim(),
+      business_type: document.getElementById('new-lead-business-type')?.value.trim() || '',
+    };
+    try {
+      await CresAPI.request('/api/leads', {
+        method: 'POST',
+        body,
+        idempotencyKey: `lead-${body.email || body.name}-${Date.now()}`,
+      });
+    } catch (err) {
+      if (err.code === 'DUPLICATE_LEAD' && err.status === 409) {
+        const dups = err.details?.duplicates || [];
+        const lines = dups
+          .map((d) => `• ${d.name || 'Lead'}${d.phone ? ` (${d.phone})` : ''}${d.business_name ? ` — ${d.business_name}` : ''}`)
+          .join('\n');
+        const msg = `Possible duplicate lead found:\n${lines || '(see existing records)'}\n\nCreate anyway?`;
+        if (!confirm(msg)) return;
+        await CresAPI.request('/api/leads', {
+          method: 'POST',
+          body: { ...body, force: true },
+          idempotencyKey: `lead-force-${body.email || body.name}-${Date.now()}`,
+        });
+      } else {
+        throw err;
+      }
+    }
+    document.getElementById('new-lead-modal').classList.remove('open');
+    e.target.reset();
+    await mountLeads();
+  }
+
+  // ---------- Clients ----------
+  async function mountClients() {
+    const res = await CresAPI.request('/api/clients');
+    const tbody = document.getElementById('clients-tbody');
+    if (!res.data.length) {
+      tbody.innerHTML = `<tr><td colspan="4" class="empty-state">No clients yet. Convert a lead to create one.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = res.data
+      .map(
+        (c) => `<tr data-id="${c.id}">
+          <td>${esc(c.name)}</td>
+          <td>${esc(c.business_name || '-')}</td>
+          <td>${fmtDate(c.converted_at)}</td>
+          <td>${c.project_count ?? 0}</td>
+        </tr>`
+      )
+      .join('');
+    tbody.querySelectorAll('tr[data-id]').forEach((tr) => {
+      tr.addEventListener('click', () => openClientProjects(tr.dataset.id));
+    });
+  }
+
+  async function openClientProjects(id) {
+    const [client, projects] = await Promise.all([
+      CresAPI.request(`/api/clients/${id}`),
+      CresAPI.request(`/api/clients/${id}/projects`),
+    ]);
+    document.getElementById('client-projects-title').textContent =
+      `${client.data.name} - projects`;
+    const list = document.getElementById('client-projects-list');
+    if (!projects.data.length) {
+      list.innerHTML = `<div class="empty-state">No linked projects yet.</div>`;
+    } else {
+      list.innerHTML = `<div class="data-table-wrap"><table class="data-table">
+        <thead><tr><th>Name</th><th>Status</th><th>Created</th></tr></thead>
+        <tbody>${projects.data
+          .map(
+            (p) => `<tr>
+              <td>${esc(p.name)}</td>
+              <td>${statusPill(p.status)}</td>
+              <td>${fmtDate(p.created_at)}</td>
+            </tr>`
+          )
+          .join('')}</tbody></table></div>`;
+    }
+    document.getElementById('client-projects-modal').classList.add('open');
+  }
+
+  // ---------- Reports ----------
+  async function mountReports() {
+    const res = await CresAPI.request('/api/reports');
+    const list = document.getElementById('reports-list');
+    list.innerHTML = res.data.length
+      ? res.data
+          .map((r) => {
+            const reviewed =
+              r.routing_status === 'pm_reviewed' || r.routing_status === 'forwarded_director'
+                ? 'Yes'
+                : 'Pending';
+            return `<tr>
+              <td>${new Date(r.created_at).toLocaleString()}</td>
+              <td>${statusPill(r.routing_status || 'pending_pm')}</td>
+              <td>${esc(reviewed)}${r.reviewed_by_name ? ` · ${esc(r.reviewed_by_name)}` : ''}</td>
+              <td>${esc(r.content)}${
+                (r.attachments || []).length
+                  ? `<div class="file-chips">${r.attachments
+                      .map((a) => `<span>${esc(a.originalName || a.path)}</span>`)
+                      .join('')}</div>`
+                  : ''
+              }</td>
+              <td>${
+                r.remarks
+                  ? `<div class="rejection-banner" style="margin:0;">${esc(r.remarks)}</div>
+                     <div class="meta">${esc(r.remarks_by_name || 'Director')} · ${
+                      r.remarks_at ? new Date(r.remarks_at).toLocaleString() : ''
+                    }</div>`
+                  : '<span class="meta">No remarks yet</span>'
+              }</td>
+            </tr>`;
+          })
+          .join('')
+      : `<tr><td colspan="5" class="empty-state">No reports submitted yet.</td></tr>`;
+  }
+
+  async function submitReport(e) {
+    e.preventDefault();
+    const fd = new FormData();
+    fd.append('content', document.getElementById('report-content').value.trim());
+    const projectId = document.getElementById('report-project').value;
+    if (projectId) fd.append('project_id', projectId);
+    const files = document.getElementById('report-files').files;
+    for (const f of files) fd.append('attachments', f);
+
+    await CresAPI.request('/api/reports', { method: 'POST', body: fd });
+    e.target.reset();
+    flash(document.getElementById('reports-flash'), 'Report submitted');
+    await mountReports();
+  }
+
+  // ---------- Follow-ups ----------
+  async function mountFollowups() {
+    const res = await CresAPI.request('/api/invoices/followups');
+    const tbody = document.getElementById('followups-tbody');
+    if (!res.data.length) {
+      tbody.innerHTML = `<tr><td colspan="4" class="empty-state">No invoices flagged to you.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = res.data
+      .map(
+        (f) => `<tr>
+          <td>${esc(f.client_name || f.client_business || '-')}</td>
+          <td>${statusPill(f.invoice_status)}</td>
+          <td>${statusPill(f.status)}</td>
+          <td>${
+            f.status === 'pending'
+              ? `<button type="button" class="btn btn-ghost" data-follow="${f.id}" style="padding:6px 10px;font-size:0.8rem;">Mark followed up</button>`
+              : '-'
+          }</td>
+        </tr>`
+      )
+      .join('');
+    tbody.querySelectorAll('[data-follow]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        await CresAPI.request(`/api/invoices/followups/${btn.dataset.follow}/followed-up`, {
+          method: 'POST',
+        });
+        await mountFollowups();
+      });
+    });
+  }
+
+  async function pickDeveloper(title) {
+    const developers = await CresAPI.request('/api/users/developers');
+    const list = developers.data || [];
+    if (!list.length) {
+      alert('No developers available');
+      return null;
+    }
+    const choice = prompt(
+      `${title}\n\nEnter number:\n` + list.map((d, i) => `${i + 1}. ${d.name}`).join('\n')
+    );
+    if (choice == null || choice === '') return null;
+    const idx = Number(choice) - 1;
+    if (!list[idx]) {
+      alert('Invalid selection');
+      return null;
+    }
+    return list[idx].id;
+  }
+
+  async function reassignProject(projectId) {
+    const developerId = await pickDeveloper('Reassign project to developer');
+    if (!developerId) return;
+    await CresAPI.request('/api/assignments', {
+      method: 'POST',
+      body: { project_id: projectId, developer_id: developerId },
+      idempotencyKey: `assign-${projectId}-${Date.now()}`,
+    });
+    flash(document.getElementById('projects-flash'), 'Developer invitation sent');
+    await mountProjects();
+  }
+
+  // ---------- Email ----------
+  async function mountEmail() {
+    const clients = await CresAPI.request('/api/clients');
+    const select = document.getElementById('email-client');
+    select.innerHTML =
+      `<option value="">- Type address below -</option>` +
+      clients.data
+        .map((c) => `<option value="${c.id}" data-email="${esc(c.email || '')}">${esc(c.name)}${c.email ? ` (${esc(c.email)})` : ''}</option>`)
+        .join('');
+
+    const hist = await CresAPI.request('/api/emails');
+    const list = document.getElementById('email-history');
+    list.innerHTML = hist.data.length
+      ? hist.data
+          .map(
+            (m) => `<li>
+              <div class="meta">${new Date(m.created_at).toLocaleString()} · ${esc(m.status)} · to ${esc(m.to_email)}</div>
+              <strong>${esc(m.subject)}</strong>
+              <div style="margin-top:4px;color:var(--text-muted);font-size:0.85rem;">${esc(m.body.slice(0, 160))}${m.body.length > 160 ? '…' : ''}</div>
+            </li>`
+          )
+          .join('')
+      : `<li class="empty-state">No emails sent yet.</li>`;
+  }
+
+  async function sendEmail(e) {
+    e.preventDefault();
+    const client_id = document.getElementById('email-client').value || null;
+    const to_email = document.getElementById('email-to').value.trim();
+    await CresAPI.request('/api/emails', {
+      method: 'POST',
+      body: {
+        client_id,
+        to_email: to_email || undefined,
+        subject: document.getElementById('email-subject').value.trim(),
+        body: document.getElementById('email-body').value.trim(),
+      },
+      idempotencyKey: `email-${Date.now()}`,
+    });
+    e.target.reset();
+    flash(document.getElementById('email-flash'), 'Email queued for delivery');
+    await mountEmail();
+  }
+
+  // ---------- Projects ----------
+  async function mountProjects() {
+    const [projects, clients, developers, workload] = await Promise.all([
+      CresAPI.request('/api/projects'),
+      CresAPI.request('/api/clients'),
+      CresAPI.request('/api/users/developers'),
+      CresAPI.request('/api/projects/meta/developer-workload').catch(() => ({ data: [] })),
+    ]);
+
+    const tbody = document.getElementById('projects-tbody');
+    const devMap = Object.fromEntries(developers.data.map((d) => [d.id, d.name]));
+    const clientMap = Object.fromEntries(clients.data.map((c) => [c.id, c.name]));
+    const loadMap = Object.fromEntries((workload.data || []).map((w) => [w.id, w.active_count]));
+
+    const exportBtn = document.getElementById('btn-export-projects');
+    if (exportBtn) exportBtn.hidden = false;
+
+    const thead = document.querySelector('#sales-projects-chrome thead tr');
+    if (thead) {
+      thead.innerHTML =
+        '<th>Name</th><th>Client</th><th>Status</th><th>Assignment</th><th>Developer</th><th></th>';
+    }
+
+    if (!projects.data.length) {
+      tbody.innerHTML = `<tr><td colspan="6" class="empty-state">No projects yet.</td></tr>`;
+    } else {
+      tbody.innerHTML = projects.data
+        .map((p) => {
+          const rejected = p.status === 'rejected';
+          const assignStatus = p.assignment_status || 'unassigned';
+          const canReassign =
+            !['pending_approval', 'rejected'].includes(p.status) &&
+            ['rejected', 'unassigned'].includes(assignStatus);
+          const actions = [];
+          if (rejected) {
+            actions.push(
+              `<button type="button" class="btn btn-ghost btn-sm" data-resubmit="${esc(p.id)}" style="padding:6px 10px;font-size:0.8rem;">Edit &amp; resubmit</button>`
+            );
+          }
+          if (canReassign) {
+            actions.push(
+              `<button type="button" class="btn btn-primary btn-sm" data-reassign="${esc(p.id)}" style="padding:6px 10px;font-size:0.8rem;">Reassign</button>`
+            );
+          }
+          return `<tr class="clickable-row" data-id="${esc(p.id)}">
+            <td>${esc(p.name)}
+              ${rejected && p.rejection_reason
+                ? `<div class="rejection-banner" style="margin-top:6px;">Rejection reason: ${esc(p.rejection_reason)}</div>`
+                : rejected
+                  ? `<div class="meta" style="margin-top:4px;color:#ffb4b4;">Rejected — open Edit &amp; resubmit for details</div>`
+                  : ''}
+            </td>
+            <td>${esc(p.client_name || clientMap[p.client_id] || '-')}</td>
+            <td>${statusPill(p.status)}</td>
+            <td>${statusPill(assignStatus)}</td>
+            <td>${esc(devMap[p.assigned_developer_id] || '-')}</td>
+            <td>${actions.length ? actions.join(' ') : '-'}</td>
+          </tr>`;
+        })
+        .join('');
+      tbody.querySelectorAll('tr[data-id]').forEach((tr) => {
+        tr.addEventListener('click', (e) => {
+          if (e.target.closest('[data-resubmit],[data-reassign]')) return;
+          if (typeof CresProjectDetail !== 'undefined') {
+            CresProjectDetail.open(tr.dataset.id, { onSaved: () => mountProjects() }).catch(console.error);
+          }
+        });
+      });
+      tbody.querySelectorAll('[data-resubmit]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openResubmitModal(btn.dataset.resubmit).catch((err) => alert(err.message));
+        });
+      });
+      tbody.querySelectorAll('[data-reassign]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          reassignProject(btn.dataset.reassign).catch((err) => alert(err.message));
+        });
+      });
+    }
+
+    const clientSelect = document.getElementById('proj-client');
+    clientSelect.innerHTML =
+      `<option value="">- Manual / none -</option>` +
+      clients.data.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+
+    const devSelect = document.getElementById('proj-developer');
+    devSelect.innerHTML =
+      `<option value="">- Unassigned -</option>` +
+      developers.data
+        .map((d) => {
+          const n = loadMap[d.id];
+          const load = n != null ? ` (${n} active)` : '';
+          return `<option value="${d.id}">${esc(d.name)}${load}</option>`;
+        })
+        .join('');
+
+    const reportProj = document.getElementById('report-project');
+    if (reportProj) {
+      reportProj.innerHTML =
+        `<option value="">- No project -</option>` +
+        projects.data.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+    }
+  }
+
+  async function openResubmitModal(id) {
+    resubmitProjectId = id;
+    const [projRes, developers] = await Promise.all([
+      CresAPI.request(`/api/projects/${id}`),
+      CresAPI.request('/api/users/developers'),
+    ]);
+    const p = projRes.data;
+    const milestones = Array.isArray(p.milestones) ? p.milestones : [];
+
+    document.getElementById('resubmit-project-title').textContent = `Edit & resubmit — ${p.name}`;
+    document.getElementById('resubmit-reason').textContent = p.rejection_reason
+      ? `Rejection reason: ${p.rejection_reason}`
+      : 'This project was rejected. Update and resubmit for Director approval.';
+    document.getElementById('resubmit-name').value = p.name || '';
+    document.getElementById('resubmit-description').value = p.description || p.summary || '';
+    document.getElementById('resubmit-value').value = p.value_amount != null ? p.value_amount : '';
+
+    const msList = document.getElementById('resubmit-milestone-list');
+    msList.innerHTML = (milestones.length ? milestones : [{ title: '' }])
+      .map(
+        (m) => `<div class="milestone-row">
+          <input placeholder="Milestone title" value="${esc(m.title || m.name || '')}" />
+          <button type="button" class="btn btn-ghost" data-remove-ms style="padding:6px 10px;">✕</button>
+        </div>`
+      )
+      .join('');
+
+    const devSelect = document.getElementById('resubmit-developer');
+    devSelect.innerHTML =
+      `<option value="">- Unassigned -</option>` +
+      developers.data
+        .map(
+          (d) =>
+            `<option value="${d.id}" ${d.id === p.assigned_developer_id ? 'selected' : ''}>${esc(d.name)}</option>`
+        )
+        .join('');
+
+    document.getElementById('resubmit-project-modal').classList.add('open');
+  }
+
+  async function submitResubmit(e) {
+    e.preventDefault();
+    const milestones = [...document.querySelectorAll('#resubmit-milestone-list input')]
+      .map((i) => i.value.trim())
+      .filter(Boolean)
+      .map((title) => ({ title, status: 'not_started', tasks: [] }));
+
+    const overview = document.getElementById('resubmit-description').value.trim();
+    await CresAPI.request(`/api/projects/${resubmitProjectId}/resubmit`, {
+      method: 'PATCH',
+      body: {
+        name: document.getElementById('resubmit-name').value.trim(),
+        description: overview,
+        summary: overview,
+        milestones,
+        assigned_developer_id: document.getElementById('resubmit-developer').value || null,
+        value_amount: document.getElementById('resubmit-value').value
+          ? Number(document.getElementById('resubmit-value').value)
+          : null,
+      },
+      idempotencyKey: `resubmit-${resubmitProjectId}-${Date.now()}`,
+    });
+    document.getElementById('resubmit-project-modal').classList.remove('open');
+    flash(document.getElementById('projects-flash'), 'Project resubmitted for Director approval');
+    await mountProjects();
+  }
+
+  async function createProject(e) {
+    e.preventDefault();
+    const milestones = [...document.querySelectorAll('#milestone-list input')]
+      .map((i) => i.value.trim())
+      .filter(Boolean)
+      .map((title) => ({ title, status: 'not_started', tasks: [] }));
+
+    let client_id = document.getElementById('proj-client').value || null;
+    const manualName = document.getElementById('proj-manual-client').value.trim();
+
+    if (!client_id && manualName) {
+      const created = await CresAPI.request('/api/clients', {
+        method: 'POST',
+        body: {
+          name: manualName,
+          business_name: document.getElementById('proj-manual-business').value.trim() || null,
+          email: document.getElementById('proj-manual-email').value.trim() || null,
+          phone: document.getElementById('proj-manual-phone').value.trim() || null,
+        },
+        idempotencyKey: `manual-client-${manualName}-${Date.now()}`,
+      });
+      client_id = created.data.id;
+    }
+
+    const overview = document.getElementById('proj-description').value.trim();
+    await CresAPI.request('/api/projects', {
+      method: 'POST',
+      body: {
+        name: document.getElementById('proj-name').value.trim(),
+        description: overview,
+        summary: overview,
+        milestones,
+        client_id,
+        assigned_developer_id: document.getElementById('proj-developer').value || null,
+        value_amount: document.getElementById('proj-value').value
+          ? Number(document.getElementById('proj-value').value)
+          : null,
+      },
+      idempotencyKey: `proj-${Date.now()}`,
+    });
+
+    document.getElementById('new-project-modal').classList.remove('open');
+    e.target.reset();
+    document.getElementById('milestone-list').innerHTML =
+      `<div class="milestone-row"><input placeholder="Milestone title" /><button type="button" class="btn btn-ghost" data-remove-ms style="padding:6px 10px;">✕</button></div>`;
+    flash(document.getElementById('projects-flash'), 'Project submitted for Director approval');
+    await mountProjects();
+  }
+
+  function bindModals() {
+    document.querySelectorAll('[data-close-modal]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        btn.closest('.modal-backdrop')?.classList.remove('open');
+      });
+    });
+    document.querySelectorAll('.modal-backdrop').forEach((m) => {
+      m.addEventListener('click', (e) => {
+        if (e.target === m) m.classList.remove('open');
+      });
+    });
+
+    document.getElementById('btn-new-lead')?.addEventListener('click', () => {
+      document.getElementById('new-lead-modal').classList.add('open');
+    });
+    document.getElementById('btn-new-project')?.addEventListener('click', () => {
+      document.getElementById('new-project-modal').classList.add('open');
+    });
+    document.getElementById('add-milestone')?.addEventListener('click', () => {
+      const row = document.createElement('div');
+      row.className = 'milestone-row';
+      row.innerHTML = `<input placeholder="Milestone title" /><button type="button" class="btn btn-ghost" data-remove-ms style="padding:6px 10px;">✕</button>`;
+      document.getElementById('milestone-list').appendChild(row);
+      row.querySelector('[data-remove-ms]').addEventListener('click', () => row.remove());
+    });
+    document.getElementById('milestone-list')?.addEventListener('click', (e) => {
+      if (e.target.matches('[data-remove-ms]')) e.target.closest('.milestone-row')?.remove();
+    });
+
+    document.getElementById('add-resubmit-milestone')?.addEventListener('click', () => {
+      const row = document.createElement('div');
+      row.className = 'milestone-row';
+      row.innerHTML = `<input placeholder="Milestone title" /><button type="button" class="btn btn-ghost" data-remove-ms style="padding:6px 10px;">✕</button>`;
+      document.getElementById('resubmit-milestone-list').appendChild(row);
+    });
+    document.getElementById('resubmit-milestone-list')?.addEventListener('click', (e) => {
+      if (e.target.matches('[data-remove-ms]')) e.target.closest('.milestone-row')?.remove();
+    });
+
+    document.getElementById('leads-search')?.addEventListener('input', () => {
+      clearTimeout(mountLeads._t);
+      mountLeads._t = setTimeout(() => mountLeads().catch(console.error), 250);
+    });
+    document.getElementById('leads-status')?.addEventListener('change', () => mountLeads());
+
+    document.getElementById('new-lead-form')?.addEventListener('submit', (e) =>
+      createLead(e).catch((err) => alert(err.message))
+    );
+    document.getElementById('lead-edit-form')?.addEventListener('submit', (e) =>
+      saveLeadEdit(e).catch((err) => alert(err.message))
+    );
+    document.getElementById('engagement-form')?.addEventListener('submit', (e) =>
+      addEngagement(e).catch((err) => alert(err.message))
+    );
+
+    async function submitLeadMessage({ sendNow }) {
+      if (!leadModalId) return;
+      const subject = document.getElementById('lead-msg-subject').value.trim();
+      const body = document.getElementById('lead-msg-body').value.trim();
+      const when = document.getElementById('lead-msg-when').value;
+      const payload = {
+        subject,
+        body,
+        send_now: !!sendNow,
+        scheduled_for: when || undefined,
+      };
+      if (!sendNow && !when) {
+        throw new Error('Pick a send time, or use Send now');
+      }
+      await CresAPI.request(`/api/leads/${leadModalId}/messages`, {
+        method: 'POST',
+        body: payload,
+        idempotencyKey: `lead-msg-${leadModalId}-${Date.now()}`,
+      });
+      document.getElementById('lead-message-form')?.reset();
+      flash(
+        document.getElementById('lead-detail-flash'),
+        sendNow ? 'Email queued to lead' : 'Email scheduled'
+      );
+      await openLeadDetail(leadModalId);
+    }
+
+    document.getElementById('lead-message-form')?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      submitLeadMessage({ sendNow: false }).catch((err) =>
+        flash(document.getElementById('lead-detail-flash'), err.message, false)
+      );
+    });
+    document.getElementById('lead-msg-send-now')?.addEventListener('click', () => {
+      submitLeadMessage({ sendNow: true }).catch((err) =>
+        flash(document.getElementById('lead-detail-flash'), err.message, false)
+      );
+    });
+
+    document.getElementById('report-form')?.addEventListener('submit', (e) =>
+      submitReport(e).catch((err) => alert(err.message))
+    );
+    document.getElementById('email-form')?.addEventListener('submit', (e) => {
+      if (CresAPI.getUser()?.role === 'finance') return;
+      sendEmail(e).catch((err) => alert(err.message));
+    });
+    document.getElementById('new-project-form')?.addEventListener('submit', (e) =>
+      createProject(e).catch((err) => alert(err.message))
+    );
+    document.getElementById('resubmit-project-form')?.addEventListener('submit', (e) =>
+      submitResubmit(e).catch((err) => alert(err.message))
+    );
+
+    document.getElementById('btn-export-projects')?.addEventListener('click', () => {
+      CresAPI.download('/api/export/projects.csv', 'projects.csv').catch((err) => alert(err.message));
+    });
+
+    document.getElementById('email-client')?.addEventListener('change', (e) => {
+      const opt = e.target.selectedOptions[0];
+      if (opt?.dataset.email) document.getElementById('email-to').value = opt.dataset.email;
+    });
+  }
+
+  async function mount(faceId, user) {
+    if (!['sales', 'admin'].includes(user.role)) return;
+
+    if (faceId === 'home' && user.role === 'sales') {
+      await mountHome();
+    } else if (faceId === 'leads') {
+      await mountLeads();
+    } else if (faceId === 'clients') {
+      await mountClients();
+    } else if (faceId === 'reports' && user.role === 'sales') {
+      await mountReports();
+      await mountProjects();
+    } else if (faceId === 'followups') {
+      await mountFollowups();
+    } else if (faceId === 'email') {
+      await mountEmail();
+    } else if (faceId === 'projects') {
+      await mountProjects();
+    }
+  }
+
+  return { bindModals, mount };
+})();

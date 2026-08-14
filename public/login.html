@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign in - Cres Dynamics</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/tokens.css" />
+  <link rel="stylesheet" href="/css/login.css" />
+</head>
+<body class="login-page">
+  <main class="login-card">
+    <div class="login-brand">
+      <div class="mark">CD</div>
+      <h1>Cres Dynamics</h1>
+      <p id="login-subtitle">Business Operating System - sign in to continue</p>
+    </div>
+
+    <div id="login-error" class="login-error" role="alert"></div>
+    <div id="login-ok" class="login-ok" role="status"></div>
+
+    <!-- State: login -->
+    <form id="panel-login" class="login-form panel" data-panel="login" novalidate>
+      <div class="field">
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="username" required placeholder="you@cresdynamics.local" />
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required placeholder="••••••••" />
+      </div>
+      <button type="submit" class="login-submit" id="login-btn">Sign in</button>
+      <p class="login-footer">
+        <button type="button" class="linkish" id="goto-forgot">Forgot password?</button>
+      </p>
+    </form>
+
+    <!-- State: accept invite -->
+    <form id="panel-invite" class="login-form panel" data-panel="invite" hidden novalidate>
+      <p class="hint">You’ve been invited to Cres Dynamics. Choose a password (min 8 characters) to activate your account.</p>
+      <div class="field">
+        <label for="invite-password">Password</label>
+        <input id="invite-password" type="password" minlength="8" required autocomplete="new-password" />
+      </div>
+      <div class="field">
+        <label for="invite-confirm">Confirm password</label>
+        <input id="invite-confirm" type="password" minlength="8" required autocomplete="new-password" />
+      </div>
+      <button type="submit" class="login-submit" id="invite-btn">Activate account</button>
+      <p class="login-footer">
+        <button type="button" class="linkish" data-back="login">Back to sign in</button>
+      </p>
+    </form>
+
+    <!-- State: forgot -->
+    <form id="panel-forgot" class="login-form panel" data-panel="forgot" hidden novalidate>
+      <div class="field">
+        <label for="forgot-email">Work email</label>
+        <input id="forgot-email" type="email" required placeholder="you@cresdynamics.local" />
+      </div>
+      <button type="submit" class="login-submit" id="forgot-btn">Send reset code</button>
+      <p class="login-footer">
+        <button type="button" class="linkish" data-back="login">Back to sign in</button>
+      </p>
+    </form>
+
+    <!-- State: verify code -->
+    <form id="panel-verify" class="login-form panel" data-panel="verify" hidden novalidate>
+      <p class="hint">Enter the 6-digit code sent to <strong id="verify-email-label"></strong>. It expires in 10 minutes.</p>
+      <div class="field">
+        <label for="otp-code">Verification code</label>
+        <input id="otp-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required placeholder="000000" autocomplete="one-time-code" />
+      </div>
+      <button type="submit" class="login-submit" id="verify-btn">Verify code</button>
+      <p class="login-footer">
+        <button type="button" class="linkish" data-back="forgot">Resend / change email</button>
+      </p>
+    </form>
+
+    <!-- State: reset password -->
+    <form id="panel-reset" class="login-form panel" data-panel="reset" hidden novalidate>
+      <div class="field">
+        <label for="new-password">New password</label>
+        <input id="new-password" type="password" minlength="8" required autocomplete="new-password" />
+      </div>
+      <div class="field">
+        <label for="confirm-password">Confirm password</label>
+        <input id="confirm-password" type="password" minlength="8" required autocomplete="new-password" />
+      </div>
+      <button type="submit" class="login-submit" id="reset-btn">Set new password</button>
+      <p class="login-footer">
+        <button type="button" class="linkish" data-back="login">Back to sign in</button>
+      </p>
+    </form>
+  </main>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/login.js"></script>
+</body>
+</html>

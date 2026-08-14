@@ -1,0 +1,1436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cres Dynamics CRM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/tokens.css" />
+  <link rel="stylesheet" href="/css/shell.css" />
+  <link rel="stylesheet" href="/css/community.css" />
+  <link rel="stylesheet" href="/css/sales.css" />
+</head>
+<body class="shell-page">
+  <div class="app-shell" id="app-shell">
+    <div class="drawer-overlay" id="drawer-overlay"></div>
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <div class="mark">CD</div>
+        <div>
+          <div class="name">Cres Dynamics</div>
+          <span class="sub">Operating System</span>
+        </div>
+      </div>
+      <ul class="nav-list" id="nav-list"></ul>
+    </aside>
+
+    <header class="topbar">
+      <div class="topbar-left">
+        <button type="button" class="hamburger" id="hamburger" aria-label="Open menu">
+          <span></span><span></span><span></span>
+        </button>
+        <h1 class="page-title" id="page-title">Home</h1>
+        <div class="live-indicator" id="live-indicator" title="Realtime connection">
+          <span class="dot"></span>
+          <span class="label">Connecting…</span>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div class="global-search-wrap">
+          <input id="global-search" type="search" placeholder="Search…" autocomplete="off" aria-label="Global search" />
+          <div class="dropdown global-search-dropdown" id="global-search-dropdown"></div>
+        </div>
+        <button type="button" class="icon-btn" id="notif-btn" aria-label="Notifications" title="Notifications">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5" />
+            <path d="M9 17a3 3 0 0 0 6 0" />
+          </svg>
+          <span class="badge" id="notif-badge" hidden>0</span>
+        </button>
+        <div class="dropdown notif-panel" id="notif-dropdown">
+          <div class="notif-head">
+            <span>Notifications</span>
+            <button type="button" id="notif-read-all">Mark all read</button>
+          </div>
+          <div id="notif-list"></div>
+        </div>
+
+        <button type="button" class="profile-btn" id="profile-btn" aria-haspopup="true">
+          <span class="avatar" id="profile-avatar">?</span>
+          <span class="profile-meta">
+            <span class="pname" id="profile-name">-</span>
+            <span class="prole" id="profile-role">-</span>
+          </span>
+        </button>
+        <div class="dropdown" id="profile-dropdown">
+          <a href="#/settings">Settings</a>
+          <button type="button" id="logout-btn">Logout</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="main-content" id="main-content">
+      <section class="face active" id="face-home" data-title="Home">
+        <div class="face-hero">
+          <h2 id="home-greeting">Welcome</h2>
+          <p id="home-blurb">Your role-based workspace.</p>
+        </div>
+        <div id="sales-dashboard"></div>
+        <div id="director-dashboard"></div>
+        <div id="developer-dashboard"></div>
+        <div id="finance-dashboard"></div>
+        <div id="hr-dashboard"></div>
+        <div id="pm-dashboard"></div>
+        <div id="admin-dashboard"></div>
+        <div id="client-dashboard"></div>
+        <div id="generic-home" class="placeholder-card" hidden>
+          Department modules for your role load in later steps. Use Community and Settings from the sidebar.
+        </div>
+      </section>
+
+      <section class="face" id="face-approvals" data-title="Approvals">
+        <div id="project-approvals-panel">
+          <div class="face-hero">
+            <h2>Pending project approvals</h2>
+            <p>Projects submitted by Sales. Approve to unlock the developer and trigger Finance invoice creation.</p>
+          </div>
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Project</th><th>Client</th><th>Submitted by</th><th>Date</th><th>Developer</th>
+                </tr>
+              </thead>
+              <tbody id="approvals-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="finance-money-approvals-panel" hidden>
+          <div class="face-hero">
+            <h2>Money approvals</h2>
+            <p>Approve Director expense requests and HR salary funding. Finance escalates to Admin for final unlock.</p>
+          </div>
+          <div id="money-approvals-flash" class="flash"></div>
+          <h3 style="margin:0 0 10px;font-size:0.95rem;" id="money-exp-heading">Director expenses</h3>
+          <div class="data-table-wrap" style="margin-bottom:22px;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Category</th><th>Amount</th><th>From</th><th>Description</th><th>Submitted</th><th></th>
+                </tr>
+              </thead>
+              <tbody id="money-exp-approvals-tbody"></tbody>
+            </table>
+          </div>
+          <h3 style="margin:0 0 10px;font-size:0.95rem;" id="money-fund-heading">HR salary funding</h3>
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Month</th><th>Requested</th><th>Requested by</th><th>People</th><th>Submitted</th><th></th>
+                </tr>
+              </thead>
+              <tbody id="money-fund-approvals-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="face" id="face-tasks" data-title="Tasks">
+        <div class="face-hero">
+          <h2>Tasks</h2>
+          <p>Create and assign tasks. PM and Director boards stay in sync with whoever is assigned.</p>
+        </div>
+        <div id="tasks-flash" class="flash"></div>
+        <div class="settings-section" style="max-width:640px;">
+          <form id="task-form" class="form-grid">
+            <div><label for="task-title">Title</label><input id="task-title" required placeholder="Prep proposal for X" /></div>
+            <div>
+              <label for="task-description">Description</label>
+              <textarea id="task-description" rows="3" placeholder="Optional details"></textarea>
+            </div>
+            <div><label for="task-assignee">Assignee</label><select id="task-assignee" required></select></div>
+            <div><label for="task-due">Due date</label><input id="task-due" type="date" /></div>
+            <div class="form-actions"><button type="submit" class="btn btn-primary">Save task</button></div>
+          </form>
+        </div>
+        <h3 style="margin:24px 0 10px;font-size:0.95rem;">Your tasks</h3>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Title</th><th>Assignee</th><th>Due</th><th>Status</th><th>Created by</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="tasks-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="face" id="face-leads" data-title="Leads">
+        <div class="face-hero">
+          <h2>Leads</h2>
+          <p>Track prospects, log engagements, and convert to clients.</p>
+        </div>
+        <div class="toolbar">
+          <input id="leads-search" type="search" placeholder="Search name or business" />
+          <select id="leads-status">
+            <option value="">All statuses</option>
+            <option value="contacting">Contacting</option>
+            <option value="follow_up">Follow-up</option>
+            <option value="not_interested">Not interested</option>
+            <option value="converted">Converted</option>
+          </select>
+          <div class="spacer"></div>
+          <button type="button" class="btn btn-primary" id="btn-new-lead">Add lead</button>
+        </div>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Name</th><th>Phone</th><th>Email</th><th>Business</th><th>Type</th><th>Status</th><th>Last engagement</th>
+              </tr>
+            </thead>
+            <tbody id="leads-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="face" id="face-clients" data-title="Clients">
+        <div class="face-hero">
+          <h2>Clients</h2>
+          <p>Converted leads - click a row to view linked projects (read-only).</p>
+        </div>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Name</th><th>Business</th><th>Converted</th><th>Projects</th></tr>
+            </thead>
+            <tbody id="clients-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="face" id="face-projects" data-title="Projects">
+        <div id="sales-projects-chrome">
+          <div class="face-hero">
+            <h2>Projects</h2>
+            <p>Create projects for Director approval. Assigned developers see them only after approval.</p>
+          </div>
+          <div id="projects-flash" class="flash"></div>
+          <div class="toolbar">
+            <div class="spacer"></div>
+            <button type="button" class="btn btn-ghost" id="btn-export-projects">Export CSV</button>
+            <button type="button" class="btn btn-primary" id="btn-new-project">Create project</button>
+          </div>
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>Name</th><th>Client</th><th>Status</th><th>Assignment</th><th>Developer</th><th></th></tr>
+              </thead>
+              <tbody id="projects-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="pm-projects-panel" hidden>
+          <div class="face-hero">
+            <h2>All projects</h2>
+            <p>Company-wide approved work. Due-soon and overdue rows are flagged automatically from milestone dates.</p>
+          </div>
+          <div class="toolbar">
+            <select id="pm-filter-status">
+              <option value="">All statuses</option>
+              <option value="approved">Approved</option>
+              <option value="in_progress">In progress</option>
+              <option value="blocked">Blocked</option>
+              <option value="completed">Completed</option>
+            </select>
+            <select id="pm-filter-developer"><option value="">All developers</option></select>
+            <select id="pm-filter-client"><option value="">All clients</option></select>
+            <select id="pm-filter-health">
+              <option value="">All health</option>
+              <option value="on_track">On track</option>
+              <option value="due_soon">Due soon</option>
+              <option value="overdue">Overdue</option>
+            </select>
+            <input id="pm-filter-from" type="date" title="Created from" />
+            <input id="pm-filter-to" type="date" title="Created to" />
+            <div class="spacer"></div>
+            <button type="button" class="btn btn-ghost" id="btn-export-pm-projects">Export CSV</button>
+          </div>
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Project</th><th>Client</th><th>Developer</th><th>Status</th><th>Progress</th><th>Due</th>
+                </tr>
+              </thead>
+              <tbody id="pm-projects-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="pm-project-detail" hidden></div>
+
+        <div id="client-projects-panel" hidden>
+          <div class="face-hero">
+            <h2>Your projects</h2>
+            <p>Live status and progress. Open a project for the milestone timeline.</p>
+          </div>
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>Project</th><th>Status</th><th>Progress</th><th>Updated</th></tr>
+              </thead>
+              <tbody id="client-projects-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="client-project-detail" hidden></div>
+
+        <div id="finance-projects-panel" hidden>
+          <div class="face-hero">
+            <h2>Project finances</h2>
+            <p>Approved projects with invoice value, payments, and outstanding balance. Finance cannot create projects.</p>
+          </div>
+          <div class="toolbar">
+            <div class="spacer"></div>
+            <button type="button" class="btn btn-ghost" id="btn-export-fin-projects">Export CSV</button>
+          </div>
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Project</th><th>Client</th><th>Project value</th><th>Invoice</th>
+                  <th>Paid</th><th>Balance</th><th>Due</th><th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="finance-projects-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="face" id="face-timeline" data-title="Timeline">
+        <div class="face-hero">
+          <h2>Project timeline</h2>
+          <p>Milestone due dates across active projects.</p>
+        </div>
+        <div id="timeline-body"></div>
+      </section>
+
+      <section class="face" id="face-changes" data-title="Change requests">
+        <div class="face-hero">
+          <h2>Change requests</h2>
+          <p>Request scope changes on your projects. Sales and PM are notified.</p>
+        </div>
+        <div id="changes-flash" class="flash"></div>
+        <div class="settings-section" style="max-width:560px;">
+          <form id="change-request-form" class="form-grid">
+            <div><label for="cr-project">Project</label><select id="cr-project" required></select></div>
+            <div><label for="cr-subject">Subject</label><input id="cr-subject" required /></div>
+            <div><label for="cr-details">Details</label>
+              <textarea id="cr-details" rows="4" required style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);"></textarea>
+            </div>
+            <div class="form-actions"><button type="submit" class="btn btn-primary">Submit request</button></div>
+          </form>
+        </div>
+        <h3 style="margin:24px 0 10px;font-size:0.95rem;">Your requests</h3>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Project</th><th>Subject</th><th>Status</th><th>Submitted</th></tr></thead>
+            <tbody id="changes-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="face" id="face-followups" data-title="My Follow-ups">
+        <div class="face-hero">
+          <h2>My Follow-ups</h2>
+          <p>Invoices Finance flagged to you. Client and invoice status only — log that you followed up.</p>
+        </div>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Client</th><th>Invoice</th><th>Follow-up</th><th>Action</th></tr>
+            </thead>
+            <tbody id="followups-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="face" id="face-email" data-title="Email client">
+        <div class="face-hero">
+          <h2 id="email-heading">Email composer</h2>
+          <p id="email-blurb">Only Sales contacts clients here - never through Community chat. Messages are logged.</p>
+        </div>
+        <div id="email-flash" class="flash"></div>
+        <div class="settings-section" style="max-width:640px;">
+          <form id="email-form" class="form-grid">
+            <div>
+              <label for="email-client">Client</label>
+              <select id="email-client"></select>
+            </div>
+            <div>
+              <label for="email-to">To email</label>
+              <input id="email-to" type="email" placeholder="client@company.com" />
+            </div>
+            <div>
+              <label for="email-subject">Subject</label>
+              <input id="email-subject" required />
+            </div>
+            <div>
+              <label for="email-body">Body</label>
+              <textarea id="email-body" rows="6" required style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;"></textarea>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">Send email</button>
+            </div>
+          </form>
+        </div>
+        <h3 style="margin:24px 0 10px;font-size:0.95rem;">Sent history</h3>
+        <ul class="engagement-list" id="email-history"></ul>
+      </section>
+
+      <section class="face" id="face-reports" data-title="Reports">
+        <div class="face-hero">
+          <h2 id="reports-heading">Reports</h2>
+          <p id="reports-blurb">Daily reports for your role.</p>
+        </div>
+
+        <div id="finance-reports-panel" hidden>
+          <div id="fin-reports-flash" class="flash"></div>
+          <div class="toolbar" style="margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+            <label class="meta" for="fin-report-from">From</label>
+            <input id="fin-report-from" type="date" />
+            <label class="meta" for="fin-report-to">To</label>
+            <input id="fin-report-to" type="date" />
+            <button type="button" class="btn btn-ghost" id="btn-fin-report-refresh">Refresh</button>
+            <div class="spacer"></div>
+            <button type="button" class="btn btn-ghost" id="btn-fin-report-csv">Download CSV</button>
+            <button type="button" class="btn btn-primary" id="btn-fin-report-pdf">Download PDF</button>
+          </div>
+          <div id="fin-report-summary" class="kpi-grid" style="margin-bottom:16px;"></div>
+          <div id="fin-report-body"></div>
+        </div>
+
+        <div id="sales-reports-panel">
+          <div id="reports-flash" class="flash"></div>
+          <div class="settings-section" style="max-width:640px;">
+            <form id="report-form" class="form-grid">
+              <div>
+                <label for="report-content">Today's work</label>
+                <textarea id="report-content" rows="5" required style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;"></textarea>
+              </div>
+              <div>
+                <label for="report-project">Project (optional)</label>
+                <select id="report-project"></select>
+              </div>
+              <div>
+                <label for="report-files">Attachments (photos / docs)</label>
+                <input id="report-files" type="file" multiple accept="image/*,.pdf,.doc,.docx,.txt" />
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary">Submit report</button>
+              </div>
+            </form>
+          </div>
+          <h3 style="margin:24px 0 10px;font-size:0.95rem;">Your recent reports</h3>
+          <div class="data-table-wrap">
+            <table class="data-table reports-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Status</th>
+                  <th>Reviewed</th>
+                  <th>Report</th>
+                  <th>Director remarks</th>
+                </tr>
+              </thead>
+              <tbody id="reports-list"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="director-reports-panel" hidden>
+          <div id="director-analytics" class="settings-section" style="max-width:none;margin-bottom:20px;"></div>
+          <h3 style="margin:0 0 10px;font-size:0.95rem;">Daily reports</h3>
+          <div class="toolbar">
+            <select id="reports-role">
+              <option value="">All roles</option>
+              <option value="sales">Sales</option>
+              <option value="developer">Developer</option>
+              <option value="pm">PM</option>
+            </select>
+            <select id="reports-person"><option value="">All people</option></select>
+            <select id="reports-routing">
+              <option value="">Forwarded (default)</option>
+              <option value="all">All reports</option>
+              <option value="pending_pm">Pending PM</option>
+              <option value="pm_reviewed">PM reviewed</option>
+              <option value="forwarded_director">Forwarded to Director</option>
+            </select>
+            <input id="reports-from" type="date" title="From date" />
+            <input id="reports-to" type="date" title="To date" />
+          </div>
+          <div class="data-table-wrap">
+            <table class="data-table reports-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Author</th>
+                  <th>Status</th>
+                  <th>Report</th>
+                  <th>Remarks</th>
+                </tr>
+              </thead>
+              <tbody id="director-reports-list"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="pm-reports-panel" hidden>
+          <div id="pm-reports-flash" class="flash"></div>
+          <p style="margin:0 0 12px;color:var(--text-muted);font-size:0.9rem;">
+            Review Sales and Developer daily reports, then forward to the Director hub. No financial data.
+          </p>
+          <div class="toolbar">
+            <select id="pm-reports-role">
+              <option value="">Sales + Developer</option>
+              <option value="sales">Sales</option>
+              <option value="developer">Developer</option>
+            </select>
+            <select id="pm-reports-routing">
+              <option value="">All routing</option>
+              <option value="pending_pm">Pending review</option>
+              <option value="pm_reviewed">Reviewed</option>
+              <option value="forwarded_director">Forwarded</option>
+            </select>
+            <input id="pm-reports-from" type="date" />
+            <input id="pm-reports-to" type="date" />
+          </div>
+          <ul class="engagement-list" id="pm-reports-list"></ul>
+        </div>
+        <div id="admin-reports-panel" hidden>
+          <div id="admin-reports-flash" class="flash"></div>
+          <div id="admin-analytics" class="settings-section" style="max-width:none;margin-bottom:20px;"></div>
+          <div id="admin-action-audit" class="settings-section" style="max-width:none;margin-bottom:20px;"></div>
+          <p style="margin:0 0 12px;color:var(--text-muted);font-size:0.9rem;">
+            Every department report. You can respond to Director, PM, and Finance reports. Sales and Developer reports are read-only.
+            <a href="#/login-audit" style="margin-left:8px;">Login audit →</a>
+          </p>
+          <h3 style="margin:0 0 10px;font-size:0.95rem;">Daily reports</h3>
+          <div class="toolbar">
+            <select id="admin-reports-role">
+              <option value="">All departments</option>
+              <option value="sales">Sales</option>
+              <option value="developer">Developer</option>
+              <option value="pm">PM</option>
+              <option value="director">Director</option>
+              <option value="finance">Finance</option>
+              <option value="hr">HR</option>
+            </select>
+            <select id="admin-reports-person"><option value="">All people</option></select>
+            <input id="admin-reports-from" type="date" />
+            <input id="admin-reports-to" type="date" />
+          </div>
+          <ul class="engagement-list" id="admin-reports-list"></ul>
+        </div>
+      </section>
+
+      <section class="face" id="face-invoices" data-title="Invoices">
+        <div id="director-invoices-panel">
+          <div class="face-hero">
+            <h2>Invoices overview</h2>
+            <p>In/out status only. No balances, expenses, or payment reconciliation.</p>
+          </div>
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>Client</th><th>Amount</th><th>Status</th><th>Project</th></tr>
+              </thead>
+              <tbody id="director-invoices-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="finance-invoices-panel" hidden>
+          <div class="face-hero">
+            <h2>Invoices</h2>
+            <p>Auto-created on Director approval. Review, resend, and manage status.</p>
+          </div>
+          <div class="toolbar">
+            <input id="fin-inv-search" type="search" placeholder="Search client or project" />
+            <select id="fin-inv-status">
+              <option value="">All statuses</option>
+              <option value="issued">Issued</option>
+              <option value="partially_paid">Partially paid</option>
+              <option value="paid">Paid</option>
+              <option value="overdue">Overdue</option>
+            </select>
+            <input id="fin-inv-from" type="date" />
+            <input id="fin-inv-to" type="date" />
+            <div class="spacer"></div>
+            <button type="button" class="btn btn-ghost" id="btn-export-invoices">Export CSV</button>
+          </div>
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Client</th><th>Project</th><th>Amount</th><th>Paid</th><th>Balance</th><th>Due</th><th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="finance-invoices-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="client-invoices-panel" hidden>
+          <div class="face-hero">
+            <h2>Invoices &amp; documents</h2>
+            <p>Your invoices and files shared on your projects. Payments are recorded by Finance - this view is read-only.</p>
+          </div>
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>Project</th><th>Amount</th><th>Status</th><th>Issued</th></tr>
+              </thead>
+              <tbody id="client-invoices-tbody"></tbody>
+            </table>
+          </div>
+          <div class="settings-section" style="margin-top:20px;max-width:640px;">
+            <h3>Shared documents</h3>
+            <ul class="engagement-list" id="client-docs-list"></ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="face" id="face-payments" data-title="Payments">
+        <div class="face-hero">
+          <h2>Record payment</h2>
+          <p>Match the client, add a bank reference, and record full or partial payment. Partial payments close the paid amount and issue a new balance invoice emailed to the client.</p>
+        </div>
+        <div id="payments-flash" class="flash"></div>
+        <div class="settings-section" style="max-width:640px;">
+          <form id="payment-form" class="form-grid">
+            <div style="grid-column:1/-1;">
+              <label for="pay-invoice">Invoice</label>
+              <select id="pay-invoice" required></select>
+            </div>
+            <div style="grid-column:1/-1;" id="pay-client-card" class="placeholder-card" hidden>
+              <div class="meta" style="margin-bottom:6px;">Client on invoice</div>
+              <div id="pay-client-summary"></div>
+              <div class="toolbar" style="margin-top:10px;gap:8px;">
+                <button type="button" class="btn btn-ghost btn-sm" id="btn-check-client">Check client in CRM</button>
+                <button type="button" class="btn btn-primary btn-sm" id="btn-add-client-manual" hidden>Add client details</button>
+              </div>
+              <div id="pay-client-manual" class="form-grid" style="margin-top:12px;" hidden>
+                <div><label>Client name</label><input id="pay-new-client-name" required placeholder="Contact name" /></div>
+                <div><label>Business</label><input id="pay-new-client-business" placeholder="Company" /></div>
+                <div><label>Email</label><input id="pay-new-client-email" type="email" required placeholder="billing@client.com" /></div>
+                <div><label>Phone</label><input id="pay-new-client-phone" placeholder="+1…" /></div>
+                <div class="form-actions" style="grid-column:1/-1;">
+                  <button type="button" class="btn btn-primary btn-sm" id="btn-save-pay-client">Save client to invoice</button>
+                </div>
+              </div>
+            </div>
+            <div>
+              <label for="pay-amount">Amount paid</label>
+              <input id="pay-amount" type="number" min="0.01" step="0.01" required />
+              <p class="meta" id="pay-debt-hint" style="margin:6px 0 0;">Select an invoice to see outstanding debt.</p>
+            </div>
+            <div>
+              <label for="pay-date">Date</label>
+              <input id="pay-date" type="date" />
+            </div>
+            <div style="grid-column:1/-1;">
+              <label for="pay-bank-ref">Bank reference</label>
+              <input id="pay-bank-ref" required placeholder="Bank / remittance reference for this payment" />
+              <div id="pay-bank-card" class="placeholder-card" style="margin-top:10px;" hidden>
+                <div class="meta">Bank reference card</div>
+                <div id="pay-bank-card-body" style="margin-top:6px;font-weight:600;"></div>
+              </div>
+            </div>
+            <div class="form-actions" style="grid-column:1/-1;">
+              <button type="submit" class="btn btn-primary">Record payment</button>
+            </div>
+          </form>
+        </div>
+        <h3 style="margin:24px 0 10px;font-size:0.95rem;">Recent payments</h3>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Invoice / client</th><th>Amount</th><th>Bank ref</th><th>Paid at</th><th>Receipt</th></tr>
+            </thead>
+            <tbody id="payments-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="face" id="face-expenses" data-title="Expenses">
+        <div class="face-hero">
+          <h2>Expenses</h2>
+          <p id="expenses-hero-copy">Operational expenses. Director submissions need Finance then Admin approval before the transaction unlocks.</p>
+        </div>
+        <div id="expenses-flash" class="flash"></div>
+        <div class="toolbar">
+          <select id="exp-category">
+            <option value="">All categories</option>
+            <option value="operational">Operational</option>
+            <option value="other">Other</option>
+          </select>
+          <select id="exp-approval-filter">
+            <option value="">All statuses</option>
+            <option value="pending_finance">Awaiting Finance</option>
+            <option value="pending_admin">Awaiting Admin</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+          <div class="spacer"></div>
+          <button type="button" class="btn btn-primary" id="btn-new-expense">Add expense</button>
+        </div>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Category</th><th>Amount</th><th>Description</th><th>Approval</th><th>By</th><th>Date</th><th></th></tr>
+            </thead>
+            <tbody id="expenses-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="face" id="face-flag" data-title="Flag follow-up">
+        <div class="face-hero">
+          <h2>Flag invoice for sales</h2>
+          <p>Assign an overdue or due invoice to a salesperson. Feeds their My Follow-ups list.</p>
+        </div>
+        <div id="flag-flash" class="flash"></div>
+        <div class="settings-section" style="max-width:560px;">
+          <form id="flag-form" class="form-grid">
+            <div>
+              <label for="flag-invoice">Invoice</label>
+              <select id="flag-invoice" required></select>
+            </div>
+            <div>
+              <label for="flag-sales">Sales rep</label>
+              <select id="flag-sales" required></select>
+            </div>
+            <div>
+              <label for="flag-note">Note (optional)</label>
+              <textarea id="flag-note" rows="3" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);"></textarea>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">Flag for follow-up</button>
+            </div>
+          </form>
+        </div>
+        <h3 style="margin:24px 0 10px;font-size:0.95rem;">Recent flags</h3>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Client</th><th>Amount</th><th>Sales</th><th>Status</th><th>Note</th></tr>
+            </thead>
+            <tbody id="flag-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="face" id="face-employees" data-title="Employees">
+        <div class="face-hero">
+          <h2>Employees</h2>
+          <p>Directory and payroll status for the current month. Salary data only - no invoices or cash-flow.</p>
+        </div>
+        <div id="employees-flash" class="flash"></div>
+        <div class="toolbar">
+          <button type="button" class="btn btn-primary" id="btn-add-employee">Add employee</button>
+        </div>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Name</th><th>Position</th><th>Pay cycle</th><th>Salary status</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="employees-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="face" id="face-leave" data-title="Leave">
+        <div class="face-hero">
+          <h2>Leave requests</h2>
+          <p id="leave-hero-copy">Request time off. HR reviews and decides every request.</p>
+        </div>
+        <div id="leave-flash" class="flash"></div>
+        <div class="toolbar">
+          <div class="spacer"></div>
+          <button type="button" class="btn btn-primary" id="btn-new-leave">New leave request</button>
+        </div>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Employee</th><th>Type</th><th>Dates</th><th>Status</th><th>Reason</th><th></th></tr>
+            </thead>
+            <tbody id="leave-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="face" id="face-salaries" data-title="Payroll">
+        <div class="face-hero">
+          <h2 id="payroll-hero-title">Payroll</h2>
+          <p id="payroll-hero-copy">Per-employee salary history. Settling unlocks after Admin approves salary funding.</p>
+        </div>
+        <div id="payroll-flash" class="flash"></div>
+        <p id="payroll-funding-banner" class="settings-section" style="margin-bottom:12px;" hidden></p>
+
+        <div id="payroll-list-panel">
+          <div class="toolbar" style="margin-bottom:10px;">
+            <p style="margin:0;color:var(--text-muted);font-size:0.9rem;">
+              Current month: <strong id="payroll-month-label">-</strong>
+            </p>
+            <div class="spacer"></div>
+            <button type="button" class="btn btn-ghost" id="btn-export-payroll">Export CSV</button>
+          </div>
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Employee</th><th>Position</th><th>Expected</th><th>Status</th><th>Paid</th>
+                </tr>
+              </thead>
+              <tbody id="payroll-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="payroll-detail-panel" hidden>
+          <button type="button" class="btn btn-ghost" id="btn-payroll-back" style="margin-bottom:12px;">Back to payroll</button>
+          <h3 id="payroll-detail-name" style="margin:0 0 4px;"></h3>
+          <p id="payroll-detail-meta" style="margin:0 0 16px;color:var(--text-muted);"></p>
+          <div class="settings-section" style="max-width:720px;margin-bottom:16px;">
+            <h3>Current month</h3>
+            <div id="payroll-current"></div>
+          </div>
+          <div class="settings-section" style="max-width:none;">
+            <h3>Salary history</h3>
+            <div class="data-table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Month</th><th>Expected</th><th>Paid</th><th>Status</th><th>Settled</th>
+                  </tr>
+                </thead>
+                <tbody id="payroll-history-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="face" id="face-salary-funding" data-title="Salary funding">
+        <div class="face-hero">
+          <h2>Salary funding</h2>
+          <p id="salary-funding-hero-copy">Select staff (including Sales) and request their month’s salaries from Finance. Finance then Admin approve in Approvals.</p>
+        </div>
+        <div id="salary-funding-flash" class="flash"></div>
+        <div class="settings-section" style="max-width:720px;margin-bottom:20px;" id="salary-funding-request-panel">
+          <h3 style="margin:0 0 10px;font-size:0.95rem;">Request funding for <span id="sf-month-label"></span></h3>
+          <div class="toolbar" style="margin-bottom:10px;">
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-sf-select-all">Select all</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-sf-clear">Clear</button>
+            <div class="spacer"></div>
+            <strong id="sf-total-label">Total: —</strong>
+          </div>
+          <div class="data-table-wrap" style="max-height:320px;overflow:auto;">
+            <table class="data-table">
+              <thead>
+                <tr><th></th><th>Name</th><th>Role</th><th>Expected</th></tr>
+              </thead>
+              <tbody id="sf-people-tbody"></tbody>
+            </table>
+          </div>
+          <div class="form-actions" style="margin-top:12px;">
+            <button type="button" class="btn btn-primary" id="btn-salary-funding-request">Send request to Finance</button>
+          </div>
+        </div>
+        <h3 style="margin:0 0 10px;font-size:0.95rem;">Request history</h3>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Month</th><th>People</th><th>Requested</th><th>Funded</th><th>Status</th><th>By</th>
+              </tr>
+            </thead>
+            <tbody id="salary-funding-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="face" id="face-inbox-ai" data-title="Inbox AI">
+        <div class="face-hero">
+          <h2>Inbox AI</h2>
+          <p>Pulls Admin mailbox mail, extracts PDF context, and drafts replies with AI. Approve to send, regenerate with instructions, or ignore.</p>
+        </div>
+        <div id="inbox-ai-flash" class="flash"></div>
+        <div class="toolbar" style="margin-bottom:14px;">
+          <button type="button" class="btn btn-primary" id="btn-inbox-sync">Sync inbox</button>
+          <select id="inbox-ai-filter">
+            <option value="active">Needs action</option>
+            <option value="all">All</option>
+            <option value="drafted">Drafted</option>
+            <option value="sent">Sent</option>
+            <option value="ignored">Ignored</option>
+          </select>
+          <div class="spacer"></div>
+          <span class="meta" id="inbox-ai-meta"></span>
+        </div>
+        <div style="display:grid;grid-template-columns:1.1fr 1.2fr;gap:16px;">
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead><tr><th>From</th><th>Subject</th><th>Status</th></tr></thead>
+              <tbody id="inbox-ai-list"></tbody>
+            </table>
+          </div>
+          <div class="settings-section" style="max-width:none;" id="inbox-ai-detail">
+            <div class="empty-state">Select a message.</div>
+          </div>
+        </div>
+        <div id="inbox-regen-panel" class="settings-section" style="max-width:none;margin-top:16px;" hidden>
+          <h3 style="margin:0 0 8px;font-size:0.95rem;">Regenerate instructions</h3>
+          <textarea id="inbox-regen-instructions" rows="3" placeholder="Tell the AI how to rewrite this reply…" style="width:100%;"></textarea>
+          <div class="form-actions" style="margin-top:10px;">
+            <button type="button" class="btn btn-primary" id="btn-inbox-regen-run">Regenerate draft</button>
+            <button type="button" class="btn btn-ghost" id="btn-inbox-regen-cancel">Cancel</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="face" id="face-users" data-title="Users">
+        <div class="face-hero">
+          <h2>Users &amp; roles</h2>
+          <p>Create accounts, change roles, activate or deactivate. Role changes take effect on the user's next request.</p>
+        </div>
+        <div id="users-flash" class="flash"></div>
+        <div class="toolbar">
+          <select id="users-filter-role"><option value="">All roles</option></select>
+          <select id="users-filter-status">
+            <option value="all">All statuses</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+          <div class="spacer"></div>
+          <button type="button" class="btn btn-ghost" id="btn-add-user">Add with password</button>
+          <button type="button" class="btn btn-primary" id="btn-invite-user">Invite user</button>
+        </div>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr>
+            </thead>
+            <tbody id="users-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="face" id="face-login-audit" data-title="Login audit">
+        <div class="face-hero">
+          <h2>Login audit</h2>
+          <p>Recent sign-in attempts across the company.</p>
+        </div>
+        <div class="toolbar">
+          <div class="spacer"></div>
+          <button type="button" class="btn btn-ghost" id="btn-export-login-audit">Export CSV</button>
+        </div>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>When</th><th>Email</th><th>User</th><th>Result</th><th>IP</th></tr>
+            </thead>
+            <tbody id="login-audit-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="face" id="face-settings" data-title="Settings">
+        <div class="face-hero">
+          <h2>Settings</h2>
+          <p>Personal profile and notification preferences. Role changes are Admin-only.</p>
+        </div>
+        <div id="settings-flash" class="flash"></div>
+        <div class="settings-section">
+          <h3>Profile</h3>
+          <form id="settings-profile-form" class="form-grid">
+            <div class="avatar-settings" style="grid-column:1/-1;">
+              <div id="set-avatar-preview" class="avatar avatar-lg">?</div>
+              <div>
+                <label for="set-avatar-file">Profile picture</label>
+                <p class="meta" style="margin:4px 0 8px;">Shown in Community, reports, and across the CRM. JPG/PNG/WebP, max 5 MB.</p>
+                <div class="form-actions" style="margin:0;">
+                  <label class="btn btn-ghost" style="cursor:pointer;margin:0;">
+                    Change photo
+                    <input id="set-avatar-file" type="file" accept="image/jpeg,image/png,image/gif,image/webp" hidden />
+                  </label>
+                  <button type="button" class="btn btn-ghost" id="set-avatar-remove">Remove</button>
+                </div>
+              </div>
+            </div>
+            <div><label for="set-name">Name</label><input id="set-name" name="name" required /></div>
+            <div><label for="set-email">Email</label><input id="set-email" name="email" disabled /></div>
+            <div><label for="set-phone">Phone</label><input id="set-phone" name="phone" /></div>
+            <div class="form-actions"><button type="submit" class="btn btn-primary">Save profile</button></div>
+          </form>
+        </div>
+        <div class="settings-section">
+          <h3>Change password</h3>
+          <form id="settings-password-form" class="form-grid">
+            <div><label for="set-current-pw">Current password</label><input id="set-current-pw" type="password" autocomplete="current-password" required /></div>
+            <div><label for="set-new-pw">New password</label><input id="set-new-pw" type="password" autocomplete="new-password" required minlength="8" /></div>
+            <div class="form-actions"><button type="submit" class="btn btn-primary">Update password</button></div>
+          </form>
+        </div>
+        <div class="settings-section">
+          <h3>Notification preferences</h3>
+          <div id="settings-prefs"></div>
+        </div>
+        <div id="admin-system-settings" hidden></div>
+      </section>
+
+      <section class="face community-face" id="face-community" data-title="Community">
+        <div class="community-layout" id="community-layout">
+          <aside class="conv-pane">
+            <div class="conv-toolbar">
+              <h3>Chats</h3>
+              <button type="button" class="btn btn-ghost" id="new-chat-btn" style="padding:6px 10px;font-size:0.8rem;">New</button>
+            </div>
+            <ul class="conv-list" id="conv-list"></ul>
+          </aside>
+          <div class="chat-pane">
+            <div class="poll-banner" id="chat-poll-banner">Realtime offline - using backup sync</div>
+            <div class="chat-empty" id="chat-empty">
+              <p>Select a conversation or start a new one.</p>
+            </div>
+            <div id="chat-active" hidden>
+              <div class="chat-header">
+                <div>
+                  <div class="peer-name" id="chat-peer-name">-</div>
+                  <div class="peer-role" id="chat-peer-role">-</div>
+                </div>
+              </div>
+              <div class="chat-messages" id="chat-messages"></div>
+              <form class="chat-composer" id="chat-composer">
+                <input id="chat-input" type="text" placeholder="Type a message" autocomplete="off" />
+                <button type="submit" class="send-btn" id="chat-send">Send</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modals -->
+  <div class="modal-backdrop" id="new-lead-modal">
+    <div class="modal-card">
+      <header>
+        <h3>Add lead</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body">
+        <form id="new-lead-form" class="form-grid">
+          <div><label>Lead name</label><input id="new-lead-name" required /></div>
+          <div><label>Phone number</label><input id="new-lead-phone" type="tel" /></div>
+          <div><label>Email</label><input id="new-lead-email" type="email" /></div>
+          <div><label>Business name <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label><input id="new-lead-business" /></div>
+          <div style="grid-column:1/-1;">
+            <label>Business type</label>
+            <input id="new-lead-business-type" placeholder="e.g. sells lighting, sells shoes, catering…" />
+          </div>
+          <div class="form-actions"><button type="submit" class="btn btn-primary">Save lead</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="lead-detail-modal">
+    <div class="modal-card wide">
+      <header>
+        <h3 id="lead-detail-title">Lead</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body">
+        <div id="lead-detail-flash" class="flash"></div>
+        <h4 style="margin:0 0 10px;font-size:0.9rem;">Edit lead</h4>
+        <form id="lead-edit-form" class="form-grid" style="margin-bottom:20px;">
+          <div><label>Lead name</label><input id="lead-edit-name" required /></div>
+          <div><label>Phone number</label><input id="lead-edit-phone" type="tel" /></div>
+          <div><label>Email</label><input id="lead-edit-email" type="email" /></div>
+          <div><label>Business name</label><input id="lead-edit-business" /></div>
+          <div style="grid-column:1/-1;">
+            <label>Business type</label>
+            <input id="lead-edit-business-type" placeholder="e.g. sells lighting, sells shoes…" />
+          </div>
+          <div>
+            <label>Status</label>
+            <select id="lead-edit-status">
+              <option value="contacting">Contacting</option>
+              <option value="follow_up">Follow-up</option>
+              <option value="not_interested">Not interested</option>
+              <option value="converted">Converted</option>
+            </select>
+          </div>
+          <div class="form-actions"><button type="submit" class="btn btn-ghost">Save changes</button></div>
+        </form>
+        <h4 style="margin:0 0 10px;font-size:0.9rem;">Engagement log</h4>
+        <ul class="engagement-list" id="engagement-list"></ul>
+        <form id="engagement-form" class="form-grid">
+          <div>
+            <label>Note</label>
+            <textarea id="eng-note" rows="3" required style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);"></textarea>
+          </div>
+          <div><label>Follow-up date (optional)</label><input id="eng-followup" type="date" /></div>
+          <div>
+            <label>Status update (optional)</label>
+            <select id="eng-status">
+              <option value="">- Keep current -</option>
+              <option value="follow_up">Follow-up</option>
+              <option value="not_interested">Not interested</option>
+              <option value="converted">Converted → Client</option>
+            </select>
+          </div>
+          <div class="form-actions"><button type="submit" class="btn btn-primary">Add note</button></div>
+        </form>
+
+        <h4 style="margin:24px 0 10px;font-size:0.9rem;">Scheduled emails</h4>
+        <p style="margin:0 0 10px;color:var(--text-muted);font-size:0.8rem;">
+          Messages send to the lead's email at the scheduled time (or immediately). Sales gets a notification when sent.
+        </p>
+        <ul class="engagement-list" id="lead-messages-list"></ul>
+        <form id="lead-message-form" class="form-grid">
+          <div><label>Subject</label><input id="lead-msg-subject" required /></div>
+          <div><label>Send at</label><input id="lead-msg-when" type="datetime-local" /></div>
+          <div style="grid-column:1/-1;">
+            <label>Message</label>
+            <textarea id="lead-msg-body" rows="3" required style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);"></textarea>
+          </div>
+          <div class="form-actions" style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button type="submit" class="btn btn-primary">Schedule email</button>
+            <button type="button" class="btn btn-ghost" id="lead-msg-send-now">Send now</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="client-projects-modal">
+    <div class="modal-card wide">
+      <header>
+        <h3 id="client-projects-title">Projects</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body" id="client-projects-list"></div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="new-project-modal">
+    <div class="modal-card wide">
+      <header>
+        <h3>Create project</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body">
+        <form id="new-project-form" class="form-grid">
+          <div><label>Project name</label><input id="proj-name" required /></div>
+          <div>
+            <label>Description / overview</label>
+            <textarea id="proj-description" rows="3" placeholder="What the project covers for the client"></textarea>
+          </div>
+          <div><label>Project value (amount)</label><input id="proj-value" type="number" min="0" step="0.01" placeholder="0.00" /></div>
+          <div><label>Link existing client</label><select id="proj-client"></select></div>
+          <div><label>Or manual client name</label><input id="proj-manual-client" placeholder="Creates client if no link" /></div>
+          <div><label>Manual business</label><input id="proj-manual-business" /></div>
+          <div><label>Manual email</label><input id="proj-manual-email" type="email" /></div>
+          <div><label>Manual phone</label><input id="proj-manual-phone" /></div>
+          <div><label>Assign developer</label><select id="proj-developer"></select></div>
+          <div>
+            <label>Milestones</label>
+            <p class="meta" style="margin:0 0 8px;">Developers can add tasks and hours under each milestone after approval.</p>
+            <div id="milestone-list">
+              <div class="milestone-row">
+                <input placeholder="Milestone title" />
+                <button type="button" class="btn btn-ghost" data-remove-ms style="padding:6px 10px;">✕</button>
+              </div>
+            </div>
+            <button type="button" class="btn btn-ghost" id="add-milestone" style="margin-top:8px;padding:6px 10px;font-size:0.8rem;">+ Add milestone</button>
+          </div>
+          <div class="form-actions"><button type="submit" class="btn btn-primary">Submit for approval</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="ctx-menu" id="ctx-menu">
+    <button type="button" data-action="mute">Mute</button>
+    <button type="button" data-action="archive">Archive</button>
+    <button type="button" data-action="clear" class="danger">Clear chat</button>
+  </div>
+
+  <div class="new-chat-modal" id="new-chat-modal">
+    <div class="new-chat-card">
+      <header>
+        <h3>New conversation</h3>
+        <button type="button" class="btn btn-ghost" id="new-chat-close" style="padding:4px 10px;">Close</button>
+      </header>
+      <ul class="contact-list" id="contact-list"></ul>
+    </div>
+  </div>
+
+  <!-- Finance invoice detail -->
+  <div class="modal-backdrop" id="finance-invoice-modal">
+    <div class="modal-card wide">
+      <header>
+        <h3 id="fin-inv-title">Invoice</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body" id="fin-inv-body"></div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="new-expense-modal">
+    <div class="modal-card">
+      <header>
+        <h3>Add expense</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body">
+        <form id="new-expense-form" class="form-grid">
+          <div>
+            <label>Category</label>
+            <select id="new-exp-category" required>
+              <option value="operational">Operational</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div><label>Amount</label><input id="new-exp-amount" type="number" min="0.01" step="0.01" required /></div>
+          <div><label>Description</label><input id="new-exp-desc" /></div>
+          <div class="form-actions"><button type="submit" class="btn btn-primary">Save expense</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Developer project detail -->
+  <div class="modal-backdrop" id="dev-project-modal">
+    <div class="modal-card wide">
+      <header>
+        <h3 id="dev-project-title">Project</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body" id="dev-project-body"></div>
+    </div>
+  </div>
+
+  <!-- Approval detail modal -->
+  <div class="modal-backdrop" id="approval-modal">
+    <div class="modal-card wide">
+      <header>
+        <h3 id="approval-title">Project approval</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body" id="approval-body"></div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="employee-modal">
+    <div class="modal-card" style="max-width:480px;">
+      <header>
+        <h3 id="employee-modal-title">Add employee</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body">
+        <div id="employee-form-flash" class="flash"></div>
+        <form id="employee-form" class="form-grid">
+          <div><label>Name</label><input name="name" required /></div>
+          <div><label>Email</label><input name="email" type="email" required /></div>
+          <div><label>Phone</label><input name="phone" type="tel" /></div>
+          <div style="grid-column:1/-1;"><label>Home address</label><input name="home_address" autocomplete="street-address" /></div>
+          <div style="grid-column:1/-1;"><label>Next of kin</label><input name="next_of_kin" placeholder="Name and phone" /></div>
+          <div><label>KRA PIN</label><input name="kra_pin" /></div>
+          <div><label>Bank account</label><input name="bank_account" /></div>
+          <div><label>Position</label><input name="position" /></div>
+          <div><label>Salary</label><input name="salary_amount" type="number" min="0" step="0.01" required /></div>
+          <div><label>Pay cycle</label>
+            <select name="pay_cycle">
+              <option value="monthly">Monthly</option>
+              <option value="biweekly">Biweekly</option>
+              <option value="weekly">Weekly</option>
+            </select>
+          </div>
+          <div id="emp-role-wrap"><label>Role</label>
+            <select name="role">
+              <option value="developer">Developer</option>
+              <option value="sales">Sales</option>
+              <option value="pm">PM</option>
+              <option value="finance">Finance</option>
+              <option value="hr">HR</option>
+              <option value="director">Director</option>
+            </select>
+          </div>
+          <div id="emp-password-wrap"><label>First-time password</label>
+            <input name="password" type="text" placeholder="Min 8 characters" autocomplete="new-password" required />
+          </div>
+          <div class="form-actions"><button type="submit" class="btn btn-primary">Save</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="user-modal">
+    <div class="modal-card" style="max-width:480px;">
+      <header>
+        <h3 id="user-modal-title">Add user</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body">
+        <div id="user-form-flash" class="flash"></div>
+        <form id="user-form" class="form-grid">
+          <div><label>Name</label><input name="name" required /></div>
+          <div><label>Email</label><input name="email" type="email" required /></div>
+          <div><label>Phone</label><input name="phone" type="tel" /></div>
+          <div><label>Role</label><select name="role" id="user-form-role" required><option value="">Select role</option></select></div>
+          <div><label>Status</label>
+            <select name="status">
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+          <div id="user-password-wrap"><label>Password</label>
+            <input name="password" id="user-password" type="text" minlength="8" autocomplete="new-password" />
+          </div>
+          <div class="form-actions"><button type="submit" class="btn btn-primary">Save</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="project-detail-modal">
+    <div class="modal-card wide">
+      <header>
+        <h3 id="project-detail-title">Project</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body" id="project-detail-body"></div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="resubmit-project-modal">
+    <div class="modal-card wide">
+      <header>
+        <h3 id="resubmit-project-title">Edit &amp; resubmit</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body">
+        <p id="resubmit-reason" class="rejection-banner"></p>
+        <form id="resubmit-project-form" class="form-grid">
+          <div><label>Name</label><input id="resubmit-name" required /></div>
+          <div style="grid-column:1/-1;">
+            <label>Description / overview</label>
+            <textarea id="resubmit-description" rows="3"></textarea>
+          </div>
+          <div><label>Project value (amount)</label><input id="resubmit-value" type="number" min="0" step="0.01" /></div>
+          <div><label>Developer</label><select id="resubmit-developer"></select></div>
+          <div style="grid-column:1/-1;">
+            <label>Milestones</label>
+            <div id="resubmit-milestone-list"></div>
+            <button type="button" class="btn btn-ghost" id="add-resubmit-milestone" style="margin-top:8px;padding:6px 10px;font-size:0.8rem;">+ Add milestone</button>
+          </div>
+          <div class="form-actions"><button type="submit" class="btn btn-primary">Resubmit for approval</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="invite-modal">
+    <div class="modal-card" style="max-width:480px;">
+      <header>
+        <h3>Invite user</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body">
+        <div id="invite-form-flash" class="flash"></div>
+        <p style="margin:0 0 12px;color:var(--text-muted);font-size:0.85rem;">Sends an email invite. The user sets their own password — you never see it.</p>
+        <form id="invite-form" class="form-grid">
+          <div><label>Name</label><input name="name" required /></div>
+          <div><label>Email</label><input name="email" type="email" required /></div>
+          <div><label>Phone</label><input name="phone" type="tel" /></div>
+          <div><label>Role</label><select name="role" id="invite-role" required></select></div>
+          <div class="form-actions"><button type="submit" class="btn btn-primary">Send invite</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="new-leave-modal">
+    <div class="modal-card" style="max-width:480px;">
+      <header>
+        <h3>New leave request</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body">
+        <form id="new-leave-form" class="form-grid">
+          <div id="leave-employee-wrap"><label>Employee</label><select id="leave-employee"></select></div>
+          <div><label>Type</label>
+            <select id="leave-type">
+              <option value="annual">Annual</option>
+              <option value="sick">Sick</option>
+              <option value="unpaid">Unpaid</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div><label>Start</label><input id="leave-start" type="date" required /></div>
+          <div><label>End</label><input id="leave-end" type="date" required /></div>
+          <div style="grid-column:1/-1;"><label>Reason</label><input id="leave-reason" /></div>
+          <div class="form-actions"><button type="submit" class="btn btn-primary">Submit request</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="notif-detail-modal">
+    <div class="modal-card" style="max-width:480px;">
+      <header>
+        <h3 id="notif-detail-title">Notification</h3>
+        <button type="button" class="btn btn-ghost" data-close-notif-detail style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body">
+        <p id="notif-detail-type" class="meta" style="margin:0 0 8px;"></p>
+        <p id="notif-detail-body" style="margin:0 0 12px;line-height:1.5;"></p>
+        <p id="notif-detail-action" style="margin:0 0 16px;color:var(--text-muted);font-size:0.9rem;"></p>
+        <div class="form-actions">
+          <button type="button" class="btn btn-primary" id="notif-detail-go" hidden>Open related page</button>
+          <button type="button" class="btn btn-ghost" data-close-notif-detail>Dismiss</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/receipts.js"></script>
+  <script src="/js/nav.js"></script>
+  <script src="/js/socket.js"></script>
+  <script src="/js/settings.js"></script>
+  <script src="/js/tasks.js"></script>
+  <script src="/js/projectDetail.js"></script>
+  <script src="/js/community.js"></script>
+  <script src="/js/sales.js"></script>
+  <script src="/js/director.js"></script>
+  <script src="/js/developer.js"></script>
+  <script src="/js/finance.js"></script>
+  <script src="/js/hr.js"></script>
+  <script src="/js/pm.js"></script>
+  <script src="/js/adminInbox.js"></script>
+  <script src="/js/admin.js"></script>
+  <script src="/js/client.js"></script>
+  <script src="/js/shell.js"></script>
+</body>
+</html>
