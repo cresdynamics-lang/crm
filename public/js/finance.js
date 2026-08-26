@@ -1190,6 +1190,7 @@ const CresFinance = (() => {
         (p) => `<tr class="clickable-row" data-invoice="${esc(p.invoice_id || '')}" data-id="${esc(p.id)}">
           <td>${esc(p.name)}</td>
           <td>${esc(p.client_name || p.client_business || '-')}</td>
+          <td style="font-size:0.8rem;">${esc(p.client_email || '')} ${esc(p.client_phone || '')}</td>
           <td>${p.value_amount != null ? fmtMoney(p.value_amount) : '-'}</td>
           <td>${p.invoice_amount != null ? fmtMoney(p.invoice_amount) : '—'}</td>
           <td>${p.invoice_id ? fmtMoney(p.amount_paid) : '—'}</td>
@@ -1210,10 +1211,103 @@ const CresFinance = (() => {
     });
   }
 
+  function bindVoicePayment() {
+    const btn = document.getElementById('btn-voice-payment');
+    const timer = document.getElementById('vp-timer');
+    const transcriptSection = document.getElementById('vp-transcript');
+    const transcriptText = document.getElementById('vp-transcript-text');
+    const previewSection = document.getElementById('vp-preview');
+    if (!btn) return;
+
+    let stream = null, recorder = null, chunks = [], timerInterval = null, seconds = 0;
+
+    btn.addEventListener('click', async () => {
+      if (recorder && recorder.state === 'recording') {
+        // Stop recording
+        btn.textContent = 'Speak payment';
+        btn.classList.remove('btn-danger');
+        clearInterval(timerInterval);
+        const blob = await new Promise((res) => {
+          recorder.onstop = () => { stream?.getTracks().forEach((t) => t.stop()); res(new Blob(chunks, { type: 'audio/webm' })); };
+          recorder.stop();
+        });
+        chunks = [];
+        if (!blob || blob.size < 500) return;
+
+        btn.disabled = true; btn.textContent = 'Analyzing...';
+        try {
+          const fd = new FormData();
+          fd.append('audio', blob, `payment-${Date.now()}.webm`);
+          const res = await CresAPI.request('/api/payments/voice-capture', { method: 'POST', body: fd });
+
+          transcriptSection.style.display = '';
+          transcriptText.textContent = res.data.transcript || '';
+
+          previewSection.style.display = '';
+          document.getElementById('vp-amount').value = res.data.amount || '';
+          document.getElementById('vp-client').value = res.data.client_name || '';
+          document.getElementById('vp-project').value = res.data.project_name || '';
+          document.getElementById('vp-bank-ref').value = res.data.bank_reference || '';
+          document.getElementById('vp-description').value = res.data.description || '';
+
+          // Store resolved IDs for submission
+          previewSection.dataset.clientId = res.data.client_id || '';
+          previewSection.dataset.projectId = res.data.project_id || '';
+          previewSection.dataset.invoiceId = res.data.invoice_id || '';
+        } catch (err) {
+          flash(document.getElementById('payments-flash'), err.message, false);
+        }
+        btn.disabled = false; btn.textContent = 'Speak payment';
+        return;
+      }
+
+      // Start recording
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        chunks = [];
+        recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+        recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+        recorder.start();
+        btn.textContent = 'Stop'; btn.classList.add('btn-danger');
+        seconds = 0; timer.style.display = '';
+        timerInterval = setInterval(() => { seconds++; const m = String(Math.floor(seconds / 60)).padStart(2, '0'); const s = String(seconds % 60).padStart(2, '0'); timer.textContent = `${m}:${s}`; }, 1000);
+        transcriptSection.style.display = 'none';
+        previewSection.style.display = 'none';
+      } catch { /* mic denied */ }
+    });
+
+    // Use these details → fill the main payment form
+    document.getElementById('btn-vp-use')?.addEventListener('click', () => {
+      const amount = document.getElementById('vp-amount').value;
+      const bankRef = document.getElementById('vp-bank-ref').value;
+      const invoiceId = previewSection.dataset.invoiceId;
+
+      if (invoiceId) {
+        const select = document.getElementById('pay-invoice');
+        if (select) { select.value = invoiceId; select.dispatchEvent(new Event('change')); }
+      }
+      if (amount) document.getElementById('pay-amount').value = amount;
+      if (bankRef) document.getElementById('pay-bank-ref').value = bankRef;
+
+      previewSection.style.display = 'none';
+      transcriptSection.style.display = 'none';
+      flash(document.getElementById('payments-flash'), 'Voice details loaded — review and submit');
+    });
+
+    document.getElementById('btn-vp-cancel')?.addEventListener('click', () => {
+      previewSection.style.display = 'none';
+      transcriptSection.style.display = 'none';
+    });
+  }
+
   function bind() {
     document.getElementById('payment-form')?.addEventListener('submit', (e) =>
       submitPayment(e).catch((err) => flash(document.getElementById('payments-flash'), err.message, false))
     );
+
+    // Voice payment capture
+    bindVoicePayment();
+
     document.getElementById('btn-fin-report-refresh')?.addEventListener('click', () =>
       mountReports().catch(console.error)
     );

@@ -8,6 +8,8 @@ const { upload } = require('../middleware/upload');
 const { queueNotification } = require('../queues/jobs');
 const { transcribeAudio, parseReportFromTranscript } = require('../services/voiceReports');
 const { recordAction } = require('../services/actionAudit');
+const { analyzeReport } = require('../services/reportAnalyzer');
+const { markAttendance } = require('../services/attendanceService');
 
 const router = express.Router();
 router.use(authenticate);
@@ -74,7 +76,8 @@ router.get(
       `SELECT dr.*, u.name AS author_name, u.avatar_url AS author_avatar_url,
               r.name AS author_role, p.name AS project_name,
               rv.name AS reviewed_by_name, fw.name AS forwarded_by_name,
-              rm.name AS remarks_by_name
+              rm.name AS remarks_by_name,
+              rp.name AS remarks_reply_by_name
        FROM daily_reports dr
        JOIN users u ON u.id = dr.user_id
        JOIN roles r ON r.id = u.role_id
@@ -82,6 +85,7 @@ router.get(
        LEFT JOIN users rv ON rv.id = dr.reviewed_by
        LEFT JOIN users fw ON fw.id = dr.forwarded_by
        LEFT JOIN users rm ON rm.id = dr.remarks_by
+       LEFT JOIN users rp ON rp.id = dr.remarks_reply_by
        ${where}
        ORDER BY dr.created_at DESC
        LIMIT 200`,
@@ -232,6 +236,11 @@ router.post(
       summary: `${req.user.name} submitted daily report: ${(content || '').slice(0, 80)}`,
       after: { routing, project_id, content },
     });
+
+    // Mark attendance for today (sales/developer only)
+    if (['sales', 'developer'].includes(req.user.role)) {
+      await markAttendance(req.user.id, rows[0].created_at, rows[0].id).catch(() => {});
+    }
 
     res.status(201).json({ ok: true, data: rows[0] });
   })
@@ -460,6 +469,150 @@ router.post(
     });
 
     res.status(201).json({ ok: true, data: rows[0] });
+  })
+);
+
+/**
+ * Director AI Review: analyze a report and return structured questions.
+ * POST /api/reports/:id/ai-review
+ */
+router.post(
+  '/:id/ai-review',
+  requirePermission('reports', 'view'),
+  asyncHandler(async (req, res) => {
+    if (!['director', 'admin'].includes(req.user.role)) {
+      throw new AppError('Only Director can use AI review', 403, 'FORBIDDEN');
+    }
+
+    const { rows: reports } = await query(
+      `SELECT dr.*, r.name AS author_role
+       FROM daily_reports dr
+       JOIN users u ON u.id = dr.user_id
+       JOIN roles r ON r.id = u.role_id
+       WHERE dr.id = $1`,
+      [req.params.id]
+    );
+    const report = reports[0];
+    if (!report) throw new AppError('Report not found', 404, 'NOT_FOUND');
+    if (!['sales', 'developer'].includes(report.author_role)) {
+      throw new AppError('AI review only for Sales and Developer reports', 400, 'VALIDATION');
+    }
+
+    // Use cached analysis if available
+    if (report.ai_analysis) {
+      return res.json({ ok: true, data: report.ai_analysis, cached: true });
+    }
+
+    const analysis = await analyzeReport(report);
+
+    // Cache the analysis
+    await query(
+      `UPDATE daily_reports SET ai_analysis = $1::jsonb WHERE id = $2`,
+      [JSON.stringify(analysis), report.id]
+    );
+
+    res.json({ ok: true, data: analysis, cached: false });
+  })
+);
+
+/**
+ * Director remarks with AI analysis: send AI-generated questions as director's own.
+ * POST /api/reports/:id/remarks-ai
+ * Accepts { remarks, ai_analysis } — remarks is the final text the director approves.
+ */
+router.post(
+  '/:id/remarks-ai',
+  requirePermission('reports', 'view'),
+  asyncHandler(async (req, res) => {
+    if (!['director', 'admin'].includes(req.user.role)) {
+      throw new AppError('Only Director can add remarks on these reports', 403, 'FORBIDDEN');
+    }
+    const remarks = (req.body?.remarks || '').trim();
+    if (!remarks) throw new AppError('remarks required', 400, 'VALIDATION');
+
+    const { rows: reports } = await query(
+      `SELECT dr.id, dr.user_id, r.name AS author_role
+       FROM daily_reports dr
+       JOIN users u ON u.id = dr.user_id
+       JOIN roles r ON r.id = u.role_id
+       WHERE dr.id = $1`,
+      [req.params.id]
+    );
+    const report = reports[0];
+    if (!report) throw new AppError('Report not found', 404, 'NOT_FOUND');
+    if (!['sales', 'developer'].includes(report.author_role)) {
+      throw new AppError('Remarks are for Sales and Developer reports', 400, 'VALIDATION');
+    }
+
+    const { rows } = await query(
+      `UPDATE daily_reports
+       SET remarks = $1, remarks_by = $2, remarks_at = NOW()
+       WHERE id = $3
+       RETURNING *`,
+      [remarks, req.user.id, report.id]
+    );
+
+    // Cache the AI analysis if provided
+    if (req.body?.ai_analysis) {
+      await query(
+        `UPDATE daily_reports SET ai_analysis = $1::jsonb WHERE id = $2`,
+        [JSON.stringify(req.body.ai_analysis), report.id]
+      );
+    }
+
+    await queueNotification({
+      userId: report.user_id,
+      type: 'report_remarks',
+      content: `Director left remarks on your daily report`,
+      meta: { reportId: report.id },
+    });
+
+    res.json({ ok: true, data: rows[0] });
+  })
+);
+
+/**
+ * Reporter replies to director's remarks.
+ * POST /api/reports/:id/reply
+ */
+router.post(
+  '/:id/reply',
+  requirePermission('reports', 'create'),
+  asyncHandler(async (req, res) => {
+    const reply = (req.body?.reply || '').trim();
+    if (!reply) throw new AppError('reply required', 400, 'VALIDATION');
+
+    const { rows: reports } = await query(
+      `SELECT dr.id, dr.user_id, dr.remarks_by
+       FROM daily_reports dr
+       WHERE dr.id = $1`,
+      [req.params.id]
+    );
+    const report = reports[0];
+    if (!report) throw new AppError('Report not found', 404, 'NOT_FOUND');
+    if (report.user_id !== req.user.id) {
+      throw new AppError('You can only reply to your own reports', 403, 'FORBIDDEN');
+    }
+
+    const { rows } = await query(
+      `UPDATE daily_reports
+       SET remarks_reply = $1, remarks_reply_at = NOW(), remarks_reply_by = $2
+       WHERE id = $3
+       RETURNING *`,
+      [reply, req.user.id, report.id]
+    );
+
+    // Notify the director who left remarks
+    if (report.remarks_by) {
+      await queueNotification({
+        userId: report.remarks_by,
+        type: 'report_remarks',
+        content: `${req.user.name} replied to your remarks on their daily report`,
+        meta: { reportId: report.id },
+      });
+    }
+
+    res.json({ ok: true, data: rows[0] });
   })
 );
 

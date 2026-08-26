@@ -347,6 +347,22 @@ const CresSales = (() => {
               r.routing_status === 'pm_reviewed' || r.routing_status === 'forwarded_director'
                 ? 'Yes'
                 : 'Pending';
+            const remarksHtml = r.remarks
+              ? `<div class="rejection-banner" style="margin:0 0 6px;">${esc(r.remarks)}</div>
+                 <div class="meta">${esc(r.remarks_by_name || 'Director')} · ${
+                  r.remarks_at ? new Date(r.remarks_at).toLocaleString() : ''
+                }</div>
+                 ${r.remarks_reply
+                   ? `<div style="margin-top:6px;padding:8px;border-left:3px solid var(--accent);background:rgba(31,167,160,0.06);border-radius:0 6px 6px 0;">
+                        <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:2px;">Your reply</div>
+                        <div>${esc(r.remarks_reply)}</div>
+                      </div>`
+                   : `<div style="margin-top:6px;">
+                        <textarea data-reply-input="${esc(r.id)}" rows="2" placeholder="Reply to Director's remarks…" style="width:100%;font-size:0.85rem;"></textarea>
+                        <button type="button" class="btn btn-primary btn-sm" data-reply="${esc(r.id)}" style="margin-top:4px;">Send reply</button>
+                      </div>`
+                 }`
+              : '<span class="meta">No remarks yet</span>';
             return `<tr>
               <td>${new Date(r.created_at).toLocaleString()}</td>
               <td>${statusPill(r.routing_status || 'pending_pm')}</td>
@@ -358,18 +374,30 @@ const CresSales = (() => {
                       .join('')}</div>`
                   : ''
               }</td>
-              <td>${
-                r.remarks
-                  ? `<div class="rejection-banner" style="margin:0;">${esc(r.remarks)}</div>
-                     <div class="meta">${esc(r.remarks_by_name || 'Director')} · ${
-                      r.remarks_at ? new Date(r.remarks_at).toLocaleString() : ''
-                    }</div>`
-                  : '<span class="meta">No remarks yet</span>'
-              }</td>
+              <td>${remarksHtml}</td>
             </tr>`;
           })
           .join('')
       : `<tr><td colspan="5" class="empty-state">No reports submitted yet.</td></tr>`;
+
+    // Bind reply buttons
+    list.querySelectorAll('[data-reply]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.reply;
+        const input = list.querySelector(`[data-reply-input="${id}"]`);
+        const reply = input?.value?.trim();
+        if (!reply) return;
+        try {
+          await CresAPI.request(`/api/reports/${id}/reply`, {
+            method: 'POST',
+            body: { reply },
+          });
+          await mountReports();
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+    });
   }
 
   async function submitReport(e) {

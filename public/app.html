@@ -309,7 +309,7 @@
             <table class="data-table">
               <thead>
                 <tr>
-                  <th>Project</th><th>Client</th><th>Project value</th><th>Invoice</th>
+                  <th>Project</th><th>Client</th><th>Contact</th><th>Value</th><th>Invoice</th>
                   <th>Paid</th><th>Balance</th><th>Due</th><th>Status</th>
                 </tr>
               </thead>
@@ -521,10 +521,29 @@
                   <th>Status</th>
                   <th>Report</th>
                   <th>Remarks</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody id="director-reports-list"></tbody>
             </table>
+          </div>
+        </div>
+
+        <!-- AI Review Modal -->
+        <div id="ai-review-modal" class="modal-overlay" hidden>
+          <div class="modal" style="max-width:680px;">
+            <div class="modal-header">
+              <h3 id="ai-review-title">AI Report Review</h3>
+              <button type="button" class="btn btn-ghost" data-close-modal="ai-review-modal">&times;</button>
+            </div>
+            <div id="ai-review-body" style="max-height:60vh;overflow-y:auto;">
+              <p class="meta">Analyzing report…</p>
+            </div>
+            <div id="ai-review-flash" class="flash"></div>
+            <div class="modal-actions">
+              <button type="button" class="btn btn-ghost" data-close-modal="ai-review-modal">Cancel</button>
+              <button type="button" class="btn btn-primary" id="btn-ai-review-send">Send as Remarks</button>
+            </div>
           </div>
         </div>
         <div id="pm-reports-panel" hidden>
@@ -649,6 +668,32 @@
           <p>Match the client, add a bank reference, and record full or partial payment. Partial payments close the paid amount and issue a new balance invoice emailed to the client.</p>
         </div>
         <div id="payments-flash" class="flash"></div>
+        <div class="settings-section" style="max-width:640px;margin-bottom:16px;">
+          <h4 style="margin:0 0 8px;font-size:0.9rem;">Voice command</h4>
+          <p class="meta" style="margin:0 0 10px;">Speak: "Received 50000 from John for Cres website, ref MPESA123"</p>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button type="button" class="btn btn-ghost" id="btn-voice-payment" style="white-space:nowrap;">Speak payment</button>
+            <span id="vp-timer" class="meta" style="display:none;">00:00</span>
+          </div>
+          <div id="vp-transcript" style="margin-top:10px;display:none;">
+            <div class="meta" style="margin-bottom:4px;">Transcript</div>
+            <div id="vp-transcript-text" style="padding:8px;background:var(--bg-soft);border-radius:6px;font-size:0.85rem;"></div>
+          </div>
+          <div id="vp-preview" style="margin-top:10px;display:none;">
+            <div class="meta" style="margin-bottom:6px;">Parsed payment — review and confirm</div>
+            <div class="form-grid">
+              <div><label>Amount</label><input id="vp-amount" type="number" min="0" step="0.01" /></div>
+              <div><label>Client</label><input id="vp-client" /></div>
+              <div><label>Project</label><input id="vp-project" /></div>
+              <div><label>Bank ref</label><input id="vp-bank-ref" /></div>
+              <div style="grid-column:1/-1;"><label>Description</label><input id="vp-description" /></div>
+            </div>
+            <div style="margin-top:8px;display:flex;gap:8px;">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-vp-use">Use these details</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-vp-cancel">Cancel</button>
+            </div>
+          </div>
+        </div>
         <div class="settings-section" style="max-width:640px;">
           <form id="payment-form" class="form-grid">
             <div style="grid-column:1/-1;">

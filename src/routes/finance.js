@@ -162,12 +162,18 @@ router.get(
 
     const { rows } = await query(
       `SELECT p.id, p.name, p.status, p.value_amount, p.client_id, p.created_at, p.updated_at,
+              p.assigned_developer_id,
               c.name AS client_name, c.business_name AS client_business,
+              c.email AS client_email, c.phone AS client_phone,
+              u.name AS owner_name, u.email AS owner_email, u.phone AS owner_phone,
+              d.name AS developer_name,
               i.id AS invoice_id, i.amount AS invoice_amount, i.amount_paid,
               i.status AS invoice_status, i.due_date,
               (COALESCE(i.amount, 0) - COALESCE(i.amount_paid, 0))::float AS balance_due
        FROM projects p
        LEFT JOIN clients c ON c.id = p.client_id
+       LEFT JOIN users u ON u.id = p.created_by
+       LEFT JOIN users d ON d.id = p.assigned_developer_id
        LEFT JOIN LATERAL (
          SELECT inv.*
          FROM invoices inv
@@ -194,6 +200,12 @@ router.get(
         value_amount: r.value_amount != null ? Number(r.value_amount) : null,
         client_name: r.client_name,
         client_business: r.client_business,
+        client_email: r.client_email,
+        client_phone: r.client_phone,
+        owner_name: r.owner_name,
+        owner_email: r.owner_email,
+        owner_phone: r.owner_phone,
+        developer_name: r.developer_name,
         invoice_id: r.invoice_id,
         invoice_amount: r.invoice_amount != null ? Number(r.invoice_amount) : null,
         amount_paid: r.amount_paid != null ? Number(r.amount_paid) : 0,

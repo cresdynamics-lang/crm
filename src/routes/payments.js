@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require('multer');
 const { withTransaction } = require('../config/database');
 const { query } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
@@ -12,9 +13,12 @@ const {
   queueNotification,
 } = require('../queues/jobs');
 const { paymentReceipt } = require('../services/receipts');
+const { capturePaymentVoice } = require('../services/voicePayments');
 
 const router = express.Router();
 router.use(authenticate);
+
+const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 const EPS = 0.001;
 
@@ -434,6 +438,85 @@ router.post(
         receipt_emailed: receiptEmailed,
         receipt_to: clientEmail,
         receipt_email_error: receiptEmailError,
+      },
+    });
+  })
+);
+
+/**
+ * Voice payment capture: transcribe audio and parse into payment fields.
+ * POST /api/payments/voice-capture
+ */
+router.post(
+  '/voice-capture',
+  requirePermission('payments', 'create'),
+  memUpload.single('audio'),
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw new AppError('No audio file', 400, 'VALIDATION');
+    if (!['finance', 'admin'].includes(req.user.role)) {
+      throw new AppError('Only Finance can use voice payments', 403, 'FORBIDDEN');
+    }
+
+    // Fetch clients and projects for matching
+    const [clientsRes, projectsRes] = await Promise.all([
+      query(`SELECT id, name, business_name FROM clients ORDER BY name LIMIT 200`),
+      query(`SELECT id, name FROM projects WHERE status NOT IN ('pending_approval','rejected','deleted') ORDER BY name LIMIT 200`),
+    ]);
+
+    const result = await capturePaymentVoice({
+      buffer: req.file.buffer,
+      filename: req.file.originalname || 'payment-voice.webm',
+      mimetype: req.file.mimetype || 'audio/webm',
+      clients: clientsRes.rows,
+      projects: projectsRes.rows,
+    });
+
+    // Try to find matching invoice if client + project are resolved
+    let invoice = null;
+    if (result.invoice_id) {
+      const { rows } = await query(
+        `SELECT i.*, c.name AS client_name FROM invoices i
+         LEFT JOIN clients c ON c.id = i.client_id
+         WHERE i.id = $1`, [result.invoice_id]
+      );
+      invoice = rows[0] || null;
+    } else if (result.project_id || result.client_id) {
+      const params = [`issued`, `partially_paid`];
+      let where = `i.status IN ($1, $2)`;
+      if (result.project_id) {
+        params.push(result.project_id);
+        where += ` AND i.project_id = $${params.length}`;
+      }
+      if (result.client_id) {
+        params.push(result.client_id);
+        where += ` AND i.client_id = $${params.length}`;
+      }
+      const { rows } = await query(
+        `SELECT i.*, c.name AS client_name FROM invoices i
+         LEFT JOIN clients c ON c.id = i.client_id
+         WHERE ${where}
+         ORDER BY i.created_at DESC LIMIT 1`,
+        params
+      );
+      invoice = rows[0] || null;
+    }
+
+    res.json({
+      ok: true,
+      data: {
+        transcript: result.transcript,
+        amount: result.amount,
+        client_name: result.client_name,
+        client_id: result.client_id,
+        project_name: result.project_name,
+        project_id: result.project_id,
+        bank_reference: result.bank_reference,
+        description: result.description,
+        paid_at: result.paid_at,
+        invoice_id: invoice?.id || null,
+        invoice_amount: invoice?.amount != null ? Number(invoice.amount) : null,
+        invoice_balance: invoice ? Number(invoice.amount || 0) - Number(invoice.amount_paid || 0) : null,
+        client_name_resolved: invoice?.client_name || result.client_name || null,
       },
     });
   })

@@ -348,10 +348,11 @@ router.post(
 
     await notifyRoles(['hr', 'finance'], {
       type: 'salary_funding_approved',
-      content: `Admin approved salary funding for ${result.month}. HR may now settle salaries.`,
+      content: `Admin approved and disbursed salary funding for ${result.month}. HR may now update individual payment statuses.`,
       meta: {
         fundingId: result.id,
         month: result.month,
+        amount_funded: result.amount_funded,
         href: '#/salary-funding',
       },
     });

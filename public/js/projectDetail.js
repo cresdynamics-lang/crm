@@ -3,7 +3,7 @@
  * Used by Sales, Director, PM, Developer, Admin - response shape is role-scoped by API.
  */
 const CresProjectDetail = (() => {
-  let state = { id: null, milestones: [], meta: {}, project: null, onSaved: null };
+  let state = { id: null, milestones: [], meta: {}, project: null, onSaved: null, user: null };
 
   function esc(str) {
     return String(str ?? '')
@@ -176,6 +176,7 @@ const CresProjectDetail = (() => {
     if (!modal || !body) return;
 
     const user = CresAPI.getUser();
+    state.user = user;
     const canLoadAssignments = ['sales', 'pm', 'director', 'admin'].includes(user?.role);
     const [projRes, updatesRes, assignRes, docsRes] = await Promise.all([
       CresAPI.request(`/api/projects/${id}`),
@@ -210,6 +211,9 @@ const CresProjectDetail = (() => {
     const canEdit = !!meta.canEditProject;
     const showResubmit = canResubmit(user?.role, p);
     const showDeliverable = canUploadDeliverable(user?.role, p, meta);
+    const isSales = user?.role === 'sales';
+    const isApproved = !!meta.isApproved;
+    const salesLocked = isSales && isApproved;
     const progressPct =
       p.progress_percent != null ? Number(p.progress_percent) : null;
 
@@ -301,17 +305,26 @@ const CresProjectDetail = (() => {
       }
 
       <h4 style="margin:0 0 8px;font-size:0.9rem;">Milestones</h4>
-      <div id="proj-detail-milestones">${renderMilestonesEditor(canUpdate)}</div>
+      <div id="proj-detail-milestones">${renderMilestonesEditor(canUpdate && !salesLocked)}</div>
       ${
-        canUpdate
+        canUpdate && !salesLocked
           ? `<button type="button" class="btn btn-ghost" id="pd-add-milestone" style="margin:8px 0 12px;padding:6px 10px;font-size:0.8rem;">+ Add milestone</button>`
+          : ''
+      }
+
+      ${
+        salesLocked
+          ? `<div style="background:rgba(31,167,160,0.08);border:1px solid rgba(31,167,160,0.3);border-radius:10px;padding:12px;margin:14px 0;">
+              <strong style="color:var(--accent);">Project locked</strong>
+              <p style="margin:4px 0 0;font-size:0.85rem;">This project has been approved. You cannot edit milestones, status, or progress notes. Only the Director can unlock by rejecting.</p>
+            </div>`
           : ''
       }
 
       ${
         canUpdate || canEdit
           ? `${
-              canUpdate
+              canUpdate && !salesLocked
                 ? `<div style="margin-top:14px;">
               <label for="proj-detail-preview">Project preview link</label>
               <input id="proj-detail-preview" type="url" placeholder="https://…" value="${esc(p.preview_url || '')}" style="width:100%;margin-top:6px;" />
@@ -334,7 +347,7 @@ const CresProjectDetail = (() => {
             <div id="proj-detail-flash" class="flash" style="margin-top:10px;"></div>
             <div class="form-actions" style="margin-top:10px;">
               <button type="button" class="btn btn-primary" id="proj-detail-save">${
-                canEdit && canUpdate ? 'Save project &amp; progress' : canEdit ? 'Save project' : 'Save progress'
+                canEdit && canUpdate ? 'Save project &amp; progress' : canEdit ? 'Save project' : salesLocked ? 'Save preview link' : 'Save progress'
               }</button>
             </div>`
           : ''
@@ -539,21 +552,30 @@ const CresProjectDetail = (() => {
   }
 
   async function save() {
-    const canEdit = !!state.meta?.canEditProject;
-    const canUpdate = !!state.meta?.canUpdateProgress;
+    const meta = state.meta || {};
+    const canEdit = !!meta.canEditProject;
+    const canUpdate = !!meta.canUpdateProgress;
+    const isApproved = !!meta.isApproved;
+    const isSales = state.user?.role === 'sales';
     const note = document.getElementById('proj-detail-note')?.value?.trim();
     const status = document.getElementById('proj-detail-status')?.value;
     const preview = document.getElementById('proj-detail-preview')?.value?.trim();
     const name = document.getElementById('proj-detail-name')?.value?.trim();
     const description = document.getElementById('proj-detail-description')?.value;
     const body = {};
-    if (canEdit && name !== undefined) body.name = name;
-    if (canEdit && description !== undefined) body.description = description;
+    // After approval: sales cannot edit name/description
+    if (canEdit && !(isSales && isApproved) && name !== undefined) body.name = name;
+    if (canEdit && !(isSales && isApproved) && description !== undefined) body.description = description;
     if (canUpdate) {
-      body.status = status;
-      body.milestones = state.milestones;
-      body.preview_url = preview !== undefined ? preview : undefined;
-      body.note = note || undefined;
+      // After approval: sales can only send preview_url — block status/milestones/note
+      if (isSales && isApproved) {
+        body.preview_url = preview !== undefined ? preview : undefined;
+      } else {
+        body.status = status;
+        body.milestones = state.milestones;
+        body.preview_url = preview !== undefined ? preview : undefined;
+        body.note = note || undefined;
+      }
     }
     await CresAPI.request(`/api/projects/${state.id}/progress`, {
       method: 'PATCH',

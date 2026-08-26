@@ -53,13 +53,19 @@ function scopeClause(user, params, alias = '') {
   return null;
 }
 
-function canSeeProjectMoney(role) {
-  // Sales sets project value on create/resubmit. Director sees projection. Admin/Finance: full.
-  return ['sales', 'director', 'admin', 'finance'].includes(role);
+function canSeeProjectMoney(role, status) {
+  // Director/Admin/Finance: always see money
+  if (['director', 'admin', 'finance'].includes(role)) return true;
+  // Sales: only sees value before approval (create/resubmit phase)
+  if (role === 'sales') {
+    return ['pending_approval', 'rejected'].includes(status);
+  }
+  // Developer/PM/client: never see money
+  return false;
 }
 
 function canSeePreviewUrl(role) {
-  // Ops + client. Finance/HR should not surface live preview links.
+  // Everyone who can see the project sees the preview link (including client)
   return ['sales', 'developer', 'pm', 'director', 'admin', 'client'].includes(role);
 }
 
@@ -68,8 +74,44 @@ function canSeeClientDetails(role) {
   return ['sales', 'director', 'admin', 'finance'].includes(role);
 }
 
-function canSeeClientContact(role) {
-  return ['sales', 'director', 'admin', 'finance'].includes(role);
+function canSeeClientContact(role, status) {
+  // Director/Admin/Finance: always see contact
+  if (['director', 'admin', 'finance'].includes(role)) return true;
+  // Sales: only sees contact before approval
+  if (role === 'sales') {
+    return ['pending_approval', 'rejected'].includes(status);
+  }
+  return false;
+}
+
+function canEditProject(role, status) {
+  // Director/Admin: always edit
+  if (['director', 'admin'].includes(role)) return true;
+  // PM: edit after approval
+  if (role === 'pm' && !['pending_approval', 'rejected'].includes(status)) return true;
+  // Sales: only edit when rejected (resubmit)
+  if (role === 'sales' && status === 'rejected') return true;
+  // Developer: edit milestones/preview/status after accepting assignment
+  if (role === 'developer' && !['pending_approval', 'rejected'].includes(status)) return true;
+  return false;
+}
+
+function canUpdateProgress(role, status) {
+  if (['pending_approval', 'rejected'].includes(status)) return false;
+  // Director/Admin/PM: always
+  if (['director', 'admin', 'pm'].includes(role)) return true;
+  // Developer: manage milestones, tasks, preview after assignment
+  if (role === 'developer') return true;
+  // Sales: preview_url only after approval (read-only on everything else)
+  if (role === 'sales') return true;
+  return false;
+}
+
+function canSalesEditFields(role, status) {
+  // After approval, sales cannot edit name/description/milestones/status
+  // Only director/admin/PM can edit fields
+  if (role === 'sales' && !['pending_approval', 'rejected'].includes(status)) return false;
+  return ['director', 'pm', 'admin'].includes(role);
 }
 
 async function loadClient(clientId) {
@@ -83,8 +125,9 @@ async function loadClient(clientId) {
 
 function shapeProject(project, role, client = null) {
   const data = { ...project };
+  const status = project.status;
 
-  if (!canSeeProjectMoney(role)) {
+  if (!canSeeProjectMoney(role, status)) {
     delete data.value_amount;
   }
 
@@ -97,7 +140,7 @@ function shapeProject(project, role, client = null) {
   } else if (client) {
     data.client_name = client.name;
     data.client_business = client.business_name;
-    if (canSeeClientContact(role)) {
+    if (canSeeClientContact(role, status)) {
       data.client_email = client.email;
       data.client_phone = client.phone;
     }
@@ -403,12 +446,12 @@ router.get(
         progress_percent: progressPercent(project.milestones),
       },
       meta: {
-        canUpdateProgress: PROGRESS_ROLES.includes(req.user.role)
-          && !['pending_approval', 'rejected'].includes(project.status),
-        canEditProject: ['director', 'pm', 'admin'].includes(req.user.role)
-          && !['pending_approval', 'rejected'].includes(project.status),
+        canUpdateProgress: canUpdateProgress(req.user.role, project.status),
+        canEditProject: canEditProject(req.user.role, project.status),
         canSeeClient: canSeeClientDetails(req.user.role),
-        canSeeMoney: canSeeProjectMoney(req.user.role),
+        canSeeMoney: canSeeProjectMoney(req.user.role, project.status),
+        canSeeContact: canSeeClientContact(req.user.role, project.status),
+        isApproved: !['pending_approval', 'rejected'].includes(project.status),
       },
     });
   })
@@ -625,7 +668,18 @@ router.patch(
 
     await assertCanAccessProject(req.user, current);
 
-    const canEditFields = ['director', 'pm', 'admin'].includes(req.user.role);
+    // After approval: sales can only update preview_url — nothing else
+    const isSalesAfterApproval = req.user.role === 'sales'
+      && !['pending_approval', 'rejected'].includes(current.status);
+
+    const canEditFields = canSalesEditFields(req.user.role, current.status);
+
+    // Sales after approval: block milestone/status/name/description changes
+    if (isSalesAfterApproval) {
+      if (milestones !== undefined || status || name || description) {
+        throw new AppError('Project is locked after approval. Only Director can unlock via reject.', 403, 'PROJECT_LOCKED');
+      }
+    }
 
     // Normalize milestone statuses + tasks (omit field = leave unchanged; never wipe with [])
     let nextMilestones;

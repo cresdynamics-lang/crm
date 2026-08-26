@@ -495,16 +495,40 @@ router.post(
         );
       }
 
+      // Auto-calculate attendance deduction
+      let attendanceDeductions = null;
+      const { calculateSalaryImpact } = require('../services/attendanceService');
+      try {
+        const impact = await calculateSalaryImpact(payment[0].employee_id, payment[0].month);
+        if (impact && impact.missing_days > 0) {
+          attendanceDeductions = {
+            missing_days: impact.missing_days,
+            total_expected: impact.total_expected,
+            total_attended: impact.total_attended,
+            daily_rate: impact.daily_rate,
+            total_deduction: impact.total_deduction,
+            attendance_score: impact.attendance_score,
+          };
+        }
+      } catch { /* attendance table may not exist yet */ }
+
+      // Apply deduction: reduce amount_paid by attendance deduction
+      const finalAmount = amount_paid != null
+        ? Math.max(0, Number(amount_paid) - (attendanceDeductions?.total_deduction || 0))
+        : Math.max(0, payment[0].amount_expected - (attendanceDeductions?.total_deduction || 0));
+
       const { rows } = await tx.query(
         `UPDATE salary_payments
-         SET amount_paid = COALESCE($1, amount_expected),
+         SET amount_paid = $1,
              status = 'settled',
-             settled_at = NOW()
-         WHERE id = $2 AND status = 'owed'
+             settled_at = NOW(),
+             attendance_deductions = $2::jsonb
+         WHERE id = $3 AND status = 'owed'
          RETURNING *`,
-        [amount_paid ?? null, req.params.id]
+        [finalAmount, attendanceDeductions ? JSON.stringify(attendanceDeductions) : null, req.params.id]
       );
       if (!rows[0]) throw new AppError('Salary payment not found or already settled', 409, 'INVALID_STATE');
+      rows[0]._attendance_deductions = attendanceDeductions;
       return rows[0];
     });
 
@@ -537,6 +561,118 @@ router.post(
     }
 
     res.json({ ok: true, data: settled });
+  })
+);
+
+/**
+ * HR updates individual salary payment amounts.
+ * POST /api/salaries/:id/update-amount
+ * Body: { amount_paid, status, hr_note }
+ */
+router.post(
+  '/:id/update-amount',
+  requirePermission('salaries', 'edit'),
+  asyncHandler(async (req, res) => {
+    if (!['hr', 'admin'].includes(req.user.role)) {
+      throw new AppError('Only HR can update individual salary payments', 403, 'FORBIDDEN');
+    }
+
+    const { amount_paid, status, hr_note } = req.body || {};
+    const sets = [];
+    const params = [];
+
+    if (amount_paid != null) {
+      const amt = Number(amount_paid);
+      if (isNaN(amt) || amt < 0) throw new AppError('amount_paid must be a non-negative number', 400, 'VALIDATION');
+      params.push(amt);
+      sets.push(`amount_paid = $${params.length}`);
+    }
+
+    if (status) {
+      if (!['owed', 'partially_paid', 'settled'].includes(status)) {
+        throw new AppError('Invalid status. Use: owed, partially_paid, settled', 400, 'VALIDATION');
+      }
+      params.push(status);
+      sets.push(`status = $${params.length}`);
+      if (status === 'settled') {
+        sets.push(`settled_at = NOW()`);
+      }
+    }
+
+    if (hr_note !== undefined) {
+      params.push(hr_note || null);
+      sets.push(`hr_note = $${params.length}`);
+    }
+
+    if (!sets.length) throw new AppError('Nothing to update', 400, 'VALIDATION');
+
+    params.push(req.params.id);
+    const { rows } = await query(
+      `UPDATE salary_payments
+       SET ${sets.join(', ')}
+       WHERE id = $${params.length}
+       RETURNING *`,
+      params
+    );
+
+    if (!rows[0]) throw new AppError('Salary payment not found', 404, 'NOT_FOUND');
+    res.json({ ok: true, data: rows[0] });
+  })
+);
+
+/**
+ * HR bulk-update salary payments for a funding request.
+ * POST /api/salaries/bulk-update
+ * Body: { month, updates: [{ employee_id, amount_paid, status, hr_note }] }
+ */
+router.post(
+  '/bulk-update',
+  requirePermission('salaries', 'edit'),
+  asyncHandler(async (req, res) => {
+    if (!['hr', 'admin'].includes(req.user.role)) {
+      throw new AppError('Only HR can bulk-update salary payments', 403, 'FORBIDDEN');
+    }
+
+    const month = req.body?.month;
+    const updates = req.body?.updates;
+    if (!month || !Array.isArray(updates)) {
+      throw new AppError('month and updates array required', 400, 'VALIDATION');
+    }
+
+    const results = [];
+    for (const u of updates) {
+      if (!u.employee_id) continue;
+      const sets = [];
+      const params = [];
+
+      if (u.amount_paid != null) {
+        params.push(Number(u.amount_paid));
+        sets.push(`amount_paid = $${params.length}`);
+      }
+      if (u.status) {
+        params.push(u.status);
+        sets.push(`status = $${params.length}`);
+        if (u.status === 'settled') sets.push(`settled_at = NOW()`);
+      }
+      if (u.hr_note !== undefined) {
+        params.push(u.hr_note || null);
+        sets.push(`hr_note = $${params.length}`);
+      }
+
+      if (!sets.length) continue;
+
+      params.push(u.employee_id, month);
+      const { rows } = await query(
+        `UPDATE salary_payments
+         SET ${sets.join(', ')}
+         WHERE employee_id = $${params.length - 1} AND month = $${params.length}
+         RETURNING *`,
+        params
+      );
+      if (rows[0]) results.push(rows[0]);
+    }
+
+    res.json({ ok: true, data: { updated: results.length, payments: results } });
   })
 );
 

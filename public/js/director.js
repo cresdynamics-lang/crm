@@ -324,6 +324,9 @@ const CresDirector = (() => {
                    <button type="button" class="btn btn-primary btn-sm" data-remark="${esc(r.id)}">Save remarks</button>
                  </div>`
               : '';
+            const aiReviewBtn = r.can_remark
+              ? `<button type="button" class="btn btn-ghost btn-sm" data-ai-review="${esc(r.id)}" data-author="${esc(r.author_name)}" style="font-size:0.78rem;margin-top:4px;">AI Review</button>`
+              : '';
             return `<tr>
               <td>${new Date(r.created_at).toLocaleString()}</td>
               <td><div class="report-author">${typeof CresSettings !== 'undefined' ? CresSettings.avatarHtml({ name: r.author_name, avatar_url: r.author_avatar_url }, 'avatar avatar-sm') : ''}<span>${esc(r.author_name)} · ${esc(r.author_role)}</span></div></td>
@@ -333,11 +336,13 @@ const CresDirector = (() => {
                 ${r.remarks ? `<div class="rejection-banner" style="margin:0 0 6px;">${esc(r.remarks)}</div>` : '<span class="meta">No remarks yet</span>'}
                 ${remarkBox}
               </td>
+              <td>${aiReviewBtn}</td>
             </tr>`;
           })
           .join('')
-      : `<tr><td colspan="5" class="empty-state">No reports match these filters.</td></tr>`;
+      : `<tr><td colspan="6" class="empty-state">No reports match these filters.</td></tr>`;
 
+    // Save remarks
     list.querySelectorAll('[data-remark]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const id = btn.dataset.remark;
@@ -354,6 +359,11 @@ const CresDirector = (() => {
           alert(err.message);
         }
       });
+    });
+
+    // AI Review buttons
+    list.querySelectorAll('[data-ai-review]').forEach((btn) => {
+      btn.addEventListener('click', () => openAiReview(btn.dataset.aiReview, btn.dataset.author));
     });
 
     // Add voice remark mic to each remarks textarea
@@ -399,6 +409,73 @@ const CresDirector = (() => {
           } catch { /* mic denied */ }
         });
       }
+    });
+  }
+
+  // AI Review state
+  let aiReviewState = { reportId: null, analysis: null };
+
+  async function openAiReview(reportId, authorName) {
+    const modal = document.getElementById('ai-review-modal');
+    const body = document.getElementById('ai-review-body');
+    const flash = document.getElementById('ai-review-flash');
+    if (!modal || !body) return;
+
+    modal.hidden = false;
+    body.innerHTML = '<p class="meta">Analyzing report with full context…</p>';
+    flash.innerHTML = '';
+
+    aiReviewState = { reportId, analysis: null };
+
+    try {
+      const res = await CresAPI.request(`/api/reports/${reportId}/ai-review`, { method: 'POST' });
+      aiReviewState.analysis = res.data;
+
+      const questions = res.data.questions || [];
+      const raw = res.data.raw || '';
+      const summary = res.data.context_summary || {};
+
+      body.innerHTML = `
+        <div style="margin-bottom:12px;">
+          <strong>AI Analysis for ${esc(authorName)}'s report</strong>
+          ${res.cached ? '<span class="meta" style="margin-left:6px;">(cached)</span>' : ''}
+        </div>
+        ${summary.open_tasks != null ? `<div style="margin-bottom:10px;font-size:0.85rem;">
+          <span class="meta">Open tasks: ${summary.open_tasks}</span>
+          ${summary.overdue_tasks > 0 ? `<span style="color:var(--danger);margin-left:8px;">Overdue: ${summary.overdue_tasks}</span>` : ''}
+          ${summary.recurring_blockers ? '<span style="color:var(--warning,#e6a817);margin-left:8px;">Recurring blockers</span>' : ''}
+        </div>` : ''}
+        <div style="margin-bottom:10px;">
+          <label style="font-size:0.85rem;font-weight:600;">Questions to ask (editable):</label>
+          <textarea id="ai-review-text" rows="10" style="width:100%;margin-top:6px;font-size:0.9rem;white-space:pre-wrap;">${esc(raw)}</textarea>
+        </div>
+        <div style="font-size:0.8rem;color:var(--text-muted);">
+          These questions will be sent as your remarks. The reporter will see them as coming from you.
+        </div>
+      `;
+    } catch (err) {
+      body.innerHTML = `<p style="color:var(--danger);">Analysis failed: ${esc(err.message)}</p>`;
+    }
+
+    // Send button
+    document.getElementById('btn-ai-review-send')?.addEventListener('click', async () => {
+      const text = document.getElementById('ai-review-text')?.value?.trim();
+      if (!text) return;
+      try {
+        await CresAPI.request(`/api/reports/${reportId}/remarks-ai`, {
+          method: 'POST',
+          body: { remarks: text, ai_analysis: aiReviewState.analysis },
+        });
+        modal.hidden = true;
+        await mountReportsHub();
+      } catch (err) {
+        flash.innerHTML = `<span style="color:var(--danger);">${esc(err.message)}</span>`;
+      }
+    });
+
+    // Close modal buttons
+    modal.querySelectorAll('[data-close-modal]').forEach((btn) => {
+      btn.addEventListener('click', () => { modal.hidden = true; });
     });
   }
 
