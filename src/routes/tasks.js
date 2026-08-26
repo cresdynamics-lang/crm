@@ -1,10 +1,14 @@
 const express = require('express');
+const multer = require('multer');
 const { query } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/rbac');
 const { asyncHandler, AppError } = require('../lib/errors');
 const { idempotency } = require('../middleware/idempotency');
 const { queueNotification } = require('../queues/jobs');
+const { transcribeAudio } = require('../services/voiceLeads');
+const { groqChat } = require('../services/groq');
+const { recordAction } = require('../services/actionAudit');
 
 const router = express.Router();
 router.use(authenticate);
@@ -256,6 +260,19 @@ router.post(
       });
     }
 
+    // Record in audit trail
+    for (const t of created) {
+      await recordAction({
+        actorId: req.user.id,
+        actorRole: req.user.role,
+        action: 'created',
+        resourceType: 'task',
+        resourceId: t.id,
+        summary: `${req.user.name} created task "${title}" for ${t.assigned_to || 'self'}`,
+        after: { title, description, assigned_to: t.assigned_to, due_date: t.due_date },
+      });
+    }
+
     res.status(201).json({
       ok: true,
       data: created.length === 1 ? created[0] : created,
@@ -337,6 +354,83 @@ router.delete(
     }
     await query(`DELETE FROM tasks WHERE id = $1`, [req.params.id]);
     res.json({ ok: true, data: { deleted: true } });
+  })
+);
+
+/**
+ * Voice task capture: transcribe audio + parse into task fields.
+ */
+const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+
+router.post(
+  '/voice-capture',
+  requirePermission('tasks', 'create'),
+  memUpload.single('audio'),
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw new AppError('No audio file', 400, 'VALIDATION');
+
+    const { text: transcript } = await transcribeAudio({
+      buffer: req.file.buffer,
+      filename: req.file.originalname || 'recording.webm',
+      mimetype: req.file.mimetype || 'audio/webm',
+    });
+
+    let projects = [];
+    try {
+      if (['developer'].includes(req.user.role)) {
+        const { rows } = await query(
+          `SELECT p.id, p.name FROM projects p
+           JOIN assignments a ON a.project_id = p.id
+           WHERE a.user_id = $1 AND p.status != 'deleted'`,
+          [req.user.id]
+        );
+        projects = rows;
+      } else {
+        const { rows } = await query(`SELECT id, name FROM projects WHERE status != 'deleted' ORDER BY name`);
+        projects = rows;
+      }
+    } catch { /* proceed without projects */ }
+
+    const projectCtx = projects.length
+      ? `\n\nAvailable projects:\n${projects.map((p) => `- "${p.name}" (id: ${p.id})`).join('\n')}`
+      : '';
+
+    const { text } = await groqChat({
+      messages: [
+        { role: 'system', content: `You extract a task from a spoken description.
+Return:
+- "title": short task title (max 8 words).
+- "description": 1-2 sentence description of what needs to be done.
+- "due_date": ISO date (YYYY-MM-DD) if mentioned, or null.
+- "project_name": project name if mentioned, or null.
+- "project_id": matching project id from the list, or null.${projectCtx}
+
+Respond with ONLY valid JSON:
+{"title":"","description":"","due_date":null,"project_name":null,"project_id":null}` },
+        { role: 'user', content: `Transcript:\n"""${transcript.slice(0, 8000)}"""` },
+      ],
+      temperature: 0.1,
+    });
+
+    const cleaned = String(text || '').replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    let parsed;
+    try { parsed = JSON.parse(cleaned); } catch {
+      const s = cleaned.indexOf('{'), e = cleaned.lastIndexOf('}');
+      if (s >= 0 && e > s) parsed = JSON.parse(cleaned.slice(s, e + 1));
+      else throw new Error('AI returned unparseable JSON');
+    }
+
+    res.json({
+      ok: true,
+      data: {
+        transcript,
+        title: parsed.title || '',
+        description: parsed.description || '',
+        due_date: parsed.due_date || null,
+        project_name: parsed.project_name || null,
+        project_id: parsed.project_id || null,
+      },
+    });
   })
 );
 

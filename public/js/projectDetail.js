@@ -234,7 +234,7 @@ const CresProjectDetail = (() => {
               <div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">${esc(p.client_email || '')} ${esc(p.client_phone || '')}</div></div>`
             : ''
         }
-        ${showMoney ? `<div><strong>Project value (amount)</strong><div>${Number(p.value_amount).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}</div></div>` : ''}
+        ${showMoney ? `<div><strong>Project value (amount)</strong><div>${Number(p.value_amount).toLocaleString('en-KE', { style: 'currency', currency: 'KES' })}</div></div>` : ''}
         ${
           p.preview_url
             ? `<div style="grid-column:1/-1;"><strong>Preview link</strong>

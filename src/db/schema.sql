@@ -560,32 +560,40 @@ INSERT INTO system_settings (key, value)
 VALUES ('expense_approval', '{"threshold": 500, "requireAboveThreshold": true}'::jsonb)
 ON CONFLICT (key) DO NOTHING;
 
--- Cres Dynamics invoice / receipt letterhead (Caribbean billing)
+-- Cres Dynamics invoice / receipt letterhead (Kenya)
 INSERT INTO system_settings (key, value)
 VALUES (
   'company_profile',
   '{
-    "legalName": "Cres Dynamics",
-    "tradingName": "Cres Dynamics",
-    "tagline": "Software & digital solutions",
-    "addressLines": ["Caribbean Regional Office", "Kingston, Jamaica", "West Indies"],
-    "phone": "+1 (876) 000-0000",
-    "email": "billing@cresdynamics.com",
+    "legalName": "Cres Dynamics Ltd",
+    "tradingName": "Cres Dynamics Ltd",
+    "tagline": "Building digital systems that Businesses Run On.",
+    "addressLines": ["P.O. BOX 1112 – 00100, NAIROBI, KENYA", "Kivuli Towers, 3rd floor, Westlands, Nairobi"],
+    "phone": "+254 743 869 564 / +254 708 805 496",
+    "email": "info@cresdynamics.com",
     "financeEmail": "finance@cresdynamics.com",
     "emailFromName": "Cres Dynamics Finance",
     "website": "www.cresdynamics.com",
-    "taxLabel": "Tax / VAT ID",
-    "taxId": "CD-CARIB-0001",
-    "currency": "USD",
-    "bankName": "First Caribbean International Bank",
-    "bankAccountName": "Cres Dynamics",
-    "bankAccountNumber": "XXXX-XXXX-XXXX",
-    "bankSwift": "FCIBJMKN",
-    "paymentNote": "Please reference the invoice number on all remittances.",
-    "footer": "Thank you for your business with Cres Dynamics."
+    "taxLabel": "KRA PIN",
+    "taxId": "P052570833B",
+    "currency": "KES",
+    "bankName": "I & M Bank",
+    "bankAccountName": "Cres Dynamics Ltd",
+    "bankAccountNumber": "01209982836350",
+    "bankBranch": "Ongata Rongai",
+    "mpesaPaybill": "542542",
+    "mpesaAccount": "43869",
+    "paymentNote": "Please use the invoice number as your payment reference.",
+    "lateFeeNote": "Late payments attract 2% monthly interest after the due date. For payment queries contact info@cresdynamics.com or +254 708 805 496.",
+    "footer": "Thank you for your business. Cres Dynamics Ltd — cresdynamics.com",
+    "logoUrl": "/brand/logo.png",
+    "signatureUrl": "/brand/signature.png?v=20260815e",
+    "financeSignatureUrl": "/brand/signature-scholastica.png?v=20260815f",
+    "invoicedBy": {"name": "Scholastica Omoro", "title": "Finance, Cres Dynamics Ltd"},
+    "authorisedBy": {"name": "Nelson Were", "title": "Chief Executive Officer, Cres Dynamics Ltd"}
   }'::jsonb
 )
-ON CONFLICT (key) DO NOTHING;
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();
 
 -- ---------------------------------------------------------------------------
 -- Role lock-down: developer assignment Accept/Swap/Reject + action audit
@@ -757,3 +765,72 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_inbox_message_id
 CREATE INDEX IF NOT EXISTS idx_admin_inbox_status ON admin_inbox_messages(status);
 CREATE INDEX IF NOT EXISTS idx_admin_inbox_received ON admin_inbox_messages(received_at DESC);
 
+
+-- Invoice create: line items, issue date, human number; project finance seq
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS finance_seq INTEGER;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS invoice_number VARCHAR(40);
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS line_items JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS issue_date DATE;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_number ON invoices(invoice_number) WHERE invoice_number IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_projects_finance_seq ON projects(finance_seq);
+
+-- Assigned director: users report to a specific director (set by Admin/HR)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS assigned_director_id UUID REFERENCES users(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_users_assigned_director ON users(assigned_director_id);
+
+-- Tasks: link to projects
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
+
+-- ============================================================
+-- CRES OPS: Knowledge Base / RAG Data Pool
+-- ============================================================
+
+-- Admin-fed knowledge base documents (text, voice transcriptions, uploaded docs)
+CREATE TABLE IF NOT EXISTS knowledge_base (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title VARCHAR(300) NOT NULL,
+  content TEXT NOT NULL,
+  source_type VARCHAR(40) NOT NULL DEFAULT 'text'
+    CHECK (source_type IN ('text', 'document', 'voice', 'system')),
+  source_file VARCHAR(500),
+  category VARCHAR(80) NOT NULL DEFAULT 'general'
+    CHECK (category IN (
+      'general', 'onboarding', 'processes', 'policies', 'decisions',
+      'finance', 'sales', 'development', 'hr', 'operations', 'strategy'
+    )),
+  tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+  accessible_roles JSONB NOT NULL DEFAULT '["all"]'::jsonb,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_kb_category ON knowledge_base(category);
+CREATE INDEX IF NOT EXISTS idx_kb_created ON knowledge_base(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_kb_source ON knowledge_base(source_type);
+CREATE INDEX IF NOT EXISTS idx_kb_tags ON knowledge_base USING GIN(tags);
+CREATE INDEX IF NOT EXISTS idx_kb_accessible ON knowledge_base USING GIN(accessible_roles);
+
+-- Cres Ops conversation history (user questions + AI answers)
+CREATE TABLE IF NOT EXISTS ops_conversations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_role VARCHAR(40) NOT NULL,
+  question TEXT NOT NULL,
+  answer TEXT NOT NULL,
+  sources JSONB NOT NULL DEFAULT '[]'::jsonb,
+  blocked_reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ops_conv_user ON ops_conversations(user_id);
+CREATE INDEX IF NOT EXISTS idx_ops_conv_created ON ops_conversations(created_at DESC);
+
+-- Expanded daily report sections (HR well-being + structured fields)
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS work_done TEXT;
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS blockers_text TEXT;
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS needs_attention TEXT;
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS hard_today TEXT;
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS easy_today TEXT;
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS happiness TEXT;
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS concerns TEXT;
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS assigned_director_id UUID REFERENCES users(id) ON DELETE SET NULL;

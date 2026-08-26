@@ -280,6 +280,9 @@
     if (faceId === 'tasks' && typeof CresTasks !== 'undefined') {
       await CresTasks.mount();
     }
+    if (faceId === 'ops' && typeof CresOps !== 'undefined') {
+      await CresOps.mount();
+    }
     if (faceId === 'community') {
       await CresCommunity.mount();
     }
@@ -634,6 +637,7 @@
 
   CresSettings.bind();
   if (typeof CresTasks !== 'undefined') CresTasks.bind();
+  if (typeof CresOps !== 'undefined') CresOps.bind();
   CresCommunity.bind();
   if (typeof CresProjectDetail !== 'undefined') CresProjectDetail.bind();
   CresSales.bindModals();

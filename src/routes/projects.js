@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require('multer');
 const { query, withTransaction } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/rbac');
@@ -18,6 +19,8 @@ const {
   newlyCompletedMilestones,
   MS_STATUSES,
 } = require('../services/milestones');
+const { transcribeAudio } = require('../services/voiceLeads');
+const { groqChat } = require('../services/groq');
 
 const router = express.Router();
 router.use(authenticate);
@@ -885,6 +888,82 @@ router.get(
       [req.params.id]
     );
     res.json({ ok: true, data: rows });
+  })
+);
+
+/**
+ * Voice project capture: transcribe audio + parse into project fields.
+ */
+const projMemUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+
+router.post(
+  '/voice-capture',
+  requirePermission('projects', 'create'),
+  projMemUpload.single('audio'),
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw new AppError('No audio file', 400, 'VALIDATION');
+
+    const { text: transcript } = await transcribeAudio({
+      buffer: req.file.buffer,
+      filename: req.file.originalname || 'recording.webm',
+      mimetype: req.file.mimetype || 'audio/webm',
+    });
+
+    // Fetch developers for matching
+    let developers = [];
+    try {
+      const { rows } = await query(
+        `SELECT u.id, u.name FROM users u JOIN roles r ON r.id = u.role_id
+         WHERE r.name = 'developer' AND u.status = 'active'`
+      );
+      developers = rows;
+    } catch { /* proceed without developers */ }
+
+    const devCtx = developers.length
+      ? `\n\nAvailable developers:\n${developers.map((d) => `- "${d.name}" (id: ${d.id})`).join('\n')}`
+      : '';
+
+    const { text } = await groqChat({
+      messages: [
+        { role: 'system', content: `You extract project details from a spoken description.
+Return:
+- "name": project name (required, short).
+- "description": 1-3 sentence overview of what the project is about.
+- "value_amount": numeric project value (KES) if mentioned, or null.
+- "client_name": client/company name if mentioned, or null.
+- "developer_name": developer to assign if mentioned, or null.
+- "project_id": matching developer id from the list, or null (put in "project_id" field — this is actually the developer id).
+- "milestones": array of milestone title strings if mentioned, or [].
+Do NOT fabricate details not spoken.${devCtx}
+
+Respond with ONLY valid JSON:
+{"name":"","description":"","value_amount":null,"client_name":null,"developer_name":null,"project_id":null,"milestones":[]}` },
+        { role: 'user', content: `Transcript:\n"""${transcript.slice(0, 8000)}"""` },
+      ],
+      temperature: 0.1,
+    });
+
+    const cleaned = String(text || '').replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    let parsed;
+    try { parsed = JSON.parse(cleaned); } catch {
+      const s = cleaned.indexOf('{'), e = cleaned.lastIndexOf('}');
+      if (s >= 0 && e > s) parsed = JSON.parse(cleaned.slice(s, e + 1));
+      else throw new Error('AI returned unparseable JSON');
+    }
+
+    res.json({
+      ok: true,
+      data: {
+        transcript,
+        name: parsed.name || '',
+        description: parsed.description || '',
+        value_amount: parsed.value_amount || null,
+        client_name: parsed.client_name || null,
+        developer_name: parsed.developer_name || null,
+        developer_id: parsed.project_id || null,  // LLM returns developer id in project_id field
+        milestones: Array.isArray(parsed.milestones) ? parsed.milestones : [],
+      },
+    });
   })
 );
 

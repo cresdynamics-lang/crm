@@ -18,7 +18,7 @@ const CresClient = (() => {
   function fmtMoney(n) {
     const num = Number(n);
     if (Number.isNaN(num)) return '-';
-    return num.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+    return num.toLocaleString('en-KE', { style: 'currency', currency: 'KES' });
   }
 
   function statusPill(s) {

@@ -175,6 +175,164 @@ router.get(
   })
 );
 
+/**
+ * Finance creates invoice: client + project + line items (no VAT).
+ * Numbering matches CresOS style: {projectSeq}/{invoiceOrdinal}/{yy} e.g. 009/02/26
+ * Due date = issue_date + 5 days.
+ */
+router.post(
+  '/',
+  requirePermission('invoices', 'create'),
+  idempotency,
+  asyncHandler(async (req, res) => {
+    if (!['finance', 'admin'].includes(req.user.role)) {
+      throw new AppError('Only Finance can create invoices', 403, 'FORBIDDEN');
+    }
+    const { client_id, project_id, items, issue_date } = req.body || {};
+    if (!client_id || !project_id) {
+      throw new AppError('client_id and project_id are required', 400, 'VALIDATION');
+    }
+    const lineItems = Array.isArray(items) ? items : [];
+    if (!lineItems.length) {
+      throw new AppError('Add at least one line item', 400, 'VALIDATION');
+    }
+
+    const clientCheck = await query(`SELECT id, email, name FROM clients WHERE id = $1`, [
+      client_id,
+    ]);
+    if (!clientCheck.rows[0]) throw new AppError('Client not found', 404, 'NOT_FOUND');
+    if (!String(clientCheck.rows[0].email || '').trim()) {
+      throw new AppError(
+        'Client has no email — add contact email before creating an invoice',
+        400,
+        'VALIDATION'
+      );
+    }
+
+    const normalized = lineItems.map((it) => {
+      const qty = Number(it.qty ?? it.quantity ?? 1);
+      const unit_price = Number(it.unit_price ?? it.unitPrice ?? 0);
+      if (!(qty > 0) || !(unit_price >= 0)) {
+        throw new AppError('Each item needs positive qty and unit_price', 400, 'VALIDATION');
+      }
+      const amount = Math.round(qty * unit_price * 100) / 100;
+      return {
+        description: String(it.description || it.name || 'Item').trim(),
+        detail: it.detail ? String(it.detail).trim() : '',
+        qty,
+        unit_price,
+        amount,
+      };
+    });
+    const total = Math.round(normalized.reduce((s, i) => s + i.amount, 0) * 100) / 100;
+    if (!(total > 0)) throw new AppError('Invoice total must be positive', 400, 'VALIDATION');
+
+    const issue =
+      issue_date && /^\d{4}-\d{2}-\d{2}$/.test(issue_date)
+        ? issue_date
+        : new Date().toISOString().slice(0, 10);
+    const due = new Date(`${issue}T12:00:00Z`);
+    due.setUTCDate(due.getUTCDate() + 5);
+    const dueDate = due.toISOString().slice(0, 10);
+    const yy = issue.slice(2, 4);
+
+    const { withTransaction } = require('../config/database');
+    const result = await withTransaction(async (tx) => {
+      const client = await tx.query(`SELECT id, email, name FROM clients WHERE id = $1`, [
+        client_id,
+      ]);
+      if (!client.rows[0]) throw new AppError('Client not found', 404, 'NOT_FOUND');
+      const project = await tx.query(
+        `SELECT id, name, finance_seq, client_id FROM projects WHERE id = $1`,
+        [project_id]
+      );
+      if (!project.rows[0]) throw new AppError('Project not found', 404, 'NOT_FOUND');
+
+      let financeSeq = project.rows[0].finance_seq;
+      if (!financeSeq) {
+        const max = await tx.query(
+          `SELECT COALESCE(MAX(finance_seq), 0)::int AS m FROM projects WHERE finance_seq IS NOT NULL`
+        );
+        financeSeq = (max.rows[0].m || 0) + 1;
+        await tx.query(`UPDATE projects SET finance_seq = $1 WHERE id = $2`, [
+          financeSeq,
+          project_id,
+        ]);
+      }
+
+      const ord = await tx.query(
+        `SELECT COUNT(*)::int AS n FROM invoices WHERE project_id = $1`,
+        [project_id]
+      );
+      const ordinal = (ord.rows[0].n || 0) + 1;
+      const invoiceNumber = `${String(financeSeq).padStart(3, '0')}/${String(ordinal).padStart(
+        2,
+        '0'
+      )}/${yy}`;
+
+      const { rows } = await tx.query(
+        `INSERT INTO invoices
+           (project_id, client_id, amount, status, due_date, amount_paid,
+            invoice_number, line_items, issue_date)
+         VALUES ($1,$2,$3,'issued',$4,0,$5,$6::jsonb,$7::date)
+         RETURNING *`,
+        [
+          project_id,
+          client_id,
+          total,
+          dueDate,
+          invoiceNumber,
+          JSON.stringify(normalized),
+          issue,
+        ]
+      );
+      return { invoice: rows[0], client: client.rows[0], project: project.rows[0] };
+    });
+
+    // Always email client the tax invoice (HTML)
+    let emailed = false;
+    try {
+      const { invoiceReceipt } = require('../services/receipts');
+      const { queueReceiptEmail, queueInvoiceEmail } = require('../queues/jobs');
+      const receipt = await invoiceReceipt(result.invoice.id);
+      await queueReceiptEmail({
+        to: result.client.email,
+        subject: receipt.subject,
+        body: receipt.text,
+        html: receipt.html,
+        receiptType: 'invoice',
+        receiptId: result.invoice.id,
+      });
+      await query(`UPDATE invoices SET auto_sent_at = NOW(), updated_at = NOW() WHERE id = $1`, [
+        result.invoice.id,
+      ]);
+      emailed = true;
+    } catch (err) {
+      console.warn('[invoices] create email queue failed', err.message);
+      try {
+        const { queueInvoiceEmail } = require('../queues/jobs');
+        await queueInvoiceEmail(result.invoice.id, result.client.email);
+        await query(`UPDATE invoices SET auto_sent_at = NOW(), updated_at = NOW() WHERE id = $1`, [
+          result.invoice.id,
+        ]);
+        emailed = true;
+      } catch (e2) {
+        console.warn('[invoices] fallback email failed', e2.message);
+      }
+    }
+
+    res.status(201).json({
+      ok: true,
+      data: {
+        invoice: result.invoice,
+        invoice_number: result.invoice.invoice_number,
+        emailed,
+        to: result.client.email || null,
+      },
+    });
+  })
+);
+
 router.patch(
   '/:id/client',
   requirePermission('invoices', 'edit'),
@@ -400,6 +558,26 @@ router.get(
   })
 );
 
+/** Force-download invoice as PDF (no print dialog / no inline open) */
+router.get(
+  '/:id/receipt/file',
+  requirePermission('invoices', 'view'),
+  asyncHandler(async (req, res) => {
+    if (req.user.role === 'sales') {
+      throw new AppError('Forbidden', 403, 'FORBIDDEN');
+    }
+    const { invoiceReceipt } = require('../services/receipts');
+    const { invoicePdf } = require('../services/pdfService');
+    const receipt = await invoiceReceipt(req.params.id);
+    const pdf = await invoicePdf(receipt);
+    const filename = `${String(receipt.documentNumber || 'invoice').replace(/[^\w.\-]+/g, '_')}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(pdf);
+  })
+);
+
 /** Email invoice receipt to client (or override to) */
 router.post(
   '/:id/receipt/send',
@@ -424,6 +602,7 @@ router.post(
       to,
       subject: receipt.subject,
       body: receipt.text,
+      html: receipt.html,
       receiptType: 'invoice',
       receiptId: receipt.id,
     });

@@ -145,6 +145,11 @@
           <p>Create and assign tasks. PM and Director boards stay in sync with whoever is assigned.</p>
         </div>
         <div id="tasks-flash" class="flash"></div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;max-width:640px;">
+          <button type="button" id="btn-new-task" class="btn btn-primary" style="padding:8px 20px;">New task</button>
+          <button type="button" id="btn-vf-task" class="btn btn-ghost" style="padding:7px 16px;font-size:0.85rem;">Voice task</button>
+          <span style="font-size:0.8rem;color:var(--text-muted);">Speak to describe a task</span>
+        </div>
         <div class="settings-section" style="max-width:640px;">
           <form id="task-form" class="form-grid">
             <div><label for="task-title">Title</label><input id="task-title" required placeholder="Prep proposal for X" /></div>
@@ -183,6 +188,7 @@
             <option value="converted">Converted</option>
           </select>
           <div class="spacer"></div>
+          <button type="button" class="btn btn-primary" id="btn-voice-capture">Voice capture</button>
           <button type="button" class="btn btn-primary" id="btn-new-lead">Add lead</button>
         </div>
         <div class="data-table-wrap">
@@ -418,11 +424,43 @@
 
         <div id="sales-reports-panel">
           <div id="reports-flash" class="flash"></div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+            <button type="button" id="btn-new-report" class="btn btn-primary" style="padding:8px 20px;">New report</button>
+            <button type="button" id="btn-voice-report" class="btn btn-ghost" style="padding:7px 16px;font-size:0.85rem;">Voice report</button>
+            <span style="font-size:0.8rem;color:var(--text-muted);">Speak your daily report instead of typing</span>
+          </div>
           <div class="settings-section" style="max-width:640px;">
-            <form id="report-form" class="form-grid">
+            <form id="report-form" class="form-grid" style="display:none;">
               <div>
-                <label for="report-content">Today's work</label>
-                <textarea id="report-content" rows="5" required style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;"></textarea>
+                <label for="report-content">What was done today</label>
+                <textarea id="report-content" rows="4" required style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="Overall work completed today (not just one project)"></textarea>
+              </div>
+              <div>
+                <label for="report-blockers">Blockers encountered</label>
+                <textarea id="report-blockers" rows="2" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="Issues, delays, or blockers"></textarea>
+              </div>
+              <div>
+                <label for="report-attention">What needs attention</label>
+                <textarea id="report-attention" rows="2" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="Anything that needs follow-up or decision"></textarea>
+              </div>
+              <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px;">
+                <label style="font-size:0.82rem;color:var(--text-muted);margin-bottom:6px;display:block;">How are you feeling? (optional)</label>
+              </div>
+              <div>
+                <label for="report-hard">What was hard today</label>
+                <textarea id="report-hard" rows="2" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="Challenging moments"></textarea>
+              </div>
+              <div>
+                <label for="report-easy">What was easy today</label>
+                <textarea id="report-easy" rows="2" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="Smooth, enjoyable work"></textarea>
+              </div>
+              <div>
+                <label for="report-happiness">What made you happy / feel part of the team</label>
+                <textarea id="report-happiness" rows="2" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="Moments of connection, wins, recognition"></textarea>
+              </div>
+              <div>
+                <label for="report-concerns">What made you think twice</label>
+                <textarea id="report-concerns" rows="2" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="Moments of doubt, frustration, or considering leaving"></textarea>
               </div>
               <div>
                 <label for="report-project">Project (optional)</label>
@@ -556,8 +594,9 @@
         <div id="finance-invoices-panel" hidden>
           <div class="face-hero">
             <h2>Invoices</h2>
-            <p>Auto-created on Director approval. Review, resend, and manage status.</p>
+            <p>Create invoices for clients, email the tax invoice, print/download, and track payments.</p>
           </div>
+          <div id="fin-inv-list-flash" class="flash"></div>
           <div class="toolbar">
             <input id="fin-inv-search" type="search" placeholder="Search client or project" />
             <select id="fin-inv-status">
@@ -571,12 +610,13 @@
             <input id="fin-inv-to" type="date" />
             <div class="spacer"></div>
             <button type="button" class="btn btn-ghost" id="btn-export-invoices">Export CSV</button>
+            <button type="button" class="btn btn-primary" id="btn-new-invoice">New invoice</button>
           </div>
           <div class="data-table-wrap">
             <table class="data-table">
               <thead>
                 <tr>
-                  <th>Client</th><th>Project</th><th>Amount</th><th>Paid</th><th>Balance</th><th>Due</th><th>Status</th>
+                  <th>Number</th><th>Client</th><th>Project</th><th>Amount</th><th>Paid</th><th>Balance</th><th>Due</th><th>Status</th>
                 </tr>
               </thead>
               <tbody id="finance-invoices-tbody"></tbody>
@@ -950,6 +990,87 @@
         </div>
       </section>
 
+      <section class="face" id="face-ops" data-title="Cres Ops">
+        <div class="face-hero">
+          <h2>Cres Ops</h2>
+          <p>Your company knowledge assistant. Ask how things work, what's expected of you, and get answers from the company data pool.</p>
+        </div>
+        <div id="ops-flash" class="flash"></div>
+
+        <div style="display:flex;gap:20px;flex-wrap:wrap;">
+          <!-- Left: Q&A -->
+          <div style="flex:1;min-width:320px;max-width:640px;">
+            <div class="settings-section">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                <span style="font-size:0.82rem;color:var(--text-muted);">You are logged in as</span>
+                <span id="ops-role-badge" class="status-pill" style="font-size:0.78rem;padding:3px 10px;"></span>
+              </div>
+
+              <div style="margin-bottom:14px;">
+                <label for="ops-question" style="font-weight:600;font-size:0.88rem;">Ask a question</label>
+                <div style="display:flex;gap:8px;margin-top:6px;">
+                  <input id="ops-question" type="text" placeholder="e.g. How do I submit a daily report?" style="flex:1;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);" />
+                  <button type="button" id="ops-ask-btn" class="btn btn-primary" style="padding:10px 20px;">Ask</button>
+                </div>
+              </div>
+
+              <div id="ops-answer" style="background:var(--bg-secondary,#1a2230);padding:14px;border-radius:8px;border:1px solid var(--border,#2a3441);min-height:60px;font-size:0.88rem;line-height:1.65;margin-bottom:10px;color:var(--text,#e8eef4);">
+                <span style="color:var(--text-muted,#8b9aab);">Your answer will appear here.</span>
+              </div>
+              <div id="ops-sources" style="font-size:0.78rem;color:var(--text-muted);margin-bottom:14px;"></div>
+            </div>
+
+            <h3 style="font-size:0.9rem;margin:16px 0 8px;">Quick questions for you</h3>
+            <div id="ops-guided" style="display:flex;flex-direction:column;gap:6px;margin-bottom:18px;"></div>
+
+            <h3 style="font-size:0.9rem;margin:16px 0 8px;">Recent answers</h3>
+            <div id="ops-history" style="max-height:300px;overflow-y:auto;"></div>
+          </div>
+
+          <!-- Right: Admin ingest (Admin only) -->
+          <div id="ops-ingest" style="flex:0 0 300px;display:none;">
+            <div class="settings-section" style="padding:16px;">
+              <h3 style="font-size:0.9rem;margin:0 0 12px;">Feed the Data Pool</h3>
+              <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px;">Add knowledge that employees can query. Text, documents, or voice recordings.</p>
+
+              <div id="ingest-flash" class="flash" style="margin-bottom:8px;"></div>
+
+              <div style="margin-bottom:10px;">
+                <label style="font-size:0.8rem;font-weight:600;">Title</label>
+                <input id="ingest-title" type="text" placeholder="e.g. Sales onboarding guide" style="width:100%;padding:8px 10px;border-radius:6px;border:1px solid var(--border);font-size:0.82rem;margin-top:4px;" />
+              </div>
+
+              <div style="margin-bottom:10px;">
+                <label style="font-size:0.8rem;font-weight:600;">Category</label>
+                <select id="ingest-category" style="width:100%;padding:8px 10px;border-radius:6px;border:1px solid var(--border);font-size:0.82rem;margin-top:4px;">
+                  <option value="general">General</option>
+                  <option value="onboarding">Onboarding</option>
+                  <option value="processes">Processes</option>
+                  <option value="policies">Policies</option>
+                  <option value="decisions">Decisions</option>
+                  <option value="finance">Finance</option>
+                  <option value="sales">Sales</option>
+                  <option value="development">Development</option>
+                  <option value="hr">HR</option>
+                  <option value="operations">Operations</option>
+                  <option value="strategy">Strategy</option>
+                </select>
+              </div>
+
+              <div style="margin-bottom:10px;">
+                <label style="font-size:0.8rem;font-weight:600;">Content</label>
+                <textarea id="ingest-content" rows="5" placeholder="Type the knowledge entry..." style="width:100%;padding:8px 10px;border-radius:6px;border:1px solid var(--border);font-size:0.82rem;margin-top:4px;resize:vertical;"></textarea>
+              </div>
+
+              <div style="display:flex;gap:8px;margin-bottom:10px;">
+                <button type="button" id="ingest-save-btn" class="btn btn-primary btn-sm" style="flex:1;padding:8px 12px;font-size:0.82rem;">Save text</button>
+                <button type="button" id="ingest-voice-btn" class="btn btn-ghost btn-sm" style="flex:1;padding:8px 12px;font-size:0.82rem;">Record voice note</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="face" id="face-settings" data-title="Settings">
         <div class="face-hero">
           <h2>Settings</h2>
@@ -1028,6 +1149,125 @@
   </div>
 
   <!-- Modals -->
+  <div class="modal-backdrop" id="voice-capture-modal">
+    <div class="modal-card wide">
+      <header>
+        <h3>Voice capture - record leads</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body">
+        <div id="voice-flash" class="flash"></div>
+
+        <div id="voice-recorder-ui" style="text-align:center;padding:24px 0 18px;">
+          <div id="voice-timer" style="font-size:1.6rem;font-weight:700;margin-bottom:8px;font-variant-numeric:tabular-nums;">00:00</div>
+          <p style="color:var(--text-muted);margin:0 0 12px;font-size:0.82rem;">
+            Narrate your leads: business name, what they sell, their phone number. Say "next" or "and another" between contacts.
+          </p>
+          <button type="button" id="btn-voice-record" class="btn" style="padding:10px 28px;font-size:0.92rem;">Start recording</button>
+        </div>
+
+        <div id="voice-transcript-section" style="display:none;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <strong style="font-size:0.85rem;">Transcript</strong>
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-voice-retry" style="padding:4px 10px;font-size:0.78rem;">Re-record</button>
+          </div>
+          <div id="voice-transcript" style="white-space:pre-wrap;background:var(--bg-secondary,#1a2230);padding:10px 12px;border-radius:6px;max-height:140px;overflow-y:auto;font-size:0.82rem;margin-bottom:14px;border:1px solid var(--border,#2a3441);color:var(--text,#e8eef4);"></div>
+        </div>
+
+        <div id="voice-leads-section" style="display:none;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <strong style="font-size:0.85rem;">Parsed leads (<span id="voice-leads-count">0</span>)</strong>
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-voice-import" style="padding:5px 14px;font-size:0.82rem;">Import</button>
+          </div>
+          <div id="voice-leads-table" style="max-height:340px;overflow-y:auto;"></div>
+        </div>
+
+        <div id="voice-working-indicator" style="display:none;text-align:center;padding:14px 0;font-size:0.85rem;color:var(--text-muted);">
+          <span style="display:inline-block;animation:pulse 1s infinite;">Processing audio with AI...</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="voice-report-modal">
+    <div class="modal-card wide">
+      <header>
+        <h3>Voice daily report</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body">
+        <div id="vr-flash" class="flash"></div>
+
+        <div id="vr-recorder-ui" style="text-align:center;padding:24px 0 18px;">
+          <div id="vr-timer" style="font-size:1.6rem;font-weight:700;margin-bottom:8px;font-variant-numeric:tabular-nums;">00:00</div>
+          <p style="color:var(--text-muted);margin:0 0 12px;font-size:0.82rem;">
+            Describe what you worked on today, any blockers, and your next steps.
+          </p>
+          <button type="button" id="btn-vr-record" class="btn" style="padding:10px 28px;font-size:0.92rem;">Start recording</button>
+        </div>
+
+        <div id="vr-transcript-section" style="display:none;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <strong style="font-size:0.85rem;">Transcript</strong>
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-vr-retry" style="padding:4px 10px;font-size:0.78rem;">Re-record</button>
+          </div>
+          <div id="vr-transcript" style="white-space:pre-wrap;background:var(--bg-secondary,#1a2230);padding:10px 12px;border-radius:6px;max-height:120px;overflow-y:auto;font-size:0.82rem;margin-bottom:14px;border:1px solid var(--border,#2a3441);color:var(--text,#e8eef4);"></div>
+        </div>
+
+        <div id="vr-report-section" style="display:none;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <strong style="font-size:0.85rem;">Structured report</strong>
+            <button type="button" class="btn btn-primary btn-sm" id="btn-vr-use" style="padding:5px 14px;font-size:0.82rem;">Use this report</button>
+          </div>
+          <div id="vr-report-preview" style="background:var(--bg-secondary,#1a2230);padding:12px;border-radius:6px;font-size:0.82rem;line-height:1.6;border:1px solid var(--border,#2a3441);white-space:pre-wrap;max-height:220px;overflow-y:auto;margin-bottom:10px;color:var(--text,#e8eef4);"></div>
+          <div id="vr-project-match" style="display:none;font-size:0.8rem;color:var(--text-muted);margin-bottom:10px;"></div>
+        </div>
+
+        <div id="vr-working-indicator" style="display:none;text-align:center;padding:14px 0;font-size:0.85rem;color:var(--text-muted);">
+          <span style="display:inline-block;animation:pulse 1s infinite;">Processing audio with AI...</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="voice-form-modal">
+    <div class="modal-card wide">
+      <header>
+        <h3>Voice capture</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body">
+        <div id="vf-flash" class="flash"></div>
+
+        <div id="vf-recorder-ui" style="text-align:center;padding:24px 0 18px;">
+          <div id="vf-timer" style="font-size:1.6rem;font-weight:700;margin-bottom:8px;font-variant-numeric:tabular-nums;">00:00</div>
+          <p id="vf-hint" style="color:var(--text-muted);margin:0 0 12px;font-size:0.82rem;"></p>
+          <button type="button" id="btn-vf-record" class="btn" style="padding:10px 28px;font-size:0.92rem;">Start recording</button>
+        </div>
+
+        <div id="vf-transcript-section" style="display:none;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <strong style="font-size:0.85rem;">Transcript</strong>
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-vf-retry" style="padding:4px 10px;font-size:0.78rem;">Re-record</button>
+          </div>
+          <div id="vf-transcript" style="white-space:pre-wrap;background:var(--bg-secondary,#1a2230);padding:10px 12px;border-radius:6px;max-height:120px;overflow-y:auto;font-size:0.82rem;margin-bottom:14px;border:1px solid var(--border,#2a3441);color:var(--text,#e8eef4);"></div>
+        </div>
+
+        <div id="vf-preview-section" style="display:none;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <strong style="font-size:0.85rem;">Parsed details</strong>
+            <button type="button" class="btn btn-primary btn-sm" id="btn-vf-use" style="padding:5px 14px;font-size:0.82rem;">Use this</button>
+          </div>
+          <div id="vf-preview" style="background:var(--bg-secondary,#1a2230);padding:12px;border-radius:6px;font-size:0.82rem;line-height:1.6;border:1px solid var(--border,#2a3441);white-space:pre-wrap;max-height:220px;overflow-y:auto;color:var(--text,#e8eef4);"></div>
+        </div>
+
+        <div id="vf-working" style="display:none;text-align:center;padding:14px 0;font-size:0.85rem;color:var(--text-muted);">
+          <span style="display:inline-block;animation:pulse 1s infinite;">Processing audio with AI...</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="new-lead-modal">
     <div class="modal-card">
       <header>
@@ -1137,6 +1377,10 @@
         <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
       </header>
       <div class="modal-body">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <button type="button" id="btn-vf-project" class="btn btn-ghost" style="padding:7px 16px;font-size:0.85rem;">Voice project</button>
+          <span style="font-size:0.8rem;color:var(--text-muted);">Speak to describe the project</span>
+        </div>
         <form id="new-project-form" class="form-grid">
           <div><label>Project name</label><input id="proj-name" required /></div>
           <div>
@@ -1191,6 +1435,64 @@
         <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
       </header>
       <div class="modal-body" id="fin-inv-body"></div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="new-invoice-modal">
+    <div class="modal-card wide">
+      <header>
+        <h3>New invoice</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body">
+        <div id="new-inv-flash" class="flash"></div>
+        <form id="new-invoice-form">
+          <div class="form-grid">
+            <div>
+              <label>Filter clients</label>
+              <input id="new-inv-client-filter" type="search" placeholder="Search client…" />
+            </div>
+            <div>
+              <label>Client</label>
+              <select id="new-inv-client" required><option value="">Select client</option></select>
+            </div>
+            <div>
+              <label>Project</label>
+              <select id="new-inv-project" required><option value="">Select project</option></select>
+            </div>
+            <div>
+              <label>Invoice date</label>
+              <input id="new-inv-date" type="date" required />
+            </div>
+          </div>
+          <div id="new-inv-contact" class="placeholder-card" hidden style="margin:10px 0 12px;">
+            <strong style="display:block;margin-bottom:6px;">Bill to (from client record)</strong>
+            <div id="new-inv-contact-body" class="meta"></div>
+          </div>
+          <p class="meta" style="margin:8px 0 12px;">Due date is invoice date + 5 days. No VAT. Numbering is per project (e.g. 009/02/26). On create, the invoice downloads and is emailed to the client.</p>
+          <div class="toolbar" style="margin-bottom:8px;">
+            <strong>Line items</strong>
+            <div class="spacer"></div>
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-new-inv-add-item">Add item</button>
+          </div>
+          <div class="data-table-wrap" style="margin-bottom:12px;">
+            <table class="data-table">
+              <thead>
+                <tr><th>Description</th><th>Qty</th><th>Unit price (KES)</th><th>Amount</th><th></th></tr>
+              </thead>
+              <tbody id="new-inv-items"></tbody>
+            </table>
+          </div>
+          <div class="toolbar" style="margin-bottom:14px;">
+            <span class="meta" id="new-inv-email-hint">Select a client to email the invoice.</span>
+            <div class="spacer"></div>
+            <strong id="new-inv-total">Total: Ksh 0.00</strong>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Create invoice</button>
+          </div>
+        </form>
+      </div>
     </div>
   </div>
 
@@ -1414,23 +1716,26 @@
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/js/api.js"></script>
-  <script src="/js/receipts.js"></script>
-  <script src="/js/nav.js"></script>
-  <script src="/js/socket.js"></script>
-  <script src="/js/settings.js"></script>
-  <script src="/js/tasks.js"></script>
-  <script src="/js/projectDetail.js"></script>
-  <script src="/js/community.js"></script>
-  <script src="/js/sales.js"></script>
-  <script src="/js/director.js"></script>
-  <script src="/js/developer.js"></script>
-  <script src="/js/finance.js"></script>
-  <script src="/js/hr.js"></script>
-  <script src="/js/pm.js"></script>
-  <script src="/js/adminInbox.js"></script>
-  <script src="/js/admin.js"></script>
-  <script src="/js/client.js"></script>
-  <script src="/js/shell.js"></script>
+  <script src="/js/api.js?v=20260815g"></script>
+  <script src="/js/receipts.js?v=20260815g"></script>
+  <script src="/js/nav.js?v=20260815g"></script>
+  <script src="/js/socket.js?v=20260815g"></script>
+  <script src="/js/settings.js?v=20260815g"></script>
+  <script src="/js/tasks.js?v=20260815g"></script>
+  <script src="/js/projectDetail.js?v=20260815g"></script>
+  <script src="/js/community.js?v=20260815g"></script>
+  <script src="/js/voiceReport.js?v=20260826a"></script>
+  <script src="/js/voiceForms.js?v=20260826a"></script>
+  <script src="/js/ops.js?v=20260826a"></script>
+  <script src="/js/sales.js?v=20260815g"></script>
+  <script src="/js/director.js?v=20260815g"></script>
+  <script src="/js/developer.js?v=20260815g"></script>
+  <script src="/js/finance.js?v=20260815h"></script>
+  <script src="/js/hr.js?v=20260815g"></script>
+  <script src="/js/pm.js?v=20260815g"></script>
+  <script src="/js/adminInbox.js?v=20260815g"></script>
+  <script src="/js/admin.js?v=20260815g"></script>
+  <script src="/js/client.js?v=20260815g"></script>
+  <script src="/js/shell.js?v=20260815g"></script>
 </body>
 </html>

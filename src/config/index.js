@@ -43,7 +43,8 @@ const config = {
     model:
       process.env.GROQ_MODEL && !looksLikeApiKey(process.env.GROQ_MODEL)
         ? process.env.GROQ_MODEL
-        : 'llama-3.1-8b-instant',
+        : 'qwen/qwen3.8-27b',
+    whisperModel: process.env.GROQ_WHISPER_MODEL || 'whisper-large-v3-turbo',
   },
   leadEmail: {
     apiUrl: process.env.LEAD_EMAIL_API_URL || '',

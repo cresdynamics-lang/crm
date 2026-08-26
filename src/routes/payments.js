@@ -129,6 +129,22 @@ router.get(
   })
 );
 
+/** Force-download payment receipt as PDF */
+router.get(
+  '/:id/receipt/file',
+  requirePermission('payments', 'view'),
+  asyncHandler(async (req, res) => {
+    const receipt = await paymentReceipt(req.params.id);
+    const { paymentReceiptPdf } = require('../services/pdfService');
+    const pdf = await paymentReceiptPdf(receipt);
+    const filename = `${String(receipt.documentNumber || 'payment-receipt').replace(/[^\w.\-]+/g, '_')}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(pdf);
+  })
+);
+
 router.post(
   '/:id/receipt/send',
   requirePermission('payments', 'create'),
@@ -144,6 +160,7 @@ router.post(
       to,
       subject: receipt.subject,
       body: receipt.text,
+      html: receipt.emailHtml || receipt.html,
       receiptType: 'payment',
       receiptId: receipt.id,
     });
@@ -182,6 +199,13 @@ router.post(
       if (!invoice) throw new AppError('Invoice not found', 404, 'NOT_FOUND');
 
       const clientRow = await ensureClientOnInvoice(tx, invoice, { client_id, client }, req.user.id);
+      if (!String(clientRow.email || '').trim()) {
+        throw new AppError(
+          'Client email is required before recording a payment — receipt must be emailed',
+          400,
+          'CLIENT_EMAIL_REQUIRED'
+        );
+      }
 
       const alreadyPaid = Number(invoice.amount_paid || 0);
       const total = Number(invoice.amount);
@@ -286,41 +310,83 @@ router.post(
 
     await queuePaymentSync(result.payment.id, result.payment.invoice_id);
 
-    // Email payment receipt from Cres Dynamics Finance
+    const clientEmail = String(result.client?.email || '').trim();
+
+    // Always email the payment receipt to the client (queue, with direct fallback)
+    let receiptEmailed = false;
+    let receiptEmailError = null;
     try {
-      const receipt = await paymentReceipt(result.payment.id);
-      if (result.client?.email) {
+      const receipt = await paymentReceipt(result.payment.id, { embedImages: true });
+      const html = receipt.emailHtml || receipt.html;
+      try {
         await queueReceiptEmail({
-          to: result.client.email,
+          to: clientEmail,
           subject: receipt.subject,
           body: receipt.text,
+          html,
           receiptType: 'payment',
           receiptId: receipt.id,
         });
+        receiptEmailed = true;
+      } catch (queueErr) {
+        console.warn('[payments] queue failed, sending receipt directly', queueErr.message);
+        const { sendWithFailover } = require('../services/emailService');
+        const { paymentReceiptPdf } = require('../services/pdfService');
+        const pdf = await paymentReceiptPdf(receipt);
+        await sendWithFailover({
+          to: clientEmail,
+          subject: receipt.subject,
+          body: receipt.text,
+          html,
+          attachments: [
+            {
+              filename: `${String(receipt.documentNumber || 'payment-receipt').replace(/[^\w.\-]+/g, '_')}.pdf`,
+              content: pdf,
+            },
+          ],
+          meta: {
+            type: 'receipt',
+            receiptType: 'payment',
+            receiptId: receipt.id,
+            fromRole: 'finance',
+          },
+        });
+        receiptEmailed = true;
       }
+      console.log('[payments] receipt emailed', {
+        paymentId: result.payment.id,
+        to: clientEmail,
+        outstanding: receipt.balance?.outstandingFormatted,
+      });
     } catch (err) {
-      console.warn('[payments] receipt email queue failed', err.message);
+      receiptEmailError = err.message;
+      console.error('[payments] receipt email FAILED', err.message);
     }
 
-    // Email residual balance invoice + due-date notice
-    if (result.residualInvoice && result.client?.email) {
-      const due = result.residualInvoice.due_date
-        ? new Date(result.residualInvoice.due_date).toLocaleDateString()
-        : 'see invoice';
-      await queueInvoiceEmail(result.residualInvoice.id, result.client.email, 'primary');
-      await queueReceiptEmail({
-        to: result.client.email,
-        subject: `Balance invoice ${result.residualInvoice.id.slice(0, 8)} — Cres Dynamics Finance`,
-        body:
-          `Hello ${result.client.name},\n\n` +
-          `We received your partial payment of ${result.debt.paid_now} (ref: ${result.debt.bank_reference}).\n` +
-          `A new invoice has been issued for the remaining balance of ${result.residualInvoice.amount}.\n` +
-          `Due date: ${due}.\n\n` +
-          `Please arrange payment by the due date.\n\n` +
-          `— Cres Dynamics Finance`,
-        receiptType: 'invoice',
-        receiptId: result.residualInvoice.id,
-      });
+    // Email residual balance invoice when funds / debt change
+    if (result.residualInvoice && clientEmail) {
+      try {
+        const { invoiceReceipt } = require('../services/receipts');
+        const balReceipt = await invoiceReceipt(result.residualInvoice.id);
+        await queueReceiptEmail({
+          to: clientEmail,
+          subject: balReceipt.subject,
+          body: balReceipt.text,
+          html: balReceipt.html,
+          receiptType: 'invoice',
+          receiptId: result.residualInvoice.id,
+        });
+        await query(`UPDATE invoices SET auto_sent_at = NOW(), updated_at = NOW() WHERE id = $1`, [
+          result.residualInvoice.id,
+        ]);
+      } catch (err) {
+        console.warn('[payments] balance invoice email failed', err.message);
+        try {
+          await queueInvoiceEmail(result.residualInvoice.id, clientEmail, 'primary');
+        } catch (_) {
+          /* already logged */
+        }
+      }
     }
 
     // Notify finance peers of debt update
@@ -361,7 +427,15 @@ router.post(
       },
     });
 
-    res.status(201).json({ ok: true, data: result });
+    res.status(201).json({
+      ok: true,
+      data: {
+        ...result,
+        receipt_emailed: receiptEmailed,
+        receipt_to: clientEmail,
+        receipt_email_error: receiptEmailError,
+      },
+    });
   })
 );
 

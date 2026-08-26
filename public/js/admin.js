@@ -19,7 +19,7 @@ const CresAdmin = (() => {
   function fmtMoney(n) {
     const num = Number(n);
     if (Number.isNaN(num)) return '-';
-    return num.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+    return num.toLocaleString('en-KE', { style: 'currency', currency: 'KES' });
   }
 
   function statusPill(s) {
@@ -494,7 +494,7 @@ const CresAdmin = (() => {
         <div class="settings-section">
           <h3>Expense approval</h3>
           <form id="admin-expense-approval" class="form-grid">
-            <div><label>Threshold (USD)</label>
+            <div><label>Threshold (Ksh)</label>
               <input name="threshold" type="number" min="0" step="1"
                 value="${esc(s.expense_approval?.threshold ?? 500)}" /></div>
             <div><label>Require approval above threshold</label>

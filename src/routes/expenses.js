@@ -348,6 +348,33 @@ router.get(
   })
 );
 
+router.get(
+  '/:id/receipt/file',
+  requirePermission('expenses', 'view'),
+  asyncHandler(async (req, res) => {
+    const { rows } = await query(`SELECT approval_status FROM expenses WHERE id = $1`, [
+      req.params.id,
+    ]);
+    if (!rows[0]) throw new AppError('Expense not found', 404, 'NOT_FOUND');
+    if (rows[0].approval_status !== 'approved') {
+      throw new AppError(
+        'Receipt available only after Admin approval (transaction unlocked)',
+        409,
+        'NOT_APPROVED'
+      );
+    }
+    const { expenseReceipt } = require('../services/receipts');
+    const { expenseReceiptPdf } = require('../services/pdfService');
+    const receipt = await expenseReceipt(req.params.id);
+    const pdf = await expenseReceiptPdf(receipt);
+    const filename = `${String(receipt.documentNumber || 'expense-receipt').replace(/[^\w.\-]+/g, '_')}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(pdf);
+  })
+);
+
 router.post(
   '/:id/receipt/send',
   requirePermission('expenses', 'view'),

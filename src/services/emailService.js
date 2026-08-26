@@ -37,7 +37,22 @@ function resolveReplyTo(meta = {}) {
   return config.email.resendReplyTo || undefined;
 }
 
-async function sendViaResend({ to, subject, body, html, from, replyTo, cc, meta }) {
+/** Normalize attachments to Resend's { filename, content(base64) } shape. */
+function normalizeAttachments(attachments) {
+  if (!Array.isArray(attachments)) return undefined;
+  const out = attachments
+    .filter(Boolean)
+    .map((a) => ({
+      filename: String(a.filename || 'attachment.pdf'),
+      content: Buffer.isBuffer(a.content)
+        ? a.content.toString('base64')
+        : String(a.content || ''),
+    }))
+    .filter((a) => a.content.length > 0);
+  return out.length ? out : undefined;
+}
+
+async function sendViaResend({ to, subject, body, html, from, replyTo, cc, meta, attachments }) {
   const key = config.email.resendApiKey;
   if (!key) throw new Error('RESEND_API_KEY is not configured');
 
@@ -51,6 +66,11 @@ async function sendViaResend({ to, subject, body, html, from, replyTo, cc, meta 
   if (replyTo) payload.reply_to = replyTo;
   if (cc?.length) payload.cc = cc;
 
+  const files = normalizeAttachments(attachments);
+  if (files) {
+    payload.attachments = files;
+  }
+
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -63,7 +83,11 @@ async function sendViaResend({ to, subject, body, html, from, replyTo, cc, meta 
   if (!res.ok) {
     throw new Error(data?.message || `Resend failed (${res.status})`);
   }
-  console.log(`[email:resend] from=${payload.from} → ${payload.to.join(', ')} | ${subject}`);
+  console.log(
+    `[email:resend] from=${payload.from} → ${payload.to.join(', ')} | ${subject}${
+      files ? ` | +${files.length} attachment(s): ${files.map((f) => f.filename).join(', ')}` : ''
+    }`
+  );
   return {
     ok: true,
     provider: 'resend',
@@ -75,9 +99,9 @@ async function sendViaResend({ to, subject, body, html, from, replyTo, cc, meta 
   };
 }
 
-async function sendViaProvider(provider, { to, subject, body, html, from, replyTo, cc, meta }) {
+async function sendViaProvider(provider, { to, subject, body, html, from, replyTo, cc, meta, attachments }) {
   if (config.email.mailer === 'resend' || provider === 'resend') {
-    return sendViaResend({ to, subject, body, html, from, replyTo, cc, meta });
+    return sendViaResend({ to, subject, body, html, from, replyTo, cc, meta, attachments });
   }
   console.log(`[email:${provider}] from=${from || '-'} → ${to} | ${subject}`);
   if (provider === 'force-fail') {
@@ -91,10 +115,11 @@ async function sendViaProvider(provider, { to, subject, body, html, from, replyT
     from: from || null,
     subject,
     meta,
+    attachments: (attachments || []).map((a) => a.filename),
   };
 }
 
-async function sendWithFailover({ to, subject, body, html, meta = {}, from, replyTo, cc } = {}) {
+async function sendWithFailover({ to, subject, body, html, meta = {}, from, replyTo, cc, attachments } = {}) {
   const fromAddr = from || (await resolveFromAddress(meta));
   const reply = replyTo || resolveReplyTo(meta);
   const primary = config.email.mailer === 'resend' ? 'resend' : config.email.primary;
@@ -109,6 +134,7 @@ async function sendWithFailover({ to, subject, body, html, meta = {}, from, repl
       from: fromAddr,
       replyTo: reply,
       cc,
+      attachments,
       meta,
     });
   } catch (primaryErr) {
@@ -122,6 +148,7 @@ async function sendWithFailover({ to, subject, body, html, meta = {}, from, repl
         from: fromAddr,
         replyTo: reply,
         cc,
+        attachments,
         meta: { ...meta, failoverFrom: primary },
       });
     } catch (fallbackErr) {

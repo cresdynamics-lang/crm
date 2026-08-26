@@ -1,5 +1,6 @@
 /**
  * Append-only action audit for meaningful writes across the system.
+ * Extended with queryAudit for the Data Pool / RAG system.
  */
 const { query } = require('../config/database');
 
@@ -36,4 +37,31 @@ async function recordAction({
   }
 }
 
-module.exports = { recordAction };
+/**
+ * Query audit log entries with filters.
+ */
+async function queryAudit({ resourceType, resourceId, actorId, action, limit = 100, offset = 0 }) {
+  const params = [];
+  const clauses = [];
+
+  if (resourceType) { params.push(resourceType); clauses.push(`resource_type = $${params.length}`); }
+  if (resourceId) { params.push(resourceId); clauses.push(`resource_id = $${params.length}`); }
+  if (actorId) { params.push(actorId); clauses.push(`actor_id = $${params.length}`); }
+  if (action) { params.push(action); clauses.push(`action = $${params.length}`); }
+
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+  params.push(limit, offset);
+
+  const { rows } = await query(
+    `SELECT a.*, u.name AS actor_name, u.avatar_url AS actor_avatar_url
+     FROM action_audit_log a
+     LEFT JOIN users u ON u.id = a.actor_id
+     ${where}
+     ORDER BY a.created_at DESC
+     LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params
+  );
+  return rows;
+}
+
+module.exports = { recordAction, queryAudit };

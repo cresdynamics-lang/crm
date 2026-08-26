@@ -49,11 +49,12 @@ async function queueOutboundClientEmail({ emailId, to, subject, body }) {
   });
 }
 
-async function queueReceiptEmail({ to, subject, body, receiptType, receiptId }) {
+async function queueReceiptEmail({ to, subject, body, html, receiptType, receiptId }) {
   return enqueue('email', 'receipt.send', {
     to,
     subject,
     body,
+    html,
     receiptType,
     receiptId,
   });

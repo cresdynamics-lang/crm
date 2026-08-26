@@ -30,6 +30,7 @@
     "morgan": "^1.10.0",
     "multer": "^2.2.0",
     "pdf-parse": "^2.4.5",
+    "pdfkit": "^0.20.1",
     "pg": "^8.13.1",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",

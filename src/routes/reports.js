@@ -1,10 +1,13 @@
 const express = require('express');
+const multer = require('multer');
 const { query } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/rbac');
 const { asyncHandler, AppError } = require('../lib/errors');
 const { upload } = require('../middleware/upload');
 const { queueNotification } = require('../queues/jobs');
+const { transcribeAudio, parseReportFromTranscript } = require('../services/voiceReports');
+const { recordAction } = require('../services/actionAudit');
 
 const router = express.Router();
 router.use(authenticate);
@@ -127,6 +130,13 @@ router.post(
     const project_id = req.body?.project_id || null;
     if (!content) throw new AppError('content required', 400, 'VALIDATION');
 
+    const blockers_text = req.body?.blockers_text || null;
+    const needs_attention = req.body?.needs_attention || null;
+    const hard_today = req.body?.hard_today || null;
+    const easy_today = req.body?.easy_today || null;
+    const happiness = req.body?.happiness || null;
+    const concerns = req.body?.concerns || null;
+
     const files = (req.files || []).map((f) => ({
       path: `/uploads/reports/${f.filename}`,
       originalName: f.originalname,
@@ -149,33 +159,140 @@ router.post(
     const routing =
       ['sales', 'developer'].includes(req.user.role) ? 'pending_pm' : 'pm_reviewed';
 
+    // Resolve assigned director for targeted notification
+    let assignedDirectorId = null;
+    try {
+      const { rows: dirRows } = await query(
+        `SELECT assigned_director_id FROM users WHERE id = $1`,
+        [req.user.id]
+      );
+      assignedDirectorId = dirRows[0]?.assigned_director_id || null;
+    } catch { /* column may not exist yet */ }
+
     const { rows } = await query(
-      `INSERT INTO daily_reports (user_id, project_id, content, attachments, routing_status)
-       VALUES ($1, $2, $3, $4::jsonb, $5)
+      `INSERT INTO daily_reports
+        (user_id, project_id, content, attachments, routing_status,
+         work_done, blockers_text, needs_attention, hard_today, easy_today, happiness, concerns,
+         assigned_director_id)
+       VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING *`,
-      [req.user.id, project_id || null, content, JSON.stringify(attachments || []), routing]
+      [
+        req.user.id, project_id || null, content, JSON.stringify(attachments || []), routing,
+        content, blockers_text, needs_attention, hard_today, easy_today, happiness, concerns,
+        assignedDirectorId,
+      ]
     );
 
-    const notifyRoles =
-      routing === 'pending_pm'
-        ? ['pm', 'admin']
-        : ['director', 'admin'];
-
-    const { rows: hubs } = await query(
-      `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
-       WHERE r.name = ANY($1::text[]) AND u.status = 'active'`,
-      [notifyRoles]
-    );
-    for (const h of hubs) {
-      await queueNotification({
-        userId: h.id,
-        type: 'daily_report',
-        content: `Daily report from ${req.user.name}`,
-        meta: { reportId: rows[0].id, userId: req.user.id, routing },
-      });
+    // Notify PM + Admin (if sales/dev), or assigned Director specifically
+    if (routing === 'pending_pm') {
+      const { rows: hubs } = await query(
+        `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
+         WHERE r.name IN ('pm', 'admin') AND u.status = 'active'`
+      );
+      for (const h of hubs) {
+        await queueNotification({
+          userId: h.id,
+          type: 'daily_report',
+          content: `Daily report from ${req.user.name}`,
+          meta: { reportId: rows[0].id, userId: req.user.id, routing },
+        });
+      }
+    } else {
+      // Notify assigned director if set, otherwise all directors + admin
+      if (assignedDirectorId) {
+        await queueNotification({
+          userId: assignedDirectorId,
+          type: 'daily_report',
+          content: `Daily report from ${req.user.name}`,
+          meta: { reportId: rows[0].id, userId: req.user.id, routing },
+        });
+      } else {
+        const { rows: dirs } = await query(
+          `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
+           WHERE r.name IN ('director', 'admin') AND u.status = 'active'`
+        );
+        for (const d of dirs) {
+          await queueNotification({
+            userId: d.id,
+            type: 'daily_report',
+            content: `Daily report from ${req.user.name}`,
+            meta: { reportId: rows[0].id, userId: req.user.id, routing },
+          });
+        }
+      }
     }
 
+    // Record in audit trail (RAG data pool)
+    await recordAction({
+      actorId: req.user.id,
+      actorRole: req.user.role,
+      action: 'submitted',
+      resourceType: 'report',
+      resourceId: rows[0].id,
+      summary: `${req.user.name} submitted daily report: ${(content || '').slice(0, 80)}`,
+      after: { routing, project_id, content },
+    });
+
     res.status(201).json({ ok: true, data: rows[0] });
+  })
+);
+
+/**
+ * Voice daily report: transcribe audio + parse into structured report.
+ */
+const memoryUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+
+router.post(
+  '/voice-capture',
+  requirePermission('reports', 'create'),
+  memoryUpload.single('audio'),
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw new AppError('No audio file', 400, 'VALIDATION');
+
+    const { text: transcript, model: whisperModel } = await transcribeAudio({
+      buffer: req.file.buffer,
+      filename: req.file.originalname || 'recording.webm',
+      mimetype: req.file.mimetype || 'audio/webm',
+    });
+
+    // Fetch user's projects for DB-aligned project matching
+    let projects = [];
+    try {
+      if (['developer'].includes(req.user.role)) {
+        const { rows } = await query(
+          `SELECT p.id, p.name FROM projects p
+           JOIN assignments a ON a.project_id = p.id
+           WHERE a.user_id = $1 AND p.status != 'deleted'`,
+          [req.user.id]
+        );
+        projects = rows;
+      } else {
+        const { rows } = await query(
+          `SELECT id, name FROM projects WHERE status != 'deleted' ORDER BY name`
+        );
+        projects = rows;
+      }
+    } catch { /* proceed without projects */ }
+
+    const report = await parseReportFromTranscript(transcript, projects);
+
+    res.json({
+      ok: true,
+      data: {
+        transcript,
+        whisper_model: whisperModel,
+        content: report.content,
+        done: report.done,
+        blockers: report.blockers,
+        needs_attention: report.needs_attention,
+        hard_today: report.hard_today,
+        easy_today: report.easy_today,
+        happiness: report.happiness,
+        concerns: report.concerns,
+        project_id: report.project_id,
+        project_name: report.project_name,
+      },
+    });
   })
 );
 

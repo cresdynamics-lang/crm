@@ -161,7 +161,7 @@ router.get(
     }
 
     const { rows } = await query(
-      `SELECT p.id, p.name, p.status, p.value_amount, p.created_at, p.updated_at,
+      `SELECT p.id, p.name, p.status, p.value_amount, p.client_id, p.created_at, p.updated_at,
               c.name AS client_name, c.business_name AS client_business,
               i.id AS invoice_id, i.amount AS invoice_amount, i.amount_paid,
               i.status AS invoice_status, i.due_date,
@@ -190,6 +190,7 @@ router.get(
         id: r.id,
         name: r.name,
         status: r.status,
+        client_id: r.client_id,
         value_amount: r.value_amount != null ? Number(r.value_amount) : null,
         client_name: r.client_name,
         client_business: r.client_business,

@@ -23,7 +23,7 @@ const CresFinance = (() => {
   function fmtMoney(n) {
     const num = Number(n);
     if (Number.isNaN(num)) return '-';
-    return num.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+    return num.toLocaleString('en-KE', { style: 'currency', currency: 'KES' });
   }
 
   function statusPill(s) {
@@ -185,12 +185,13 @@ const CresFinance = (() => {
     const res = await CresAPI.request(`/api/invoices?${params}`);
     const tbody = document.getElementById('finance-invoices-tbody');
     if (!res.data.length) {
-      tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No invoices match.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-state">No invoices match.</td></tr>`;
       return;
     }
     tbody.innerHTML = res.data
       .map(
         (i) => `<tr data-id="${i.id}">
+          <td>${esc(i.invoice_number || i.id.slice(0, 8))}</td>
           <td>${esc(i.client_name || i.client_business || '-')}</td>
           <td>${esc(i.project_name || '-')}</td>
           <td>${fmtMoney(i.amount)}</td>
@@ -210,7 +211,9 @@ const CresFinance = (() => {
     const res = await CresAPI.request(`/api/invoices/${id}`);
     const { invoice: i, payments, emailLog, deadLetters, followups } = res.data;
     const balance = invoiceBalance(i);
-    document.getElementById('fin-inv-title').textContent = `Invoice ${i.id.slice(0, 8)}…`;
+    document.getElementById('fin-inv-title').textContent = `Invoice ${
+      i.invoice_number || i.id.slice(0, 8)
+    }`;
     document.getElementById('fin-inv-body').innerHTML = `
       ${
         i.status === 'overdue'
@@ -221,27 +224,27 @@ const CresFinance = (() => {
           : ''
       }
       <div class="form-grid" style="margin-bottom:14px;">
+        <div><strong>Number</strong><div>${esc(i.invoice_number || '-')}</div></div>
         <div><strong>Client</strong><div>${esc(i.client_name || '-')} ${i.client_email ? `&lt;${esc(i.client_email)}&gt;` : ''}</div></div>
         <div><strong>Project</strong><div>${esc(i.project_name || '-')}</div></div>
         <div><strong>Amount</strong><div>${fmtMoney(i.amount)}</div></div>
         <div><strong>Paid</strong><div>${fmtMoney(i.amount_paid || 0)}</div></div>
         <div><strong>Balance</strong><div>${fmtMoney(balance)}</div></div>
+        <div><strong>Issue date</strong><div>${i.issue_date ? new Date(i.issue_date).toLocaleDateString() : fmtDate(i.created_at)}</div></div>
         <div><strong>Due date</strong><div>${i.due_date ? new Date(i.due_date).toLocaleDateString() : '-'}</div></div>
         <div><strong>Status</strong><div>${statusPill(i.status)}</div></div>
-        <div><strong>Created</strong><div>${fmtDate(i.created_at)}</div></div>
         <div><strong>Auto-sent</strong><div>${i.auto_sent_at ? fmtDate(i.auto_sent_at) : 'Never'}</div></div>
       </div>
       <div id="fin-inv-flash" class="flash"></div>
       <div class="form-actions" style="margin-bottom:16px;">
-        <button type="button" class="btn btn-primary" id="btn-resend-invoice">Resend email</button>
-        <button type="button" class="btn btn-ghost" id="btn-print-invoice-receipt">Print invoice</button>
-        <button type="button" class="btn btn-ghost" id="btn-send-invoice-receipt">Email invoice</button>
+        <button type="button" class="btn btn-primary" id="btn-download-invoice-receipt">Download invoice</button>
         ${
           ['overdue', 'issued', 'partially_paid'].includes(i.status)
             ? `<a href="#/flag" class="btn btn-ghost">Flag follow-up</a>`
             : ''
         }
       </div>
+      <p class="meta" style="margin:0 0 14px;">Email is sent automatically when the invoice is created or when payments change project balances.</p>
       <h4 style="margin:0 0 8px;font-size:0.9rem;">Send history</h4>
       <ul class="engagement-list" id="fin-email-log"></ul>
       ${
@@ -263,8 +266,7 @@ const CresFinance = (() => {
                   <div class="meta">${esc(p.recorded_by_name)} · ${fmtDate(p.paid_at)}</div>
                   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                     <span>${fmtMoney(p.amount)}</span>
-                    <button type="button" class="btn btn-ghost btn-sm" data-print-pay="${esc(p.id)}" style="padding:4px 8px;font-size:0.75rem;">Print</button>
-                    <button type="button" class="btn btn-ghost btn-sm" data-send-pay="${esc(p.id)}" style="padding:4px 8px;font-size:0.75rem;">Send</button>
+                    <button type="button" class="btn btn-ghost btn-sm" data-download-pay="${esc(p.id)}" style="padding:4px 8px;font-size:0.75rem;">Download</button>
                   </div>
                 </li>`
               )
@@ -292,50 +294,15 @@ const CresFinance = (() => {
       : `<li class="empty-state">No send attempts logged.</li>`;
 
     document.getElementById('finance-invoice-modal').classList.add('open');
-    document.getElementById('btn-resend-invoice').onclick = async () => {
-      try {
-        await CresAPI.request(`/api/invoices/${id}/resend`, {
-          method: 'POST',
-          idempotencyKey: `resend-${id}-${Date.now()}`,
-        });
-        flash(document.getElementById('fin-inv-flash'), 'Resend queued');
-        await openInvoice(id);
-      } catch (err) {
-        flash(document.getElementById('fin-inv-flash'), err.message, false);
-      }
-    };
-    document.getElementById('btn-print-invoice-receipt').onclick = () =>
-      CresReceipts.fetchAndPrint(`/api/invoices/${id}/receipt`).catch((err) =>
+    document.getElementById('btn-download-invoice-receipt').onclick = () =>
+      CresReceipts.downloadFile(`/api/invoices/${id}/receipt`).catch((err) =>
         flash(document.getElementById('fin-inv-flash'), err.message, false)
       );
-    document.getElementById('btn-send-invoice-receipt').onclick = async () => {
-      try {
-        const to = i.client_email || prompt('Send invoice receipt to email:');
-        if (!to) return;
-        const res = await CresReceipts.send(`/api/invoices/${id}/receipt/send`, to);
-        flash(document.getElementById('fin-inv-flash'), `Receipt queued to ${res.data.to}`);
-        await openInvoice(id);
-      } catch (err) {
-        flash(document.getElementById('fin-inv-flash'), err.message, false);
-      }
-    };
-    document.querySelectorAll('[data-print-pay]').forEach((btn) => {
+    document.querySelectorAll('[data-download-pay]').forEach((btn) => {
       btn.onclick = () =>
-        CresReceipts.fetchAndPrint(`/api/payments/${btn.dataset.printPay}/receipt`).catch((err) =>
+        CresReceipts.downloadFile(`/api/payments/${btn.dataset.downloadPay}/receipt`).catch((err) =>
           flash(document.getElementById('fin-inv-flash'), err.message, false)
         );
-    });
-    document.querySelectorAll('[data-send-pay]').forEach((btn) => {
-      btn.onclick = async () => {
-        try {
-          const to = i.client_email || prompt('Send payment receipt to email:');
-          if (!to) return;
-          const res = await CresReceipts.send(`/api/payments/${btn.dataset.sendPay}/receipt/send`, to);
-          flash(document.getElementById('fin-inv-flash'), `Payment receipt queued to ${res.data.to}`);
-        } catch (err) {
-          flash(document.getElementById('fin-inv-flash'), err.message, false);
-        }
-      };
     });
   }
 
@@ -482,32 +449,19 @@ const CresFinance = (() => {
               <td>${esc(p.bank_reference || '-')}</td>
               <td>${fmtDate(p.paid_at)}</td>
               <td>
-                <button type="button" class="btn btn-ghost btn-sm" data-print-pay="${esc(p.id)}" style="padding:4px 8px;font-size:0.75rem;">Print</button>
-                <button type="button" class="btn btn-ghost btn-sm" data-send-pay="${esc(p.id)}" data-email="${esc(p.client_email || '')}" style="padding:4px 8px;font-size:0.75rem;">Send</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-download-pay="${esc(p.id)}" style="padding:4px 8px;font-size:0.75rem;">Download</button>
               </td>
             </tr>`
           )
           .join('')
       : `<tr><td colspan="5" class="empty-state">No payments yet.</td></tr>`;
 
-    tbody.querySelectorAll('[data-print-pay]').forEach((btn) => {
+    tbody.querySelectorAll('[data-download-pay]').forEach((btn) => {
       btn.addEventListener('click', () =>
-        CresReceipts.fetchAndPrint(`/api/payments/${btn.dataset.printPay}/receipt`).catch((err) =>
+        CresReceipts.downloadFile(`/api/payments/${btn.dataset.downloadPay}/receipt`).catch((err) =>
           flash(document.getElementById('payments-flash'), err.message, false)
         )
       );
-    });
-    tbody.querySelectorAll('[data-send-pay]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        try {
-          const to = btn.dataset.email || prompt('Send payment receipt to email:');
-          if (!to) return;
-          const res = await CresReceipts.send(`/api/payments/${btn.dataset.sendPay}/receipt/send`, to);
-          flash(document.getElementById('payments-flash'), `Receipt queued to ${res.data.to}`);
-        } catch (err) {
-          flash(document.getElementById('payments-flash'), err.message, false);
-        }
-      });
     });
   }
 
@@ -562,21 +516,26 @@ const CresFinance = (() => {
     const data = res.data || {};
     const payId = data.payment?.id;
     let msg = `Payment recorded. Debt remaining: ${fmtMoney(data.debt?.remaining || 0)}.`;
+    if (data.receipt_emailed) {
+      msg += ` Receipt emailed to ${data.receipt_to}.`;
+    } else if (data.receipt_email_error) {
+      msg += ` WARNING: receipt email failed (${data.receipt_email_error}).`;
+    }
     if (data.residualInvoice) {
       msg += ` New balance invoice ${fmtMoney(data.residualInvoice.amount)} issued and emailed (due ${data.residualInvoice.due_date ? new Date(data.residualInvoice.due_date).toLocaleDateString() : '-'}).`;
-    } else {
-      msg += ' Invoice paid in full. Receipt emailed to client.';
+    } else if (data.receipt_emailed) {
+      msg += ' Invoice paid in full.';
     }
-    flash(document.getElementById('payments-flash'), msg);
+    flash(document.getElementById('payments-flash'), msg, data.receipt_emailed !== false);
     e.target.reset();
     document.getElementById('pay-client-card').hidden = true;
     document.getElementById('pay-bank-card').hidden = true;
     await mountPayments();
     if (payId && typeof CresReceipts !== 'undefined') {
       try {
-        await CresReceipts.fetchAndPrint(`/api/payments/${payId}/receipt`);
+        await CresReceipts.downloadFile(`/api/payments/${payId}/receipt`);
       } catch {
-        // pop-up blocked
+        /* download optional after record — email already queued server-side */
       }
     }
   }
@@ -678,7 +637,7 @@ const CresFinance = (() => {
               actions = `<button type="button" class="btn btn-primary btn-sm" data-adm-exp="${esc(x.id)}">Final approve</button>
                 <button type="button" class="btn btn-ghost btn-sm" data-rej-exp="${esc(x.id)}">Reject</button>`;
             } else if (st === 'approved' && ['finance', 'admin'].includes(me?.role)) {
-              actions = `<button type="button" class="btn btn-ghost btn-sm" data-print-exp="${esc(x.id)}">Print</button>
+              actions = `<button type="button" class="btn btn-ghost btn-sm" data-print-exp="${esc(x.id)}">Download</button>
                 <button type="button" class="btn btn-ghost btn-sm" data-send-exp="${esc(x.id)}">Send</button>`;
             } else {
               actions = '<span class="meta">—</span>';
@@ -1095,7 +1054,7 @@ const CresFinance = (() => {
 
   function printFinReportPdf(d) {
     const money = (n) =>
-      Number(n || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+      Number(n || 0).toLocaleString('en-KE', { style: 'currency', currency: 'KES' });
     const rows = (d.ledger || [])
       .map(
         (r) => `<tr>
@@ -1155,7 +1114,7 @@ const CresFinance = (() => {
   <p class="foot">Cres Dynamics Finance · Outstanding invoices ${esc(money(d.summary.outstanding_invoices))} · Use your browser’s Print → Save as PDF.</p>
   <script>window.onload=function(){window.print();}</script>
 </body></html>`;
-    const w = window.open('', '_blank', 'noopener,noreferrer,width=960,height=1000');
+    const w = window.open('', '_blank', 'width=960,height=1000');
     if (!w) throw new Error('Pop-up blocked — allow pop-ups to download PDF');
     w.document.open();
     w.document.write(html);
@@ -1325,6 +1284,203 @@ const CresFinance = (() => {
         await mountExpenses();
       } catch (err) {
         alert(err.message);
+      }
+    });
+
+    let newInvClients = [];
+    let newInvProjects = [];
+
+    function newInvRecalc() {
+      let total = 0;
+      document.querySelectorAll('#new-inv-items tr').forEach((tr) => {
+        const qty = Number(tr.querySelector('[data-qty]')?.value || 0);
+        const unit = Number(tr.querySelector('[data-unit]')?.value || 0);
+        const amt = Math.round(qty * unit * 100) / 100;
+        total += amt;
+        const cell = tr.querySelector('[data-amt]');
+        if (cell) cell.textContent = fmtMoney(amt);
+      });
+      const label = document.getElementById('new-inv-total');
+      if (label) label.textContent = `Total: ${fmtMoney(total)}`;
+    }
+
+    function addNewInvItem(prefill = {}) {
+      const tbody = document.getElementById('new-inv-items');
+      if (!tbody) return;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input data-desc type="text" required placeholder="Description" value="${esc(
+          prefill.description || ''
+        )}" style="width:100%;" /></td>
+        <td><input data-qty type="number" min="0.01" step="0.01" value="${esc(
+          prefill.qty || 1
+        )}" style="width:80px;" required /></td>
+        <td><input data-unit type="number" min="0" step="0.01" value="${esc(
+          prefill.unit_price || ''
+        )}" style="width:120px;" required /></td>
+        <td data-amt>${fmtMoney(0)}</td>
+        <td><button type="button" class="btn btn-ghost btn-sm" data-remove>Remove</button></td>`;
+      tbody.appendChild(tr);
+      tr.querySelectorAll('input').forEach((inp) => inp.addEventListener('input', newInvRecalc));
+      tr.querySelector('[data-remove]')?.addEventListener('click', () => {
+        tr.remove();
+        newInvRecalc();
+      });
+      newInvRecalc();
+    }
+
+    function fillNewInvClients(filter = '') {
+      const sel = document.getElementById('new-inv-client');
+      if (!sel) return;
+      const q = filter.trim().toLowerCase();
+      const list = newInvClients.filter(
+        (c) =>
+          !q ||
+          (c.name || '').toLowerCase().includes(q) ||
+          (c.business_name || '').toLowerCase().includes(q) ||
+          (c.email || '').toLowerCase().includes(q)
+      );
+      const prev = sel.value;
+      sel.innerHTML =
+        `<option value="">Select client</option>` +
+        list
+          .map(
+            (c) =>
+              `<option value="${esc(c.id)}">${esc(c.business_name || c.name)}${
+                c.email ? ` — ${esc(c.email)}` : ''
+              }</option>`
+          )
+          .join('');
+      if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
+    }
+
+    function fillNewInvProjects(clientId) {
+      const sel = document.getElementById('new-inv-project');
+      if (!sel) return;
+      const list = newInvProjects.filter((p) => !clientId || p.client_id === clientId);
+      sel.innerHTML =
+        `<option value="">Select project</option>` +
+        list
+          .map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`)
+          .join('');
+    }
+
+    function showNewInvContact(clientId) {
+      const card = document.getElementById('new-inv-contact');
+      const body = document.getElementById('new-inv-contact-body');
+      const hint = document.getElementById('new-inv-email-hint');
+      if (!clientId) {
+        if (card) card.hidden = true;
+        if (body) body.innerHTML = '';
+        if (hint) hint.textContent = 'Select a client to email the invoice.';
+        return;
+      }
+      const c = newInvClients.find((x) => x.id === clientId);
+      if (!c) {
+        if (card) card.hidden = true;
+        return;
+      }
+      if (card) card.hidden = false;
+      if (body) {
+        body.innerHTML = `
+          <div><strong>Name:</strong> ${esc(c.name || '—')}</div>
+          <div><strong>Business:</strong> ${esc(c.business_name || '—')}</div>
+          <div><strong>Email:</strong> ${esc(c.email || '—')}</div>
+          <div><strong>Phone:</strong> ${esc(c.phone || '—')}</div>`;
+      }
+      if (hint) {
+        hint.textContent = c.email
+          ? `Will download and email to ${c.email}`
+          : 'Client has no email — add email on the client record before creating.';
+        hint.style.color = c.email ? '' : '#c0392b';
+      }
+    }
+
+    async function openNewInvoiceModal() {
+      const modal = document.getElementById('new-invoice-modal');
+      if (!modal) return;
+      const [clients, projects] = await Promise.all([
+        CresAPI.request('/api/clients'),
+        // Finance is blocked from /api/projects (ops list) — use money view
+        CresAPI.request('/api/finance/projects'),
+      ]);
+      newInvClients = clients.data || [];
+      newInvProjects = (projects.data || []).map((p) => ({
+        id: p.id,
+        name: p.name,
+        client_id: p.client_id,
+        client_name: p.client_name || p.client_business || '',
+      }));
+      fillNewInvClients();
+      fillNewInvProjects('');
+      showNewInvContact('');
+      document.getElementById('new-inv-date').value = new Date().toISOString().slice(0, 10);
+      document.getElementById('new-inv-items').innerHTML = '';
+      addNewInvItem();
+      modal.classList.add('open');
+    }
+
+    document.getElementById('btn-new-invoice')?.addEventListener('click', () =>
+      openNewInvoiceModal().catch((err) => alert(err.message))
+    );
+    document.getElementById('btn-new-inv-add-item')?.addEventListener('click', () => addNewInvItem());
+    document.getElementById('new-inv-client-filter')?.addEventListener('input', (e) => {
+      fillNewInvClients(e.target.value);
+      showNewInvContact(document.getElementById('new-inv-client')?.value || '');
+    });
+    document.getElementById('new-inv-client')?.addEventListener('change', (e) => {
+      fillNewInvProjects(e.target.value);
+      showNewInvContact(e.target.value);
+    });
+    document.getElementById('new-invoice-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const flashEl = document.getElementById('new-inv-flash');
+      const client_id = document.getElementById('new-inv-client').value;
+      const project_id = document.getElementById('new-inv-project').value;
+      const issue_date = document.getElementById('new-inv-date').value;
+      const client = newInvClients.find((c) => c.id === client_id);
+      if (!client?.email?.trim()) {
+        flash(flashEl, 'Selected client has no email — update the client record first', false);
+        return;
+      }
+      const items = [...document.querySelectorAll('#new-inv-items tr')].map((tr) => ({
+        description: tr.querySelector('[data-desc]')?.value?.trim(),
+        qty: Number(tr.querySelector('[data-qty]')?.value),
+        unit_price: Number(tr.querySelector('[data-unit]')?.value),
+      }));
+      if (!items.length || items.some((i) => !i.description || !(i.qty > 0))) {
+        flash(flashEl, 'Add valid line items', false);
+        return;
+      }
+      try {
+        const res = await CresAPI.request('/api/invoices', {
+          method: 'POST',
+          body: {
+            client_id,
+            project_id,
+            issue_date,
+            items,
+            send_email: true,
+          },
+          idempotencyKey: `inv-create-${Date.now()}`,
+        });
+        document.getElementById('new-invoice-modal')?.classList.remove('open');
+        const invId = res.data?.invoice?.id;
+        if (invId) {
+          try {
+            await CresReceipts.downloadFile(`/api/invoices/${invId}/receipt`);
+          } catch (_) {
+            /* download best-effort — email already queued on create */
+          }
+        }
+        flash(
+          document.getElementById('fin-inv-list-flash'),
+          `Invoice ${res.data.invoice_number} created · downloaded · emailed to ${client.email}`
+        );
+        await mountInvoices();
+        if (invId) await openInvoice(invId);
+      } catch (err) {
+        flash(flashEl, err.message, false);
       }
     });
 

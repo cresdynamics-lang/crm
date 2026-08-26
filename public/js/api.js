@@ -126,7 +126,7 @@ const CresAPI = (() => {
     return { user, permissions: data.data.permissions };
   }
 
-  /** Authenticated blob download (CSV exports, etc.) */
+  /** Authenticated blob download (CSV exports, invoice/receipt files, etc.) */
   async function download(path, filename) {
     const headers = {};
     const token = getAccess();
@@ -144,15 +144,29 @@ const CresAPI = (() => {
       const data = await res.json().catch(() => ({}));
       throw new Error(data?.error?.message || `Download failed (${res.status})`);
     }
-    const blob = await res.blob();
+
+    // Force a real Save download. text/html blobs often open in a tab (looks like print).
+    const buf = await res.arrayBuffer();
+    const blob = new Blob([buf], { type: 'application/octet-stream' });
+
+    let name = filename || path.split('/').pop() || 'download';
+    const cd = res.headers.get('Content-Disposition') || '';
+    const m =
+      /filename\*=UTF-8''([^;]+)|filename="([^"]+)"|filename=([^;]+)/i.exec(cd);
+    if (m) {
+      name = decodeURIComponent((m[1] || m[2] || m[3] || name).trim());
+    }
+
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = filename || path.split('/').pop() || 'download.csv';
+    a.download = name;
+    a.rel = 'noopener';
+    a.style.display = 'none';
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
   return {

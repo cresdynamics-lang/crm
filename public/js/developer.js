@@ -540,6 +540,18 @@ const CresDeveloper = (() => {
         e.stopImmediatePropagation();
         const fd = new FormData();
         fd.append('content', document.getElementById('report-content').value.trim());
+        const blockers = document.getElementById('report-blockers')?.value.trim();
+        const attention = document.getElementById('report-attention')?.value.trim();
+        const hard = document.getElementById('report-hard')?.value.trim();
+        const easy = document.getElementById('report-easy')?.value.trim();
+        const happy = document.getElementById('report-happiness')?.value.trim();
+        const concerns = document.getElementById('report-concerns')?.value.trim();
+        if (blockers) fd.append('blockers_text', blockers);
+        if (attention) fd.append('needs_attention', attention);
+        if (hard) fd.append('hard_today', hard);
+        if (easy) fd.append('easy_today', easy);
+        if (happy) fd.append('happiness', happy);
+        if (concerns) fd.append('concerns', concerns);
         const projectId = document.getElementById('report-project').value;
         if (projectId) fd.append('project_id', projectId);
         const files = document.getElementById('report-files').files;
@@ -552,6 +564,20 @@ const CresDeveloper = (() => {
         } catch (err) {
           flash(document.getElementById('reports-flash'), err.message, false);
         }
+      });
+    }
+    CresVoiceReport?.initVoiceReport();
+    CresVoiceForms?.initVoiceForms();
+
+    // New report toggle
+    const btnNewReport = document.getElementById('btn-new-report');
+    const reportFormEl = document.getElementById('report-form');
+    if (btnNewReport && reportFormEl && !btnNewReport.dataset.reportBound) {
+      btnNewReport.dataset.reportBound = '1';
+      btnNewReport.addEventListener('click', () => {
+        const isHidden = reportFormEl.style.display === 'none';
+        reportFormEl.style.display = isHidden ? '' : 'none';
+        btnNewReport.textContent = isHidden ? 'Close form' : 'New report';
       });
     }
   }

@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require('multer');
 const { query, withTransaction } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/rbac');
@@ -7,6 +8,18 @@ const { idempotency } = require('../middleware/idempotency');
 
 const router = express.Router();
 router.use(authenticate);
+
+/** Voice recordings are small (webm/opus ~1MB/min); cap at 25MB (~25min). */
+const voiceUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (/^audio\//.test(file.mimetype) || /\.webm$|\.mp3$|\.m4a$|\.wav$|\.ogg$/i.test(file.originalname)) {
+      return cb(null, true);
+    }
+    cb(new AppError('Audio file required', 400, 'VALIDATION'));
+  },
+});
 
 router.get(
   '/',
@@ -50,6 +63,137 @@ router.get(
     res.json({ ok: true, data: rows });
   })
 );
+
+// ── Voice capture + Bulk import ──────────────────────────────────────────────
+
+router.post(
+  '/voice-capture',
+  requirePermission('leads', 'create'),
+  (req, res, next) => {
+    voiceUpload.single('audio')(req, res, (err) => {
+      if (err instanceof multer.MulterError) {
+        return next(new AppError(err.message, 400, 'VALIDATION'));
+      }
+      if (err) return next(err);
+      next();
+    });
+  },
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw new AppError('Audio file is required', 400, 'VALIDATION');
+
+    const { transcribeAudio, parseLeadsFromTranscript } = require('../services/voiceLeads');
+
+    const { text: transcript, model: whisperModel } = await transcribeAudio({
+      buffer: req.file.buffer,
+      filename: req.file.originalname,
+      mimetype: req.file.mimetype,
+    });
+
+    let leads = [];
+    let parseError = null;
+    if (transcript.length > 10) {
+      try {
+        ({ leads } = await parseLeadsFromTranscript(transcript));
+      } catch (err) {
+        parseError = err.message;
+        console.warn('[leads] parse error', err.message);
+      }
+    }
+
+    res.json({
+      ok: true,
+      data: {
+        transcript,
+        whisper_model: whisperModel,
+        leads_count: leads.length,
+        leads,
+        parse_error: parseError,
+      },
+    });
+  })
+);
+
+router.post(
+  '/bulk',
+  requirePermission('leads', 'create'),
+  asyncHandler(async (req, res) => {
+    const { leads = [] } = req.body || {};
+    if (!Array.isArray(leads) || !leads.length) {
+      throw new AppError('leads array required', 400, 'VALIDATION');
+    }
+    const MAX = 50;
+    const items = leads.slice(0, MAX);
+
+    const created = [];
+    const duplicates = [];
+    const failed = [];
+
+    for (const raw of items) {
+      const name = String(raw.name || raw.business_name || '').trim();
+      if (!name && !raw.phone) {
+        failed.push({ lead: raw, error: 'Missing name or phone' });
+        continue;
+      }
+      try {
+        const dupeClauses = [];
+        const dupeParams = [];
+        if (String(raw.phone || '').trim()) {
+          dupeParams.push(String(raw.phone).trim().replace(/\s+/g, ''));
+          dupeClauses.push(
+            `regexp_replace(COALESCE(phone,''), '\\s', '', 'g') = $${dupeParams.length}`
+          );
+        }
+        if (String(raw.business_name || '').trim()) {
+          dupeParams.push(String(raw.business_name).trim().toLowerCase());
+          dupeClauses.push(
+            `LOWER(TRIM(COALESCE(business_name,''))) = $${dupeParams.length}`
+          );
+        }
+        if (!raw.force && dupeClauses.length) {
+          const { rows: dups } = await query(
+            `SELECT id, name, phone, business_name, business_type FROM leads WHERE ${dupeClauses.join(' OR ')} LIMIT 3`,
+            dupeParams
+          );
+          if (dups.length) {
+            duplicates.push({ lead: raw, duplicates: dups });
+            continue;
+          }
+        }
+
+        const { rows } = await query(
+          `INSERT INTO leads (name, phone, email, business_name, business_type, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+          [
+            name,
+            raw.phone || null,
+            raw.email || null,
+            raw.business_name || null,
+            (raw.business_type || '').trim() || null,
+            req.user.id,
+          ]
+        );
+        created.push({ id: rows[0].id, name, business_name: raw.business_name || null });
+      } catch (err) {
+        failed.push({ lead: raw, error: err.message });
+      }
+    }
+
+    res.json({
+      ok: true,
+      data: {
+        total: items.length,
+        created: created.length,
+        duplicates: duplicates.length,
+        failed: failed.length,
+        leads_created: created,
+        leads_duplicate: duplicates,
+        leads_failed: failed,
+      },
+    });
+  })
+);
+
+// ── Single lead CRUD ─────────────────────────────────────────────────────────
 
 router.post(
   '/',

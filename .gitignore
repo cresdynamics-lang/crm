@@ -43,5 +43,8 @@ coverage/
 .turbo/
 .next/
 
+# Local deploy keys (never commit)
+.deploy/
+
 # Package manager noise
 package-lock.json.bak

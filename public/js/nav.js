@@ -200,6 +200,13 @@ const CresNav = (() => {
       icon: '◦',
       anyOf: ['settings:view'],
     },
+    {
+      id: 'ops',
+      label: 'Cres Ops',
+      href: '#/ops',
+      icon: '?',
+      anyOf: ['reports:view', 'settings:view', 'tasks:view'],
+    },
   ];
 
   function visibleItems(user, permissions) {

@@ -36,6 +36,7 @@ const inviteRoutes = require('./routes/invites');
 const leaveRoutes = require('./routes/leave');
 const assignmentRoutes = require('./routes/assignments');
 const auditRoutes = require('./routes/audit');
+const opsRoutes = require('./routes/ops');
 const salaryFundingRoutes = require('./routes/salaryFunding');
 const adminInboxRoutes = require('./routes/adminInbox');
 
@@ -44,10 +45,22 @@ function createApp() {
   const publicDir = path.join(__dirname, '..', 'public');
   const uploadsDir = path.join(__dirname, '..', 'uploads');
 
-  app.use(helmet({ contentSecurityPolicy: false }));
+  app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   app.use(cors());
   app.use(express.json({ limit: '2mb' }));
   app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+
+  // Brand assets must load in downloaded invoice HTML / email clients
+  app.use(
+    '/brand',
+    express.static(path.join(publicDir, 'brand'), {
+      setHeaders(res) {
+        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+      },
+    })
+  );
 
   // Per-domain API groups
   app.use('/api/health', healthRoutes);
@@ -83,6 +96,7 @@ function createApp() {
   app.use('/api/leave', leaveRoutes);
   app.use('/api/assignments', assignmentRoutes);
   app.use('/api/audit', auditRoutes);
+  app.use('/api/ops', opsRoutes);
 
   app.use('/uploads', express.static(uploadsDir));
 
@@ -92,7 +106,15 @@ function createApp() {
   app.get('/dashboard', (_req, res) => res.sendFile(path.join(publicDir, 'app.html')));
   app.get('/app', (_req, res) => res.redirect('/dashboard'));
 
-  app.use(express.static(publicDir));
+  app.use(
+    express.static(publicDir, {
+      setHeaders(res, filePath) {
+        if (/\.(js|css|html)$/i.test(filePath)) {
+          res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+        }
+      },
+    })
+  );
 
   app.use(notFound);
   app.use(errorHandler);

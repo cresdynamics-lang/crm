@@ -535,3 +535,58 @@
 .deliverable-meta {
   padding: 10px 12px;
 }
+
+/* Cres Ops */
+.ops-guided-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border, #2a3441);
+  background: var(--bg-elevated, #171d25);
+  cursor: pointer;
+  font-size: 0.84rem;
+  color: var(--text, #e8eef4);
+  transition: background 0.15s, border-color 0.15s;
+}
+.ops-guided-btn:hover {
+  background: var(--bg-soft, #1e2630);
+  border-color: var(--accent, #1fa7a0);
+}
+.ops-history-entry {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border, #2a3441);
+  background: var(--bg-elevated, #171d25);
+  margin-bottom: 8px;
+  font-size: 0.84rem;
+}
+.ops-history-q {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--accent, #1fa7a0);
+}
+.ops-history-a {
+  color: var(--text, #e8eef4);
+  line-height: 1.5;
+}
+.ops-redirect {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(212, 160, 23, 0.1);
+  border: 1px solid rgba(212, 160, 23, 0.3);
+  color: var(--text, #e8eef4);
+  font-size: 0.82rem;
+}
+.ops-source-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--bg-soft, #1e2630);
+  border: 1px solid var(--border, #2a3441);
+  color: var(--text-muted, #8b9aab);
+  font-size: 0.75rem;
+  margin-right: 4px;
+}

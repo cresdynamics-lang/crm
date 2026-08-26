@@ -4,6 +4,51 @@ const { queueInvoiceEmail, queueNotification, queueNotificationDigestEmail } = r
 const { Worker, QUEUE_NAMES, connection, moveToDeadLetter, defaultJobOpts } = require('./index');
 const { resolveDelivery } = require('../services/notificationPrefs');
 
+/**
+ * Build the PDF attachment for a receipt/invoice email at send time so the
+ * figures always match the current balance state.
+ */
+async function buildPdfAttachment(receiptType, receiptId) {
+  if (!receiptId) return null;
+  const { invoiceReceipt, paymentReceipt, expenseReceipt } = require('../services/receipts');
+  const {
+    invoicePdf,
+    paymentReceiptPdf,
+    expenseReceiptPdf,
+  } = require('../services/pdfService');
+
+  try {
+    if (receiptType === 'payment') {
+      const receipt = await paymentReceipt(receiptId);
+      const pdf = await paymentReceiptPdf(receipt);
+      return {
+        filename: `${String(receipt.documentNumber || 'payment-receipt').replace(/[^\w.\-]+/g, '_')}.pdf`,
+        content: pdf,
+      };
+    }
+    if (receiptType === 'invoice') {
+      const receipt = await invoiceReceipt(receiptId);
+      const pdf = await invoicePdf(receipt);
+      return {
+        filename: `${String(receipt.documentNumber || 'invoice').replace(/[^\w.\-]+/g, '_')}.pdf`,
+        content: pdf,
+      };
+    }
+    if (receiptType === 'expense') {
+      const receipt = await expenseReceipt(receiptId);
+      const pdf = await expenseReceiptPdf(receipt);
+      return {
+        filename: `${String(receipt.documentNumber || 'expense-receipt').replace(/[^\w.\-]+/g, '_')}.pdf`,
+        content: pdf,
+      };
+    }
+  } catch (err) {
+    // Attachment is best-effort; never block the email itself
+    console.warn(`[email] PDF attachment failed (${receiptType} ${receiptId}): ${err.message}`);
+  }
+  return null;
+}
+
 async function handleSideEffect(job) {
   const { name, data } = job;
 
@@ -162,11 +207,14 @@ async function handleEmail(job) {
   }
 
   if (name === 'receipt.send') {
+    const attachment = await buildPdfAttachment(data.receiptType, data.receiptId);
     const result = await sendWithFailover({
       to: data.to,
       subject: data.subject,
       body: data.body,
-      meta: { type: 'receipt', receiptType: data.receiptType, receiptId: data.receiptId },
+      html: data.html,
+      attachments: attachment ? [attachment] : undefined,
+      meta: { type: 'receipt', receiptType: data.receiptType, receiptId: data.receiptId, fromRole: 'finance' },
     });
     if (data.receiptType === 'invoice' && data.receiptId) {
       await query(
@@ -250,30 +298,19 @@ async function handleEmail(job) {
     }
   }
 
-  // Default: invoice email (issued / residual balance)
+  // Default: invoice email (issued / residual balance) — HTML tax invoice + PDF
   const { invoiceId, clientEmail, channel } = data;
   try {
-    const { rows: invRows } = await query(
-      `SELECT i.amount, i.amount_paid, i.due_date, i.status, c.name AS client_name
-       FROM invoices i
-       LEFT JOIN clients c ON c.id = i.client_id
-       WHERE i.id = $1`,
-      [invoiceId]
-    );
-    const inv = invRows[0] || {};
-    const balance = Number(inv.amount || 0) - Number(inv.amount_paid || 0);
-    const due = inv.due_date ? new Date(inv.due_date).toLocaleDateString() : 'see invoice';
+    const { invoiceReceipt } = require('../services/receipts');
+    const receipt = await invoiceReceipt(invoiceId);
+    const attachment = await buildPdfAttachment('invoice', invoiceId);
     const result = await sendWithFailover({
       to: clientEmail,
-      subject: `Invoice ${String(invoiceId).slice(0, 8)} from Cres Dynamics Finance`,
-      body:
-        `Hello ${inv.client_name || 'there'},\n\n` +
-        `Your invoice ${String(invoiceId).slice(0, 8)} has been issued by Cres Dynamics Finance.\n` +
-        `Amount due: ${balance}.\n` +
-        `Due date: ${due}.\n\n` +
-        `Please arrange payment by the due date and include your bank reference on the remittance.\n\n` +
-        `— Cres Dynamics Finance`,
-      meta: { invoiceId, channel, type: 'invoice_send' },
+      subject: receipt.subject,
+      body: receipt.text,
+      html: receipt.html,
+      attachments: attachment ? [attachment] : undefined,
+      meta: { invoiceId, channel, type: 'invoice_send', fromRole: 'finance' },
     });
 
     await query(
@@ -394,4 +431,10 @@ if (require.main === module) {
   console.log('[workers] running standalone');
 }
 
-module.exports = { startWorkers, handleSideEffect, handleEmail, handleNotification };
+module.exports = {
+  startWorkers,
+  handleSideEffect,
+  handleEmail,
+  handleNotification,
+  buildPdfAttachment,
+};

@@ -22,7 +22,7 @@ const CresDirector = (() => {
   function fmtMoney(n) {
     const num = Number(n);
     if (Number.isNaN(num)) return '-';
-    return num.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+    return num.toLocaleString('en-KE', { style: 'currency', currency: 'KES' });
   }
 
   function statusPill(s) {
@@ -354,6 +354,51 @@ const CresDirector = (() => {
           alert(err.message);
         }
       });
+    });
+
+    // Add voice remark mic to each remarks textarea
+    list.querySelectorAll('[data-remark-input]').forEach((ta) => {
+      CresVoiceReport?.initRemarkMic(null, null);
+      // Re-init using the actual element
+      if (window.CresVoiceReport && !ta.dataset.micBound) {
+        ta.dataset.micBound = '1';
+        const micBtn = document.createElement('button');
+        micBtn.type = 'button';
+        micBtn.className = 'btn btn-ghost btn-sm';
+        micBtn.style.cssText = 'padding:3px 10px;font-size:0.78rem;vertical-align:middle;margin-left:6px;';
+        micBtn.textContent = '\uD83C\uDF99 Speak';
+        ta.parentNode.insertBefore(micBtn, ta.nextSibling);
+
+        let rStream = null, rRec = null, rChunks = [];
+        micBtn.addEventListener('click', async () => {
+          if (rRec && rRec.state === 'recording') {
+            micBtn.textContent = '\uD83C\uDF99 Speak';
+            micBtn.classList.remove('btn-danger');
+            const blob = await new Promise((res) => {
+              rRec.onstop = () => { rStream?.getTracks().forEach((t) => t.stop()); res(new Blob(rChunks, { type: 'audio/webm' })); };
+              rRec.stop();
+            });
+            rChunks = [];
+            if (!blob || blob.size < 500) return;
+            micBtn.disabled = true; micBtn.textContent = '...';
+            try {
+              const fd = new FormData(); fd.append('audio', blob, `remark-${Date.now()}.webm`);
+              const r = await CresAPI.request('/api/reports/voice-capture', { method: 'POST', body: fd });
+              if (r.ok && r.data?.content) ta.value = (ta.value ? ta.value + '\n' : '') + r.data.content;
+            } catch { /* ignore */ }
+            micBtn.disabled = false; micBtn.textContent = '\uD83C\uDF99 Speak';
+            return;
+          }
+          try {
+            rStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            rChunks = [];
+            rRec = new MediaRecorder(rStream, { mimeType: 'audio/webm;codecs=opus' });
+            rRec.ondataavailable = (e) => { if (e.data.size > 0) rChunks.push(e.data); };
+            rRec.start();
+            micBtn.textContent = '\u23F9 Stop'; micBtn.classList.add('btn-danger');
+          } catch { /* mic denied */ }
+        });
+      }
     });
   }
 

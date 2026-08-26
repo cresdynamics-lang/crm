@@ -1,31 +1,45 @@
 /**
  * Cres Dynamics billing / letterhead defaults for invoices & receipts.
  * Overridable via system_settings.key = 'company_profile'.
- * Ready to map against an uploaded invoice PDF template.
  */
 const DEFAULT_COMPANY = {
-  legalName: 'Cres Dynamics',
-  tradingName: 'Cres Dynamics',
-  tagline: 'Software & digital solutions',
+  legalName: 'Cres Dynamics Ltd',
+  tradingName: 'Cres Dynamics Ltd',
+  tagline: 'Building digital systems that Businesses Run On.',
   addressLines: [
-    'Caribbean Regional Office',
-    'Kingston, Jamaica',
-    'West Indies',
+    'P.O. BOX 1112 – 00100, NAIROBI, KENYA',
+    'Kivuli Towers, 3rd floor, Westlands, Nairobi',
   ],
-  phone: '+1 (876) 000-0000',
-  email: 'billing@cresdynamics.com',
+  phone: '+254 743 869 564 / +254 708 805 496',
+  email: 'info@cresdynamics.com',
   financeEmail: 'finance@cresdynamics.com',
   emailFromName: 'Cres Dynamics Finance',
   website: 'www.cresdynamics.com',
-  taxLabel: 'Tax / VAT ID',
-  taxId: 'CD-CARIB-0001',
-  currency: 'USD',
-  bankName: 'First Caribbean International Bank',
-  bankAccountName: 'Cres Dynamics',
-  bankAccountNumber: 'XXXX-XXXX-XXXX',
-  bankSwift: 'FCIBJMKN',
-  paymentNote: 'Please reference the invoice number on all remittances.',
-  footer: 'Thank you for your business with Cres Dynamics.',
+  taxLabel: 'KRA PIN',
+  taxId: 'P052570833B',
+  currency: 'KES',
+  bankName: 'I & M Bank',
+  bankAccountName: 'Cres Dynamics Ltd',
+  bankAccountNumber: '01209982836350',
+  bankBranch: 'Ongata Rongai',
+  bankSwift: '',
+  mpesaPaybill: '542542',
+  mpesaAccount: '43869',
+  paymentNote: 'Please use the invoice number as your payment reference.',
+  lateFeeNote:
+    'Late payments attract 2% monthly interest after the due date. For payment queries contact info@cresdynamics.com or +254 708 805 496.',
+  footer: 'Thank you for your business. Cres Dynamics Ltd — cresdynamics.com',
+  logoUrl: '/brand/logo.png',
+  signatureUrl: '/brand/signature.png?v=20260815e',
+  financeSignatureUrl: '/brand/signature-scholastica.png?v=20260815f',
+  invoicedBy: {
+    name: 'Scholastica Omoro',
+    title: 'Finance, Cres Dynamics Ltd',
+  },
+  authorisedBy: {
+    name: 'Nelson Were',
+    title: 'Chief Executive Officer, Cres Dynamics Ltd',
+  },
 };
 
 async function loadCompanyProfile(queryFn) {
@@ -34,7 +48,20 @@ async function loadCompanyProfile(queryFn) {
       `SELECT value FROM system_settings WHERE key = 'company_profile' LIMIT 1`
     );
     if (rows[0]?.value && typeof rows[0].value === 'object') {
-      return { ...DEFAULT_COMPANY, ...rows[0].value };
+      const merged = { ...DEFAULT_COMPANY, ...rows[0].value };
+      if (rows[0].value.authorisedBy) {
+        merged.authorisedBy = {
+          ...DEFAULT_COMPANY.authorisedBy,
+          ...rows[0].value.authorisedBy,
+        };
+      }
+      if (rows[0].value.invoicedBy) {
+        merged.invoicedBy = {
+          ...DEFAULT_COMPANY.invoicedBy,
+          ...rows[0].value.invoicedBy,
+        };
+      }
+      return merged;
     }
   } catch {
     // DB may be unavailable during early boot — use defaults

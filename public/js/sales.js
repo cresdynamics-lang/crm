@@ -22,7 +22,7 @@ const CresSales = (() => {
   function fmtMoney(n) {
     const num = Number(n);
     if (Number.isNaN(num)) return '-';
-    return num.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+    return num.toLocaleString('en-KE', { style: 'currency', currency: 'KES' });
   }
 
   function statusPill(s) {
@@ -376,6 +376,18 @@ const CresSales = (() => {
     e.preventDefault();
     const fd = new FormData();
     fd.append('content', document.getElementById('report-content').value.trim());
+    const blockers = document.getElementById('report-blockers')?.value.trim();
+    const attention = document.getElementById('report-attention')?.value.trim();
+    const hard = document.getElementById('report-hard')?.value.trim();
+    const easy = document.getElementById('report-easy')?.value.trim();
+    const happy = document.getElementById('report-happiness')?.value.trim();
+    const concerns = document.getElementById('report-concerns')?.value.trim();
+    if (blockers) fd.append('blockers_text', blockers);
+    if (attention) fd.append('needs_attention', attention);
+    if (hard) fd.append('hard_today', hard);
+    if (easy) fd.append('easy_today', easy);
+    if (happy) fd.append('happiness', happy);
+    if (concerns) fd.append('concerns', concerns);
     const projectId = document.getElementById('report-project').value;
     if (projectId) fd.append('project_id', projectId);
     const files = document.getElementById('report-files').files;
@@ -832,6 +844,21 @@ const CresSales = (() => {
       const opt = e.target.selectedOptions[0];
       if (opt?.dataset.email) document.getElementById('email-to').value = opt.dataset.email;
     });
+
+    initVoiceCapture();
+    CresVoiceReport?.initVoiceReport();
+    CresVoiceForms?.initVoiceForms();
+
+    // New report toggle
+    const btnNewReport = document.getElementById('btn-new-report');
+    const reportForm = document.getElementById('report-form');
+    if (btnNewReport && reportForm) {
+      btnNewReport.addEventListener('click', () => {
+        const isHidden = reportForm.style.display === 'none';
+        reportForm.style.display = isHidden ? '' : 'none';
+        btnNewReport.textContent = isHidden ? 'Close form' : 'New report';
+      });
+    }
   }
 
   async function mount(faceId, user) {
@@ -853,6 +880,255 @@ const CresSales = (() => {
     } else if (faceId === 'projects') {
       await mountProjects();
     }
+  }
+
+  // ---------- Voice capture ----------
+  let voiceMediaRecorder = null;
+  let voiceStream = null;
+  let voiceTimerInterval = null;
+  let voiceStartTime = null;
+  let voiceParsedLeads = [];
+
+  function voiceFlash(msg, ok = true) {
+    const el = document.getElementById('voice-flash');
+    if (!el) return;
+    el.textContent = msg;
+    el.className = `flash visible ${ok ? 'ok' : 'err'}`;
+    setTimeout(() => el.classList.remove('visible'), 5000);
+  }
+
+  function resetVoiceUI() {
+    stopVoiceRecorder();
+    document.getElementById('voice-recorder-ui').style.display = '';
+    document.getElementById('voice-transcript-section').style.display = 'none';
+    document.getElementById('voice-leads-section').style.display = 'none';
+    document.getElementById('voice-working-indicator').style.display = 'none';
+    document.getElementById('voice-leads-table').innerHTML = '';
+    document.getElementById('voice-leads-count').textContent = '0';
+    document.getElementById('voice-timer').textContent = '00:00';
+    voiceParsedLeads = [];
+  }
+
+  function stopVoiceRecorder() {
+    if (voiceMediaRecorder && voiceMediaRecorder.state !== 'inactive') {
+      try { voiceMediaRecorder.stop(); } catch {}
+    }
+    if (voiceStream) {
+      voiceStream.getTracks().forEach((t) => t.stop());
+      voiceStream = null;
+    }
+    if (voiceTimerInterval) {
+      clearInterval(voiceTimerInterval);
+      voiceTimerInterval = null;
+    }
+  }
+
+  function preferredMime() {
+    const types = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4;codecs=mp4a.40.2',
+      'audio/ogg;codecs=opus',
+      'audio/m4a',
+      'audio/wav',
+    ];
+    for (const t of types) {
+      if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(t)) return t;
+    }
+    return '';
+  }
+
+  async function startVoiceRecording() {
+    const btn = document.getElementById('btn-voice-record');
+    try {
+      voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      voiceFlash('Microphone permission denied. Check browser settings.', false);
+      return;
+    }
+    const mime = preferredMime();
+    voiceMediaRecorder = new MediaRecorder(voiceStream, mime ? { mimeType: mime } : {});
+    const chunks = [];
+    voiceMediaRecorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    voiceMediaRecorder.onstop = async () => {
+      const blob = new Blob(chunks, { type: voiceMediaRecorder.mimeType || 'audio/webm' });
+      if (blob.size < 1024) {
+        voiceFlash('Recording too short. Try again and narrate more contacts.', false);
+        resetVoiceUI();
+        return;
+      }
+      await sendVoiceAudio(blob);
+    };
+
+    voiceStartTime = Date.now();
+    btn.textContent = 'Stop recording';
+    btn.style.background = '#c53030';
+    btn.classList.remove('btn-primary');
+    btn.onclick = () => voiceMediaRecorder.stop();
+
+    document.getElementById('voice-timer').textContent = '00:00';
+    voiceTimerInterval = setInterval(() => {
+      const sec = Math.floor((Date.now() - voiceStartTime) / 1000);
+      const mm = String(Math.floor(sec / 60)).padStart(2, '0');
+      const ss = String(sec % 60).padStart(2, '0');
+      document.getElementById('voice-timer').textContent = `${mm}:${ss}`;
+    }, 300);
+
+    voiceMediaRecorder.start(500); // 500ms timeslice for progress
+  }
+
+  async function sendVoiceAudio(blob) {
+    const indicator = document.getElementById('voice-working-indicator');
+    indicator.style.display = '';
+    document.getElementById('voice-recorder-ui').style.display = 'none';
+    document.getElementById('voice-transcript-section').style.display = 'none';
+    document.getElementById('voice-leads-section').style.display = 'none';
+
+    try {
+      const ext = (voiceMediaRecorder?.mimeType || 'audio/webm').includes('ogg')
+        ? 'ogg'
+        : voiceMediaRecorder?.mimeType?.includes('mp4')
+          ? 'm4a'
+          : 'webm';
+      const fd = new FormData();
+      fd.append('audio', blob, `leads-capture.${ext}`);
+
+      const res = await CresAPI.request('/api/leads/voice-capture', {
+        method: 'POST',
+        body: fd,
+        idempotencyKey: `voice-capture-${Date.now()}`,
+      });
+
+      indicator.style.display = 'none';
+      document.getElementById('voice-transcript-section').style.display = '';
+      document.getElementById('voice-transcript').textContent =
+        res.data.transcript || '(no speech detected)';
+      document.getElementById('voice-recorder-ui').style.display = '';
+      resetRecorderBtn();
+
+      if (res.data.parse_error) {
+        voiceFlash(`Transcript received but parsing failed: ${res.data.parse_error}`, false);
+      }
+      if (res.data.leads_count) {
+        voiceParsedLeads = res.data.leads;
+        renderVoiceParsedLeads(res.data.leads);
+        voiceFlash(`Parsed ${res.data.leads_count} lead(s) from transcript`);
+      } else if (!res.data.parse_error) {
+        voiceFlash('No leads detected in audio. Narrate business names and phone numbers.', false);
+      }
+    } catch (err) {
+      indicator.style.display = 'none';
+      document.getElementById('voice-recorder-ui').style.display = '';
+      resetRecorderBtn();
+      voiceFlash(err.message, false);
+    }
+  }
+
+  function resetRecorderBtn() {
+    const btn = document.getElementById('btn-voice-record');
+    if (!btn) return;
+    btn.textContent = 'Start recording';
+    btn.style.background = '';
+    btn.classList.add('btn-primary');
+    btn.onclick = startVoiceRecording;
+  }
+
+  function renderVoiceParsedLeads(leads) {
+    const section = document.getElementById('voice-leads-section');
+    section.style.display = '';
+    document.getElementById('voice-leads-count').textContent = leads.length;
+
+    const tbl = document.getElementById('voice-leads-table');
+    const rows = leads
+      .map((l, i) => {
+        const bn = esc(String(l.business_name || ''));
+        const nm = esc(String(l.name || ''));
+        const ph = esc(String(l.phone || ''));
+        const bt = esc(String(l.business_type || ''));
+        return `<tr style="border-bottom:1px solid var(--border,#d8e0e8);font-size:0.82rem;" data-vidx="${i}">
+          <td style="width:28px;text-align:center;padding:6px 4px;"><input type="checkbox" data-voice-idx="${i}" checked /></td>
+          <td style="padding:5px 4px;"><input value="${nm}" data-vf="name" style="width:100%;font-size:0.82rem;padding:4px 6px;" /></td>
+          <td style="padding:5px 4px;"><input value="${ph}" data-vf="phone" style="width:100%;font-size:0.82rem;padding:4px 6px;" /></td>
+          <td style="padding:5px 4px;"><input value="${bn}" data-vf="business_name" style="width:100%;font-size:0.82rem;padding:4px 6px;" /></td>
+          <td style="padding:5px 4px;"><input value="${bt}" data-vf="business_type" style="width:100%;font-size:0.82rem;padding:4px 6px;" /></td>
+        </tr>`;
+      })
+      .join('');
+    tbl.innerHTML = `<table style="width:100%;border-collapse:collapse;">
+      <thead><tr style="background:var(--bg-secondary,#eef2f5);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted,#6b7b8d);">
+        <th style="width:28px;"></th><th style="padding:6px 4px;text-align:left;">Contact</th>
+        <th style="padding:6px 4px;text-align:left;">Phone</th><th style="padding:6px 4px;text-align:left;">Business</th>
+        <th style="padding:6px 4px;text-align:left;">Type</th>
+      </tr></thead>
+      <tbody>${rows}</tbody></table>`;
+
+    // Sync edits back to voiceParsedLeads
+    tbl.querySelectorAll('input[data-vf]').forEach((inp) => {
+      inp.addEventListener('change', () => {
+        const tr = inp.closest('tr');
+        const idx = Number(tr.dataset.vidx);
+        const field = inp.dataset.vf;
+        if (voiceParsedLeads[idx]) voiceParsedLeads[idx][field] = inp.value.trim();
+      });
+    });
+  }
+
+  async function importVoiceLeads() {
+    const selected = [];
+    document
+      .querySelectorAll('input[data-voice-idx]:checked')
+      .forEach((cb) => {
+        const idx = Number(cb.dataset.voiceIdx);
+        if (voiceParsedLeads[idx]) selected.push(voiceParsedLeads[idx]);
+      });
+    if (!selected.length) {
+      voiceFlash('Select at least one lead to import', false);
+      return;
+    }
+    const btn = document.getElementById('btn-voice-import');
+    btn.disabled = true;
+    btn.textContent = `Importing ${selected.length}...`;
+    try {
+      const res = await CresAPI.request('/api/leads/bulk', {
+        method: 'POST',
+        body: { leads: selected },
+        idempotencyKey: `voice-import-${Date.now()}`,
+      });
+      const d = res.data;
+      voiceFlash(
+        `Imported ${d.created} lead(s)${d.duplicates ? ` (${d.duplicates} duplicate${d.duplicates === 1 ? '' : 's'} skipped)` : ''}${d.failed ? ` (${d.failed} failed)` : ''}`,
+        true
+      );
+      document.getElementById('leads-tbody') && (await mountLeads());
+      setTimeout(() => {
+        document.getElementById('voice-capture-modal')?.classList.remove('open');
+      }, 1800);
+    } catch (err) {
+      voiceFlash(err.message, false);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Import';
+    }
+  }
+
+  function initVoiceCapture() {
+    const recordBtn = document.getElementById('btn-voice-record');
+    if (recordBtn) recordBtn.onclick = startVoiceRecording;
+
+    document.getElementById('btn-voice-retry')?.addEventListener('click', () => {
+      resetVoiceUI();
+    });
+    document.getElementById('btn-voice-import')?.addEventListener('click', importVoiceLeads);
+
+    document.getElementById('btn-voice-capture')?.addEventListener('click', () => {
+      resetVoiceUI();
+      document.getElementById('voice-capture-modal').classList.add('open');
+    });
+
+    document.querySelector('#voice-capture-modal [data-close-modal]')?.addEventListener('click', () => {
+      stopVoiceRecorder();
+      document.getElementById('voice-capture-modal').classList.remove('open');
+    });
   }
 
   return { bindModals, mount };
