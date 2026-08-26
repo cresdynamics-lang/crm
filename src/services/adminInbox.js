@@ -84,21 +84,8 @@ async function syncAdminInbox({ limit = 20 } = {}) {
           let aiDraft = null;
           let aiSummary = null;
           let status = 'pending';
-          try {
-            const drafted = await draftInboxReply({
-              fromName,
-              fromEmail,
-              subject: parsed.subject || '',
-              bodyText,
-              attachmentSummaries,
-            });
-            aiDraft = drafted.draft;
-            aiSummary = drafted.summary;
-            status = 'drafted';
-          } catch (aiErr) {
-            console.warn('[inbox] AI draft failed', aiErr.message);
-            status = 'pending';
-          }
+          // Skip AI draft during bulk sync — generate on-demand via regenerate button
+          // to avoid TPM rate limits on free tier
 
           await query(
             `INSERT INTO admin_inbox_messages

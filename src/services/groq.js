@@ -9,6 +9,8 @@ function apiKeys() {
   );
 }
 
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 async function groqChat({ messages, temperature = 0.4 }) {
   const keys = apiKeys();
   if (!keys.length) {
@@ -16,29 +18,45 @@ async function groqChat({ messages, temperature = 0.4 }) {
   }
   let lastErr;
   for (const key of keys) {
-    try {
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${key}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: config.groq.model,
-          messages,
-          temperature,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data?.error?.message || `Groq HTTP ${res.status}`);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${key}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: config.groq.model,
+            messages,
+            temperature,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const errMsg = data?.error?.message || `Groq HTTP ${res.status}`;
+          if (res.status === 429 && attempt < 2) {
+            const wait = Math.min(5000, 2000 * (attempt + 1));
+            console.warn(`[groq] rate limited, retrying in ${wait}ms: ${errMsg.slice(0, 80)}`);
+            await sleep(wait);
+            continue;
+          }
+          throw new Error(errMsg);
+        }
+        const text = data?.choices?.[0]?.message?.content?.trim();
+        if (!text) throw new Error('Empty Groq response');
+        return { text, model: config.groq.model, raw: data };
+      } catch (err) {
+        lastErr = err;
+        if (err.message.includes('Rate limit') && attempt < 2) {
+          const wait = Math.min(8000, 3000 * (attempt + 1));
+          console.warn(`[groq] rate limit retry ${attempt + 1}/3 in ${wait}ms`);
+          await sleep(wait);
+          continue;
+        }
+        console.warn(`[groq] key failed: ${err.message}`);
+        break;
       }
-      const text = data?.choices?.[0]?.message?.content?.trim();
-      if (!text) throw new Error('Empty Groq response');
-      return { text, model: config.groq.model, raw: data };
-    } catch (err) {
-      lastErr = err;
-      console.warn(`[groq] key failed: ${err.message}`);
     }
   }
   throw lastErr || new Error('Groq unavailable');
