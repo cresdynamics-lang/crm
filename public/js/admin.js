@@ -147,6 +147,18 @@ const CresAdmin = (() => {
         roles.data.map((r) => `<option value="${esc(r.name)}">${esc(r.name)}</option>`).join('');
     }
 
+    const me = CresAPI.getUser();
+    const canEdit = me.role === 'admin';
+    const canDelete = ['admin', 'director', 'hr'].includes(me.role);
+    const addBtn = document.getElementById('btn-add-user');
+    const inviteBtn = document.getElementById('btn-invite-user');
+    if (addBtn) addBtn.hidden = !canEdit;
+    if (inviteBtn) inviteBtn.hidden = !canEdit;
+    const heroP = document.querySelector('#face-users .face-hero p');
+    if (heroP && me.role !== 'admin') {
+      heroP.textContent = 'Remove a staff account. Login stops; payroll and reports stay on record.';
+    }
+
     tbody.innerHTML = users.data.length
       ? users.data
           .map(
@@ -156,7 +168,12 @@ const CresAdmin = (() => {
               <td>${esc(u.role)}</td>
               <td>${statusPill(u.status)}</td>
               <td>
-                <button type="button" class="btn btn-ghost btn-sm" data-edit="${esc(u.id)}">Edit</button>
+                ${canEdit ? `<button type="button" class="btn btn-ghost btn-sm" data-edit="${esc(u.id)}">Edit</button>` : ''}
+                ${
+                  canDelete && u.status === 'active' && u.id !== me.id
+                    ? `<button type="button" class="btn btn-ghost btn-sm" data-delete-user="${esc(u.id)}" style="color:#ffb4b4;">Remove</button>`
+                    : ''
+                }
               </td>
             </tr>`
           )
@@ -165,6 +182,20 @@ const CresAdmin = (() => {
 
     tbody.querySelectorAll('[data-edit]').forEach((btn) => {
       btn.addEventListener('click', () => openUserForm(btn.dataset.edit, users.data));
+    });
+    tbody.querySelectorAll('[data-delete-user]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const u = users.data.find((x) => x.id === btn.dataset.deleteUser);
+        if (!u) return;
+        if (!confirm(`Remove ${u.name} (${u.role})? They will lose access. Payroll and reports stay.`)) return;
+        try {
+          await CresAPI.request(`/api/users/${u.id}`, { method: 'DELETE' });
+          flash(document.getElementById('users-flash'), `${u.name} removed`);
+          await mountUsers();
+        } catch (err) {
+          flash(document.getElementById('users-flash'), err.message, false);
+        }
+      });
     });
   }
 
@@ -312,15 +343,118 @@ const CresAdmin = (() => {
     }
   }
 
+  const REPORT_QUESTIONS = [
+    { key: 'work_done', fallback: 'content', label: 'Done today' },
+    { key: 'blockers_text', label: 'Blocked by' },
+    { key: 'needs_attention', label: "Tomorrow's top 3" },
+    { key: 'hard_today', label: 'What was hard this week' },
+    { key: 'easy_today', label: 'What was easy this week' },
+    { key: 'happiness', label: 'What made you feel part of the team' },
+    { key: 'concerns', label: 'Anything on your mind' },
+  ];
+
+  let adminReportCache = [];
+  let viewingReportId = null;
+
+  function eatToday() {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
+  }
+
+  function progressBar(pct) {
+    const n = Math.max(0, Math.min(100, Number(pct) || 0));
+    return `<div class="progress-track" title="${n}%"><div class="progress-fill" style="width:${n}%"></div></div>
+            <span class="meta">${n}%</span>`;
+  }
+
+  function reportAnswer(r, q) {
+    const val = (r[q.key] || (q.fallback ? r[q.fallback] : '') || '').trim();
+    return val;
+  }
+
+  function openAdminReport(id) {
+    const r = adminReportCache.find((x) => x.id === id);
+    const modal = document.getElementById('admin-report-view-modal');
+    const body = document.getElementById('admin-report-view-body');
+    const title = document.getElementById('admin-report-view-title');
+    const note = document.getElementById('admin-report-director-note');
+    if (!r || !modal || !body) return;
+    viewingReportId = id;
+    if (title) {
+      title.textContent = `${r.author_name || 'Report'} · ${r.author_role || ''}`;
+    }
+    const qa = REPORT_QUESTIONS.map((q) => {
+      const val = reportAnswer(r, q);
+      if (!val) return '';
+      return `<dt>${esc(q.label)}</dt><dd>${esc(val)}</dd>`;
+    }).join('');
+    body.innerHTML = `
+      <div class="meta" style="margin-bottom:8px;">
+        ${CresFormat.datetime(r.created_at)}
+        ${r.project_name ? ` · ${esc(r.project_name)}` : ''}
+        · ${statusPill(r.routing_status || '')}
+      </div>
+      <dl class="report-qa">${qa || `<dt>Done today</dt><dd>${esc(r.content || '—')}</dd>`}</dl>
+      ${
+        r.admin_director_note
+          ? `<div class="meta" style="margin-top:12px;padding:8px;border-left:3px solid var(--accent);">
+               Current note to Director: ${esc(r.admin_director_note)}
+             </div>`
+          : ''
+      }`;
+    if (note) note.value = r.admin_director_note || '';
+    modal.classList.add('open');
+  }
+
+  async function mountProjectsBoard() {
+    const tbody = document.getElementById('admin-projects-tbody');
+    if (!tbody) return;
+    try {
+      const [projRes, finRes] = await Promise.all([
+        CresAPI.request('/api/projects'),
+        CresAPI.request('/api/finance/overview').catch(() => ({ data: { projects: [] } })),
+      ]);
+      const money = new Map((finRes.data?.projects || []).map((p) => [p.id, p]));
+      const rows = (projRes.data || []).map((p) => {
+        const m = money.get(p.id) || {};
+        return {
+          ...p,
+          invoiced: m.invoiced ?? 0,
+          paid: m.paid ?? 0,
+          balance: m.balance ?? 0,
+          progress: p.progress_percent ?? 0,
+        };
+      });
+      tbody.innerHTML = rows.length
+        ? rows
+            .map(
+              (p) => `<tr>
+                <td>${esc(p.name)}</td>
+                <td>${esc(p.client_name || p.client_business || '—')}</td>
+                <td>${statusPill(p.status)}</td>
+                <td>${progressBar(p.progress)}</td>
+                <td>${fmtMoney(p.value_amount)}</td>
+                <td>${fmtMoney(p.invoiced)}</td>
+                <td>${fmtMoney(p.paid)}</td>
+                <td>${fmtMoney(p.balance)}</td>
+              </tr>`
+            )
+            .join('')
+        : `<tr><td colspan="8" class="empty-state">No projects yet.</td></tr>`;
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-state">${esc(err.message)}</td></tr>`;
+    }
+  }
+
   async function mountDailyReports() {
     const role = document.getElementById('admin-reports-role')?.value;
-    const from = document.getElementById('admin-reports-from')?.value;
-    const to = document.getElementById('admin-reports-to')?.value;
+    const dayEl = document.getElementById('admin-reports-day');
     const personSel = document.getElementById('admin-reports-person');
+    if (dayEl && !dayEl.value) dayEl.value = eatToday();
+    const day = dayEl?.value || eatToday();
 
     const users = await CresAPI.request('/api/users?status=all');
     const people = (users.data || []).filter((u) => {
-      if (u.role === 'client') return false;
+      if (['client', 'admin', 'hr'].includes(u.role)) return false;
       if (role && u.role !== role) return false;
       return true;
     });
@@ -334,58 +468,74 @@ const CresAdmin = (() => {
       personSel.value = person;
     }
 
-    const params = new URLSearchParams({ routing_status: 'all' });
+    const covQs = new URLSearchParams({ date: day });
+    if (role) covQs.set('role', role);
+    const params = new URLSearchParams({ routing_status: 'all', date_from: day, date_to: day });
     if (role) params.set('role', role);
     if (person) params.set('user_id', person);
-    if (from) params.set('date_from', from);
-    if (to) params.set('date_to', to);
 
-    const reports = await CresAPI.request(`/api/reports?${params}`);
+    const [coverage, reports] = await Promise.all([
+      CresAPI.request(`/api/reports/coverage?${covQs}`),
+      CresAPI.request(`/api/reports?${params}`),
+    ]);
 
+    const submitted = coverage.data?.submitted || [];
+    const missing = coverage.data?.missing || [];
+    const kpis = document.getElementById('admin-reports-coverage-kpis');
+    if (kpis) {
+      kpis.innerHTML = `
+        <div class="kpi-card"><div class="kpi-label">Shared</div><div class="kpi-value">${submitted.length}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Did not share</div><div class="kpi-value">${missing.length}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Expected</div><div class="kpi-value">${submitted.length + missing.length}</div></div>`;
+    }
+    const covHost = document.getElementById('admin-reports-coverage');
+    if (covHost) {
+      const personLi = (p, clickable) => {
+        const open = clickable && p.report_id
+          ? ` class="clickable" role="button" tabindex="0" data-open-report="${esc(p.report_id)}"`
+          : '';
+        const bits = [];
+        if (p.project_name) bits.push(esc(p.project_name));
+        if (p.submitted_at) bits.push(CresFormat.datetime(p.submitted_at));
+        const extra = bits.length ? ` · ${bits.join(' · ')}` : '';
+        return `<li${open}><strong>${esc(p.name)}</strong><div class="meta">${esc(p.role)}${extra}</div></li>`;
+      };
+      covHost.innerHTML = `
+        <div class="coverage-col">
+          <h3>Shared a report</h3>
+          <ul>${submitted.length ? submitted.map((p) => personLi(p, true)).join('') : '<li class="meta">Nobody yet today.</li>'}</ul>
+        </div>
+        <div class="coverage-col">
+          <h3>Did not share</h3>
+          <ul>${missing.length ? missing.map((p) => personLi(p, false)).join('') : '<li class="meta">Everyone filed.</li>'}</ul>
+        </div>`;
+    }
+
+    adminReportCache = reports.data || [];
     const list = document.getElementById('admin-reports-list');
     if (!list) return;
-    list.innerHTML = reports.data.length
-      ? reports.data
+    list.innerHTML = adminReportCache.length
+      ? adminReportCache
           .map((r) => {
-            const reactions = (r.reactions || [])
-              .map(
-                (rx) => `<div class="meta" style="margin-top:4px;">↳ ${esc(rx.author_name)}: ${esc(rx.content)}</div>`
-              )
-              .join('');
-            const reactBox = r.can_react
-              ? `<div class="toolbar" style="margin-top:8px;gap:8px;align-items:flex-start;">
-                   <input data-react-input="${esc(r.id)}" placeholder="Respond…" style="flex:1;min-width:160px;" />
-                   <button type="button" class="btn btn-primary btn-sm" data-react="${esc(r.id)}">Send</button>
-                 </div>`
-              : ['sales', 'developer'].includes(r.author_role)
-                ? `<div class="meta" style="margin-top:6px;">Read-only (Sales/Developer reports)</div>`
+            const av =
+              typeof CresSettings !== 'undefined'
+                ? CresSettings.avatarHtml(
+                    { name: r.author_name, avatar_url: r.author_avatar_url },
+                    'avatar avatar-sm'
+                  )
                 : '';
-            return `<li>
-              <div class="meta report-author">${typeof CresSettings !== 'undefined' ? CresSettings.avatarHtml({ name: r.author_name, avatar_url: r.author_avatar_url }, 'avatar avatar-sm') : ''}<span>${esc(r.author_name)} · ${esc(r.author_role)} · ${CresFormat.datetime(r.created_at)}
-                ${r.project_name ? ` · ${esc(r.project_name)}` : ''} · ${statusPill(r.routing_status || '')}</span>
-              </div>
-              <div>${esc(r.content)}</div>
-              ${reactions}
-              ${reactBox}
+            const project = r.project_name ? ` · ${esc(r.project_name)}` : '';
+            const preview = esc((r.work_done || r.content || '').slice(0, 160));
+            return `<li class="clickable" role="button" tabindex="0" data-open-report="${esc(r.id)}">
+              <div class="meta report-author">${av}<span>${esc(r.author_name)} · ${esc(r.author_role)} · ${CresFormat.datetime(r.created_at)}${project} · ${statusPill(r.routing_status || '')}</span></div>
+              <div>${preview}</div>
             </li>`;
           })
           .join('')
-      : `<li class="empty-state">No reports match.</li>`;
+      : `<li class="empty-state">No reports for this day.</li>`;
 
-    list.querySelectorAll('[data-react]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const id = btn.dataset.react;
-        const input = list.querySelector(`[data-react-input="${id}"]`);
-        const content = input?.value?.trim();
-        if (!content) return;
-        try {
-          await CresAPI.request(`/api/reports/${id}/react`, { method: 'POST', body: { content } });
-          flash(document.getElementById('admin-reports-flash'), 'Response sent');
-          await mountDailyReports();
-        } catch (err) {
-          flash(document.getElementById('admin-reports-flash'), err.message, false);
-        }
-      });
+    document.querySelectorAll('#admin-reports-daily [data-open-report]').forEach((el) => {
+      el.addEventListener('click', () => openAdminReport(el.dataset.openReport));
     });
   }
 
@@ -879,8 +1029,27 @@ const CresAdmin = (() => {
     ['users-filter-role', 'users-filter-status'].forEach((id) => {
       document.getElementById(id)?.addEventListener('change', () => mountUsers().catch(console.error));
     });
-    ['admin-reports-role', 'admin-reports-person', 'admin-reports-from', 'admin-reports-to'].forEach((id) => {
+    ['admin-reports-role', 'admin-reports-person', 'admin-reports-day'].forEach((id) => {
       document.getElementById(id)?.addEventListener('change', () => mountDailyReports().catch(console.error));
+    });
+    document.getElementById('btn-export-admin-projects')?.addEventListener('click', () => {
+      CresAPI.download('/api/export/projects.csv', 'projects.csv').catch((err) => alert(err.message));
+    });
+    document.getElementById('admin-report-director-note-send')?.addEventListener('click', async () => {
+      const note = document.getElementById('admin-report-director-note')?.value?.trim();
+      if (!note || !viewingReportId) return;
+      try {
+        await CresAPI.request(`/api/reports/${viewingReportId}/director-note`, {
+          method: 'POST',
+          body: { note },
+        });
+        flash(document.getElementById('admin-report-view-flash') || document.getElementById('admin-reports-flash'), 'Note sent to Director only');
+        const cached = adminReportCache.find((r) => r.id === viewingReportId);
+        if (cached) cached.admin_director_note = note;
+        document.getElementById('admin-report-view-modal')?.classList.remove('open');
+      } catch (err) {
+        flash(document.getElementById('admin-report-view-flash') || document.getElementById('admin-reports-flash'), err.message, false);
+      }
     });
   }
 
@@ -976,10 +1145,14 @@ const CresAdmin = (() => {
   }
 
   async function mount(faceId, user) {
+    if (faceId === 'users' && ['admin', 'director', 'hr'].includes(user.role)) {
+      await mountUsers();
+      return;
+    }
     if (user.role !== 'admin') return;
     if (faceId === 'home') await mountHome();
     else if (faceId === 'finance') await mountFinance();
-    else if (faceId === 'users') await mountUsers();
+    else if (faceId === 'projects') await mountProjectsBoard();
     else if (faceId === 'reports') await mountReports();
     else if (faceId === 'organization') await mountSystemSettings();
     else if (faceId === 'email') await mountEmailOrg();

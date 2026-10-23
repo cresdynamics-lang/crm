@@ -329,6 +329,17 @@ const CresDirector = (() => {
               <td>${esc(r.content)}${r.project_name ? `<div class="meta">${esc(r.project_name)}</div>` : ''}${r.pm_note ? `<div class="meta">PM: ${esc(r.pm_note)}</div>` : ''}</td>
               <td>
                 ${r.remarks ? `<div class="rejection-banner" style="margin:0 0 6px;">${esc(r.remarks)}</div>` : '<span class="meta">No remarks yet</span>'}
+                ${
+                  r.admin_director_note
+                    ? `<div style="margin-top:8px;padding:8px;border-left:3px solid var(--accent);background:rgba(0,168,197,0.06);border-radius:0 6px 6px 0;">
+                         <div class="meta" style="margin-bottom:2px;">Admin note (private · Director only)</div>
+                         <div>${esc(r.admin_director_note)}</div>
+                         <div class="meta">${esc(r.admin_director_note_by_name || 'Admin')}${
+                           r.admin_director_note_at ? ` · ${CresFormat.datetime(r.admin_director_note_at)}` : ''
+                         }</div>
+                       </div>`
+                    : ''
+                }
                 ${remarkBox}
               </td>
               <td>${aiReviewBtn}</td>

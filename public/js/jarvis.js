@@ -38,15 +38,15 @@
     ],
     director: [
       'Give me today\'s summary.',
-      'What needs my approval?',
-      'Which invoices are overdue?',
-      'How is the team looking today?',
+      'Who logged in and what did the team do?',
+      'Which invoices are still pending?',
+      'Which payments were receipted recently?',
     ],
     admin: [
-      'Give me today\'s summary.',
-      'What needs my approval?',
-      'How is the system looking?',
-      'Any failed jobs?',
+      'Give me today\'s company summary.',
+      'Who logged in and what did they do?',
+      'How are finance, HR, and projects looking?',
+      'What did developers update?',
     ],
     client: [
       'What\'s the status of my project?',
@@ -131,11 +131,8 @@
 
   function els() {
     return {
-      root: document.getElementById('jarvis-root'),
-      panel: document.getElementById('jarvis-panel'),
+      workspace: document.getElementById('jarvis-workspace'),
       fab: document.getElementById('jarvis-fab'),
-      close: document.getElementById('jarvis-close'),
-      backdrop: document.getElementById('jarvis-backdrop'),
       log: document.getElementById('jarvis-log'),
       chips: document.getElementById('jarvis-chips'),
       input: document.getElementById('jarvis-input'),
@@ -146,16 +143,20 @@
     };
   }
 
-  function setOpen(open) {
-    const { root, input, fab } = els();
-    if (!root) return;
-    root.classList.toggle('open', open);
-    document.body.classList.toggle('jarvis-open', open);
-    if (open) {
-      input?.focus();
-    } else {
-      fab?.focus();
+  function goToJarvis() {
+    if (location.hash !== '#/jarvis') location.hash = '#/jarvis';
+  }
+
+  async function show() {
+    goToJarvis();
+    if (!loadHistory().length) renderChips();
+    else {
+      const { chips } = els();
+      if (chips) chips.hidden = true;
+      renderLog(loadHistory());
     }
+    await loadCapabilities();
+    els().input?.focus();
   }
 
   function setBusy(next) {
@@ -342,65 +343,40 @@
     });
   }
 
-  function mount() {
-    if (document.getElementById('jarvis-root')) return;
-    const root = document.createElement('div');
-    root.id = 'jarvis-root';
-    root.innerHTML = `
-      <button type="button" class="jarvis-fab" id="jarvis-fab" aria-label="Open Jarvis">
-        <img src="/brand/logo-mark.png" alt="" />
-      </button>
-      <div class="jarvis-backdrop" id="jarvis-backdrop"></div>
-      <aside class="jarvis-panel" id="jarvis-panel" role="dialog" aria-labelledby="jarvis-title" aria-modal="true">
-        <header class="jarvis-head">
-          <div>
-            <h2 id="jarvis-title">JARVIS</h2>
-            <p>Ask about your work</p>
-          </div>
-          <div class="jarvis-head-actions">
-            <button type="button" id="jarvis-speak" class="jarvis-icon-btn" aria-label="Read answers aloud" aria-pressed="false" title="Read answers aloud">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a9 9 0 0 1 0 14"/></svg>
-            </button>
-            <button type="button" id="jarvis-close" class="jarvis-icon-btn" aria-label="Close Jarvis">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-            </button>
-          </div>
-        </header>
-        <div class="jarvis-chips" id="jarvis-chips"></div>
-        <div class="jarvis-log" id="jarvis-log" aria-live="polite"></div>
-        <p class="jarvis-status" id="jarvis-status"></p>
-        <form class="jarvis-composer" id="jarvis-form">
-          <button type="button" id="jarvis-mic" class="jarvis-icon-btn" aria-label="Dictate question">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
-          </button>
-          <textarea id="jarvis-input" rows="1" placeholder="Ask Jarvis…" aria-label="Ask Jarvis"></textarea>
-          <button type="submit" id="jarvis-send" class="jarvis-send" aria-label="Send">Send</button>
-        </form>
-      </aside>
-    `;
-    document.body.appendChild(root);
-
-    const { fab, close, backdrop, input } = els();
-    fab.addEventListener('click', async () => {
-      if (!loadHistory().length) renderChips();
-      setOpen(true);
-      await loadCapabilities();
+  function mountFab() {
+    if (document.getElementById('jarvis-fab')) return;
+    const fab = document.createElement('button');
+    fab.type = 'button';
+    fab.className = 'jarvis-fab';
+    fab.id = 'jarvis-fab';
+    fab.setAttribute('aria-label', 'Open Jarvis');
+    fab.innerHTML = '<img src="/brand/logo-mark.png" alt="" />';
+    fab.addEventListener('click', () => {
+      goToJarvis();
     });
-    close.addEventListener('click', () => setOpen(false));
-    backdrop.addEventListener('click', () => setOpen(false));
-    document.getElementById('jarvis-form').addEventListener('submit', (e) => {
+    document.body.appendChild(fab);
+  }
+
+  function mount() {
+    if (document.getElementById('jarvis-form')?.dataset.bound === '1') {
+      mountFab();
+      return;
+    }
+    const { input } = els();
+    const form = document.getElementById('jarvis-form');
+    if (!form) {
+      mountFab();
+      return;
+    }
+    form.dataset.bound = '1';
+    form.addEventListener('submit', (e) => {
       e.preventDefault();
       ask();
     });
-    input.addEventListener('keydown', (e) => {
+    input?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         ask();
-      }
-    });
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && document.getElementById('jarvis-root')?.classList.contains('open')) {
-        setOpen(false);
       }
     });
 
@@ -408,6 +384,7 @@
     setupSpeak();
     renderChips();
     renderLog(loadHistory());
+    mountFab();
   }
 
   wrapLogout();
@@ -416,4 +393,6 @@
   } else {
     mount();
   }
+
+  window.CresJarvis = { show, open: show, mount };
 })();

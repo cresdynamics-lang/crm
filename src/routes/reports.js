@@ -14,6 +14,60 @@ const { markAttendance } = require('../services/attendanceService');
 const router = express.Router();
 router.use(authenticate);
 
+const ADMIN_NOTE_KEYS = [
+  'admin_director_note',
+  'admin_director_note_by',
+  'admin_director_note_at',
+  'admin_director_note_by_name',
+];
+const EXPECTED_REPORT_ROLES = ['sales', 'developer', 'pm', 'finance', 'director'];
+const WORK_QUESTIONS = [
+  { key: 'work_done', fallback: 'content', label: 'Done today' },
+  { key: 'blockers_text', label: 'Blocked by' },
+  { key: 'needs_attention', label: "Tomorrow's top 3" },
+  { key: 'hard_today', label: 'What was hard this week' },
+  { key: 'easy_today', label: 'What was easy this week' },
+  { key: 'happiness', label: 'What made you feel part of the team' },
+  { key: 'concerns', label: 'Anything on your mind' },
+];
+
+function presentReport(row, role) {
+  if (!row || ['admin', 'director'].includes(role)) return row;
+  const copy = { ...row };
+  for (const k of ADMIN_NOTE_KEYS) delete copy[k];
+  return copy;
+}
+
+function eatToday() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
+}
+
+async function saveAdminDirectorNote(report, adminUser, note) {
+  const { rows } = await query(
+    `UPDATE daily_reports
+     SET admin_director_note = $1,
+         admin_director_note_by = $2,
+         admin_director_note_at = NOW()
+     WHERE id = $3
+     RETURNING id, admin_director_note, admin_director_note_by, admin_director_note_at`,
+    [note, adminUser.id, report.id]
+  );
+
+  const { rows: directors } = await query(
+    `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
+     WHERE r.name = 'director' AND u.status = 'active'`
+  );
+  for (const d of directors) {
+    await queueNotification({
+      userId: d.id,
+      type: 'admin_report_note',
+      content: `Admin left a private note on ${report.author_name || 'a'} report`,
+      meta: { reportId: report.id, href: '#/reports?tab=daily' },
+    });
+  }
+  return rows[0];
+}
+
 router.get(
   '/',
   requirePermission('reports', 'view'),
@@ -46,11 +100,11 @@ router.get(
 
     if (req.query.date_from) {
       params.push(req.query.date_from);
-      clauses.push(`dr.created_at >= $${params.length}::date`);
+      clauses.push(`(dr.created_at AT TIME ZONE 'Africa/Nairobi')::date >= $${params.length}::date`);
     }
     if (req.query.date_to) {
       params.push(req.query.date_to);
-      clauses.push(`dr.created_at < ($${params.length}::date + INTERVAL '1 day')`);
+      clauses.push(`(dr.created_at AT TIME ZONE 'Africa/Nairobi')::date <= $${params.length}::date`);
     }
 
     if (!ownOnly) {
@@ -79,7 +133,8 @@ router.get(
               r.name AS author_role, p.name AS project_name,
               rv.name AS reviewed_by_name, fw.name AS forwarded_by_name,
               rm.name AS remarks_by_name,
-              rp.name AS remarks_reply_by_name
+              rp.name AS remarks_reply_by_name,
+              adn.name AS admin_director_note_by_name
        FROM daily_reports dr
        JOIN users u ON u.id = dr.user_id
        JOIN roles r ON r.id = u.role_id
@@ -88,14 +143,15 @@ router.get(
        LEFT JOIN users fw ON fw.id = dr.forwarded_by
        LEFT JOIN users rm ON rm.id = dr.remarks_by
        LEFT JOIN users rp ON rp.id = dr.remarks_reply_by
+       LEFT JOIN users adn ON adn.id = dr.admin_director_note_by
        ${where}
        ORDER BY dr.created_at DESC
        LIMIT 200`,
       params
     );
 
-    // Attach reactions for hub viewers (admin/director)
-    if (['admin', 'director'].includes(req.user.role) && rows.length) {
+    const leaders = ['admin', 'director'].includes(req.user.role);
+    if (leaders && rows.length) {
       const ids = rows.map((r) => r.id);
       const { rows: reactions } = await query(
         `SELECT rr.*, u.name AS author_name, u.avatar_url AS author_avatar_url
@@ -112,8 +168,8 @@ router.get(
       }
       for (const r of rows) {
         r.reactions = byReport.get(r.id) || [];
-        r.can_react = req.user.role === 'admin'
-          && ['director', 'pm', 'finance'].includes(r.author_role);
+        r.can_react = false;
+        r.can_director_note = req.user.role === 'admin';
         r.can_remark = req.user.role === 'director'
           && ['sales', 'developer'].includes(r.author_role);
       }
@@ -123,7 +179,69 @@ router.get(
       }
     }
 
-    res.json({ ok: true, data: rows });
+    res.json({
+      ok: true,
+      data: rows.map((r) => presentReport(r, req.user.role)),
+      meta: leaders ? { questions: WORK_QUESTIONS } : undefined,
+    });
+  })
+);
+
+router.get(
+  '/coverage',
+  requirePermission('reports', 'view'),
+  asyncHandler(async (req, res) => {
+    if (!['admin', 'director'].includes(req.user.role)) {
+      throw new AppError('Forbidden', 403, 'FORBIDDEN');
+    }
+    const day = String(req.query.date || eatToday());
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+      throw new AppError('date must be YYYY-MM-DD', 400, 'VALIDATION');
+    }
+    const roles = req.query.role && EXPECTED_REPORT_ROLES.includes(req.query.role)
+      ? [req.query.role]
+      : EXPECTED_REPORT_ROLES;
+
+    const { rows: staff } = await query(
+      `SELECT DISTINCT ON (u.id) u.id, u.name, r.name AS role
+       FROM users u
+       JOIN roles r ON r.id = u.role_id
+       WHERE u.status = 'active' AND r.name = ANY($1::text[])
+       ORDER BY u.id, u.name`,
+      [roles]
+    );
+    const { rows: filed } = await query(
+      `SELECT DISTINCT ON (dr.user_id)
+              dr.id, dr.user_id, dr.created_at, p.name AS project_name
+       FROM daily_reports dr
+       LEFT JOIN projects p ON p.id = dr.project_id
+       WHERE (dr.created_at AT TIME ZONE 'Africa/Nairobi')::date = $1::date
+       ORDER BY dr.user_id, dr.created_at DESC`,
+      [day]
+    );
+    const byUser = new Map(filed.map((r) => [r.user_id, r]));
+    const submitted = [];
+    const missing = [];
+    for (const u of staff) {
+      const report = byUser.get(u.id);
+      const person = { id: u.id, name: u.name, role: u.role };
+      if (report) {
+        submitted.push({
+          ...person,
+          report_id: report.id,
+          submitted_at: report.created_at,
+          project_name: report.project_name || null,
+        });
+      } else {
+        missing.push(person);
+      }
+    }
+    submitted.sort((a, b) => a.name.localeCompare(b.name));
+    missing.sort((a, b) => a.name.localeCompare(b.name));
+    res.json({
+      ok: true,
+      data: { date: day, submitted, missing, questions: WORK_QUESTIONS },
+    });
   })
 );
 
@@ -336,7 +454,7 @@ router.post(
       [req.user.id, note, req.params.id]
     );
     if (!rows[0]) throw new AppError('Report not found or already forwarded', 409, 'INVALID_STATE');
-    res.json({ ok: true, data: rows[0] });
+    res.json({ ok: true, data: presentReport(rows[0], req.user.role) });
   })
 );
 
@@ -378,7 +496,7 @@ router.post(
       });
     }
 
-    res.json({ ok: true, data: rows[0] });
+    res.json({ ok: true, data: presentReport(rows[0], req.user.role) });
   })
 );
 
@@ -389,7 +507,7 @@ router.post(
   '/:id/remarks',
   requirePermission('reports', 'view'),
   asyncHandler(async (req, res) => {
-    if (!['director', 'admin'].includes(req.user.role)) {
+    if (req.user.role !== 'director') {
       throw new AppError('Only Director can add remarks on these reports', 403, 'FORBIDDEN');
     }
     const remarks = (req.body?.remarks || '').trim();
@@ -424,60 +542,57 @@ router.post(
       meta: { reportId: report.id },
     });
 
-    res.json({ ok: true, data: rows[0] });
+    res.json({ ok: true, data: presentReport(rows[0], req.user.role) });
   })
 );
 
 /**
- * Admin reacts/responds to Director, PM, or Finance reports.
- * Sales and Developer reports are read-only (API-enforced).
+ * Admin private note — visible to Director only. Never notifies the reporter.
+ */
+async function loadReportForAdminNote(id) {
+  const { rows: reports } = await query(
+    `SELECT dr.id, dr.user_id, u.name AS author_name, r.name AS author_role
+     FROM daily_reports dr
+     JOIN users u ON u.id = dr.user_id
+     JOIN roles r ON r.id = u.role_id
+     WHERE dr.id = $1`,
+    [id]
+  );
+  return reports[0] || null;
+}
+
+router.post(
+  '/:id/director-note',
+  requirePermission('reports', 'view'),
+  asyncHandler(async (req, res) => {
+    if (req.user.role !== 'admin') {
+      throw new AppError('Only Admin can leave a Director-only note', 403, 'FORBIDDEN');
+    }
+    const note = (req.body?.note || req.body?.content || '').trim();
+    if (!note) throw new AppError('note required', 400, 'VALIDATION');
+    const report = await loadReportForAdminNote(req.params.id);
+    if (!report) throw new AppError('Report not found', 404, 'NOT_FOUND');
+    const saved = await saveAdminDirectorNote(report, req.user, note);
+    res.json({ ok: true, data: saved });
+  })
+);
+
+/**
+ * Legacy admin react endpoint. Writes a Director-only note instead of a public reaction.
  */
 router.post(
   '/:id/react',
   requirePermission('reports', 'view'),
   asyncHandler(async (req, res) => {
     if (req.user.role !== 'admin') {
-      throw new AppError('Only Admin can react to hub reports', 403, 'FORBIDDEN');
+      throw new AppError('Only Admin can leave a Director-only note', 403, 'FORBIDDEN');
     }
-    const content = (req.body?.content || '').trim();
+    const content = (req.body?.content || req.body?.note || '').trim();
     if (!content) throw new AppError('content required', 400, 'VALIDATION');
-
-    const { rows: reports } = await query(
-      `SELECT dr.id, r.name AS author_role, dr.user_id
-       FROM daily_reports dr
-       JOIN users u ON u.id = dr.user_id
-       JOIN roles r ON r.id = u.role_id
-       WHERE dr.id = $1`,
-      [req.params.id]
-    );
-    const report = reports[0];
+    const report = await loadReportForAdminNote(req.params.id);
     if (!report) throw new AppError('Report not found', 404, 'NOT_FOUND');
-    if (['sales', 'developer'].includes(report.author_role)) {
-      throw new AppError(
-        'Sales and Developer reports are read-only for Admin',
-        403,
-        'FORBIDDEN'
-      );
-    }
-    if (!['director', 'pm', 'finance'].includes(report.author_role)) {
-      throw new AppError('Reactions only allowed on Director, PM, or Finance reports', 403, 'FORBIDDEN');
-    }
-
-    const { rows } = await query(
-      `INSERT INTO report_reactions (report_id, user_id, content)
-       VALUES ($1, $2, $3)
-       RETURNING *`,
-      [report.id, req.user.id, content]
-    );
-
-    await queueNotification({
-      userId: report.user_id,
-      type: 'report_reaction',
-      content: `Admin responded to your report`,
-      meta: { reportId: report.id, reactionId: rows[0].id },
-    });
-
-    res.status(201).json({ ok: true, data: rows[0] });
+    const saved = await saveAdminDirectorNote(report, req.user, content);
+    res.status(201).json({ ok: true, data: saved });
   })
 );
 
@@ -489,7 +604,7 @@ router.post(
   '/:id/ai-review',
   requirePermission('reports', 'view'),
   asyncHandler(async (req, res) => {
-    if (!['director', 'admin'].includes(req.user.role)) {
+    if (req.user.role !== 'director') {
       throw new AppError('Only Director can use AI review', 403, 'FORBIDDEN');
     }
 
@@ -533,7 +648,7 @@ router.post(
   '/:id/remarks-ai',
   requirePermission('reports', 'view'),
   asyncHandler(async (req, res) => {
-    if (!['director', 'admin'].includes(req.user.role)) {
+    if (req.user.role !== 'director') {
       throw new AppError('Only Director can add remarks on these reports', 403, 'FORBIDDEN');
     }
     const remarks = (req.body?.remarks || '').trim();
@@ -576,7 +691,7 @@ router.post(
       meta: { reportId: report.id },
     });
 
-    res.json({ ok: true, data: rows[0] });
+    res.json({ ok: true, data: presentReport(rows[0], req.user.role) });
   })
 );
 
@@ -621,7 +736,7 @@ router.post(
       });
     }
 
-    res.json({ ok: true, data: rows[0] });
+    res.json({ ok: true, data: presentReport(rows[0], req.user.role) });
   })
 );
 

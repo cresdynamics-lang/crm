@@ -1,8 +1,26 @@
-/* Jarvis side panel — uses CRM tokens so it follows dark / light themes. */
+/* Jarvis page + shortcut FAB — uses CRM tokens so it follows dark / light themes. */
 
-#jarvis-root {
-  position: relative;
-  z-index: 70;
+.jarvis-workspace {
+  display: flex;
+  flex-direction: column;
+  min-height: min(70vh, calc(100vh - var(--topbar-h) - 140px));
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.jarvis-workspace .jarvis-log {
+  flex: 1;
+  min-height: 240px;
+}
+
+body:has(#face-jarvis.active) .jarvis-fab {
+  display: none;
+}
+
+.nav-list a[data-nav='jarvis'] .nav-icon {
+  color: var(--accent);
 }
 
 .jarvis-fab {

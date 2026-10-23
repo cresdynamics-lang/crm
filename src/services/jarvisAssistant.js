@@ -5,10 +5,26 @@
 const config = require('../config');
 const { hasPermission } = require('../middleware/rbac');
 const { searchKnowledge } = require('./knowledgeService');
+const { gatherCompanyBrief } = require('./jarvisBriefing');
 const { AppError } = require('../lib/errors');
 
 const STAFF = ['admin', 'director', 'sales', 'developer', 'finance', 'pm', 'hr'];
 const LEADERS = ['admin', 'director'];
+const BOOKS = ['admin', 'finance'];
+const PENDING_INVOICE_STATUSES = ['issued', 'overdue', 'partially_paid'];
+const DIRECTOR_BLOCKED_ENDPOINTS = new Set([
+  'finance_overview',
+  'finance_dashboard',
+  'finance_projects',
+  'cash_flow_report',
+  'website_payments',
+  'balances',
+  'expenses',
+  'payments',
+  'salary_funding',
+  'admin_dashboard',
+  'daily_digest',
+]);
 
 const ID_RE = /^[\w-]{1,64}$/;
 const QUERY_KEY_RE = /^[\w.-]{1,40}$/;
@@ -29,9 +45,9 @@ const CATALOG = [
   { id: 'me', path: '/api/auth/me', any: null, roles: [...STAFF, 'client'], desc: 'Your signed-in profile' },
   { id: 'notifications', path: '/api/notifications', any: [['notifications', 'view']], roles: null, desc: 'Your notifications' },
   { id: 'approvals', path: '/api/approvals', any: null, roles: STAFF, desc: 'Items waiting on you' },
-  { id: 'admin_dashboard', path: '/api/admin/dashboard', any: [['query', 'view']], roles: LEADERS, desc: 'Admin dashboard KPIs' },
-  { id: 'daily_digest', path: '/api/admin/daily-digest', any: [['reports', 'view']], roles: LEADERS, desc: "Today's operations digest" },
-  { id: 'director_dashboard', path: '/api/director/dashboard', any: [['projects', 'approve'], ['invoices', 'view']], roles: LEADERS, desc: 'Director dashboard' },
+  { id: 'admin_dashboard', path: '/api/admin/dashboard', any: [['query', 'view']], roles: ['admin'], desc: 'Admin dashboard KPIs' },
+  { id: 'daily_digest', path: '/api/admin/daily-digest', any: [['reports', 'view']], roles: ['admin'], desc: "Today's operations digest" },
+  { id: 'director_dashboard', path: '/api/director/dashboard', any: [['projects', 'approve'], ['invoices', 'view']], roles: LEADERS, desc: 'Director dashboard (projects, team, pending invoices — no books)' },
   { id: 'director_approvals', path: '/api/director/approvals', any: [['projects', 'approve']], roles: LEADERS, desc: 'Projects waiting for director approval' },
   { id: 'sales_dashboard', path: '/api/sales/dashboard', any: [['leads', 'view'], ['projects', 'view']], roles: ['sales', ...LEADERS], desc: 'Sales dashboard' },
   { id: 'developer_dashboard', path: '/api/developer/dashboard', any: [['projects', 'view']], roles: ['developer', 'admin'], desc: 'Developer dashboard' },
@@ -39,20 +55,21 @@ const CATALOG = [
   { id: 'pm_dashboard', path: '/api/pm/dashboard', any: [['projects', 'view']], roles: ['pm', ...LEADERS], desc: 'PM dashboard' },
   { id: 'pm_projects', path: '/api/pm/projects', any: [['projects', 'view']], roles: ['pm', ...LEADERS], desc: 'PM project list' },
   { id: 'pm_project', path: '/api/pm/projects/:id', any: [['projects', 'view']], roles: ['pm', ...LEADERS], desc: 'One PM project by id' },
-  { id: 'finance_overview', path: '/api/finance/overview', any: [['cash_flow', 'view'], ['account_balance', 'view'], ['invoices', 'view']], roles: ['finance', ...LEADERS], desc: 'Finance overview' },
-  { id: 'finance_dashboard', path: '/api/finance/dashboard', any: [['cash_flow', 'view'], ['account_balance', 'view']], roles: ['finance', ...LEADERS], desc: 'Finance dashboard' },
-  { id: 'finance_projects', path: '/api/finance/projects', any: [['projects', 'view']], roles: ['finance', ...LEADERS], desc: 'Finance project list' },
-  { id: 'cash_flow_report', path: '/api/finance/cash-flow-report', any: [['cash_flow', 'view'], ['account_balance', 'view']], roles: ['finance', ...LEADERS], desc: 'Cash flow report' },
-  { id: 'website_payments', path: '/api/finance/website-payments', any: [['cash_flow', 'view'], ['payments', 'view']], roles: ['finance', ...LEADERS], desc: 'Website payment records' },
-  { id: 'hr_dashboard', path: '/api/hr/dashboard', any: [['salaries', 'view']], roles: ['hr', ...LEADERS], desc: 'HR dashboard' },
-  { id: 'hr_applicants', path: '/api/hr/applicants', any: [['employees', 'view']], roles: ['hr', ...LEADERS], desc: 'Job applicants' },
-  { id: 'hr_onboarding', path: '/api/hr/onboarding', any: [['employees', 'view']], roles: ['hr', ...LEADERS], desc: 'Onboarding list' },
+  { id: 'finance_overview', path: '/api/finance/overview', any: [['cash_flow', 'view'], ['account_balance', 'view'], ['invoices', 'view']], roles: BOOKS, desc: 'Full finance overview (balances, revenue, expenses)' },
+  { id: 'finance_dashboard', path: '/api/finance/dashboard', any: [['cash_flow', 'view'], ['account_balance', 'view']], roles: BOOKS, desc: 'Finance dashboard' },
+  { id: 'finance_projects', path: '/api/finance/projects', any: [['projects', 'view']], roles: BOOKS, desc: 'Finance project balances' },
+  { id: 'cash_flow_report', path: '/api/finance/cash-flow-report', any: [['cash_flow', 'view'], ['account_balance', 'view']], roles: BOOKS, desc: 'Cash flow report' },
+  { id: 'website_payments', path: '/api/finance/website-payments', any: [['cash_flow', 'view'], ['payments', 'view']], roles: BOOKS, desc: 'Website payment records' },
+  { id: 'hr_dashboard', path: '/api/hr/dashboard', any: [['salaries', 'view']], roles: ['hr', 'admin'], desc: 'HR dashboard including payroll figures' },
+  { id: 'hr_applicants', path: '/api/hr/applicants', any: [['employees', 'view']], roles: ['hr', 'admin'], desc: 'Job applicants' },
+  { id: 'hr_onboarding', path: '/api/hr/onboarding', any: [['employees', 'view']], roles: ['hr', 'admin'], desc: 'Onboarding list' },
   { id: 'site_analytics', path: '/api/analytics/summary', any: null, roles: LEADERS, desc: 'Website analytics summary' },
   { id: 'system_health', path: '/api/admin/health/overview', any: null, roles: ['admin'], desc: 'System health overview' },
   { id: 'failed_jobs', path: '/api/admin/failed-jobs', any: [['settings', 'view']], roles: ['admin'], desc: 'Failed background jobs' },
   { id: 'email_activity', path: '/api/admin/email-activity', any: [['settings', 'view']], roles: ['admin'], desc: 'Outbound email activity' },
-  { id: 'admin_inbox', path: '/api/admin/inbox', any: [['users', 'view']], roles: LEADERS, desc: 'Admin inbox threads' },
-  { id: 'admin_inbox_item', path: '/api/admin/inbox/:id', any: [['users', 'view']], roles: LEADERS, desc: 'One admin inbox thread by id' },
+  { id: 'login_audit', path: '/api/invites/login-audit', any: [['users', 'view']], roles: ['admin'], desc: 'Who signed in (admin Organization log)' },
+  { id: 'admin_inbox', path: '/api/admin/inbox', any: [['users', 'view']], roles: ['admin'], desc: 'Admin inbox threads' },
+  { id: 'admin_inbox_item', path: '/api/admin/inbox/:id', any: [['users', 'view']], roles: ['admin'], desc: 'One admin inbox thread by id' },
   { id: 'search', path: '/api/search', any: [['query', 'view']], roles: STAFF, desc: 'Global search (pass query.q)' },
   { id: 'clients', path: '/api/clients', any: [['clients', 'view']], roles: STAFF, desc: 'Client list' },
   { id: 'client', path: '/api/clients/:id', any: [['clients', 'view']], roles: STAFF, desc: 'One client by id' },
@@ -72,18 +89,17 @@ const CATALOG = [
   { id: 'reports', path: '/api/reports', any: [['reports', 'view']], roles: STAFF, desc: 'Daily reports' },
   { id: 'attendance_team', path: '/api/attendance/team', any: [['reports', 'view']], roles: STAFF, desc: 'Team attendance' },
   { id: 'report_compliance', path: '/api/attendance/report-compliance', any: [['reports', 'view']], roles: STAFF, desc: 'Report compliance' },
-  { id: 'audit', path: '/api/audit', any: [['reports', 'view']], roles: STAFF, desc: 'Audit log' },
-  { id: 'invoices', path: '/api/invoices', any: [['invoices', 'view']], roles: STAFF, desc: 'Invoice list' },
-  { id: 'invoice', path: '/api/invoices/:id', any: [['invoices', 'view']], roles: STAFF, desc: 'One invoice by id' },
+  { id: 'audit', path: '/api/audit', any: [['reports', 'view']], roles: LEADERS, desc: 'What people did (action audit)' },
+  { id: 'audit_actions', path: '/api/audit/actions', any: [['reports', 'view']], roles: LEADERS, desc: 'Action audit trail' },
+  { id: 'invoices', path: '/api/invoices', any: [['invoices', 'view']], roles: STAFF, desc: 'Invoice list (director: pending/overdue only)' },
+  { id: 'invoice', path: '/api/invoices/:id', any: [['invoices', 'view']], roles: STAFF, desc: 'One invoice by id (director: pending/overdue only)' },
   { id: 'invoice_followups', path: '/api/invoices/followups', any: [['invoice_followups', 'view']], roles: STAFF, desc: 'Invoice follow-ups' },
-  { id: 'balances', path: '/api/invoices/meta/balances', any: [['account_balance', 'view']], roles: STAFF, desc: 'Account balances' },
-  { id: 'payments', path: '/api/payments', any: [['payments', 'view']], roles: STAFF, desc: 'Payment list' },
-  { id: 'expenses', path: '/api/expenses', any: [['expenses', 'view']], roles: STAFF, desc: 'Expense list' },
-  { id: 'salaries', path: '/api/salaries', any: [['salaries', 'view']], roles: STAFF, desc: 'Salary list' },
+  { id: 'balances', path: '/api/invoices/meta/balances', any: [['account_balance', 'view']], roles: BOOKS, desc: 'Account balances' },
+  { id: 'payments', path: '/api/payments', any: [['payments', 'view']], roles: BOOKS, desc: 'All payments (full books)' },
+  { id: 'expenses', path: '/api/expenses', any: [['expenses', 'view']], roles: BOOKS, desc: 'Expense list' },
+  { id: 'salaries', path: '/api/salaries', any: [['salaries', 'view']], roles: ['hr', 'admin', 'finance'], desc: 'Salary list' },
   { id: 'my_salary', path: '/api/salaries/me', any: [['salaries', 'view']], roles: STAFF, desc: 'Your salary' },
-  // The route itself does not scope to the caller (it returns the whole month's
-  // payroll total), so keep it to the roles that run payroll.
-  { id: 'salary_funding', path: '/api/salaries/funding/summary', any: [['salaries', 'view']], roles: ['finance', 'hr', ...LEADERS], desc: 'Salary funding summary' },
+  { id: 'salary_funding', path: '/api/salaries/funding/summary', any: [['salaries', 'view']], roles: ['finance', 'hr', 'admin'], desc: 'Salary funding summary' },
   { id: 'employees', path: '/api/salaries/employees', any: [['employees', 'view']], roles: STAFF, desc: 'Employee list' },
   { id: 'my_leave', path: '/api/leave/mine', any: [['leave', 'view']], roles: STAFF, desc: 'Your leave' },
   { id: 'leave', path: '/api/leave', any: [['leave', 'view'], ['employees', 'view']], roles: STAFF, desc: 'Leave requests' },
@@ -104,6 +120,7 @@ function isAllowed(user, entry) {
   } else if (portal) {
     return false;
   }
+  if (role === 'director' && DIRECTOR_BLOCKED_ENDPOINTS.has(entry.id)) return false;
   if (entry.roles && entry.roles.length && !entry.roles.includes(role)) return false;
   if (entry.any && entry.any.length) {
     return entry.any.some(([resource, action]) => hasPermission(user, resource, action));
@@ -155,13 +172,36 @@ function nairobiNow() {
   }).format(new Date());
 }
 
+function roleRules(role) {
+  if (role === 'admin') {
+    return [
+      'This is Admin: they get the full company picture. Use company_brief first for overviews.',
+      'You may report logins, what people did, sales, HR (including payroll), project management, developer updates, invoices, receipts, expenses, cash flow, and account balances.',
+    ].join(' ');
+  }
+  if (role === 'director') {
+    return [
+      'This is Director. Use company_brief first for overviews.',
+      'You MAY report: who logged in, what people did, sales, project management, developer updates, HR operations (headcount, leave, attendance, applicants), pending/overdue invoices, and stamped receipts for payments that have been recorded and cleared.',
+      'You must NOT report account balances, cash-flow totals, expense lists or expense totals, salary funding, payroll figures, or general financial health.',
+      'If asked for the books, say Admin and Finance hold those numbers, then offer pending invoices or recent receipt stamps instead.',
+    ].join(' ');
+  }
+  return 'Stay inside this role\'s allowed endpoints. Do not volunteer another department\'s numbers.';
+}
+
 function buildSystemPrompt(user, allowed) {
   const name = user?.name || 'there';
   const role = user?.role || 'user';
   const list = allowed.map((e) => `- ${e.id}: ${e.desc}`).join('\n');
+  const leaderTool = LEADERS.includes(role)
+    ? 'You also have company_brief for a live snapshot of operations (and, for Admin, full finance). Call it before answering company-wide questions.'
+    : '';
   return [
     `You are JARVIS, the assistant inside the Cres Dynamics CRM, talking to ${name} (${role}).`,
     `Today is ${nairobiNow()} (Africa/Nairobi).`,
+    roleRules(role),
+    leaderTool,
     'Answer only from tool results; look things up before answering; never invent names, figures, dates or statuses.',
     'Read-only: if asked to change something, say which CRM page to use.',
     'If data is outside the role or a tool says "Not allowed", say their role doesn\'t have access — no guessing, no workarounds.',
@@ -169,7 +209,7 @@ function buildSystemPrompt(user, allowed) {
     'Brief: direct answer first, then key facts; KES for money. Format for a small chat panel: plain sentences, **bold** for emphasis and "- " bullet lines only — no tables, headings or links in markdown syntax.',
     'Allowed endpoint ids:',
     list,
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 function clipHistory(history) {
@@ -183,8 +223,8 @@ function clipHistory(history) {
     }));
 }
 
-function buildTools(allowedIds) {
-  return [
+function buildTools(allowedIds, role) {
+  const tools = [
     {
       type: 'function',
       function: {
@@ -221,6 +261,20 @@ function buildTools(allowedIds) {
       },
     },
   ];
+  if (LEADERS.includes(role)) {
+    tools.unshift({
+      type: 'function',
+      function: {
+        name: 'company_brief',
+        description:
+          role === 'admin'
+            ? 'Live company snapshot: logins, what people did, sales, HR, projects, developer updates, pending invoices, cleared receipts, and full finance.'
+            : 'Live company snapshot: logins, what people did, sales, HR operations, projects, developer updates, pending invoices, and stamped receipts for cleared payments. No balances, expenses, or payroll.',
+        parameters: { type: 'object', properties: {} },
+      },
+    });
+  }
+  return tools;
 }
 
 function fetchWithTimeout(url, options, ms) {
@@ -294,7 +348,28 @@ function sanitizeQuery(query) {
   return out;
 }
 
+function filterDirectorPayload(endpointId, data) {
+  if (endpointId !== 'invoices' && endpointId !== 'invoice') return data;
+  const keep = (row) => PENDING_INVOICE_STATUSES.includes(String(row?.status || ''));
+  if (Array.isArray(data)) return data.filter(keep);
+  if (data && typeof data === 'object' && Array.isArray(data.items)) {
+    return { ...data, items: data.items.filter(keep) };
+  }
+  if (data && typeof data === 'object' && data.status && !keep(data)) {
+    return {
+      notice:
+        'This invoice is not pending. Director may only see pending/overdue invoices or stamped receipts for cleared payments.',
+      status: data.status,
+      invoice_number: data.invoice_number || null,
+    };
+  }
+  return data;
+}
+
 async function executeCrmGet({ user, authHeader, endpointId, id, query }) {
+  if (user?.role === 'director' && DIRECTOR_BLOCKED_ENDPOINTS.has(endpointId)) {
+    return 'ERROR: Not allowed for this user\'s role.';
+  }
   const entry = allowedEndpoints(user).find((e) => e.id === endpointId);
   if (!entry) return 'ERROR: Not allowed for this user\'s role.';
 
@@ -333,7 +408,9 @@ async function executeCrmGet({ user, authHeader, endpointId, id, query }) {
   if (!res.ok) return 'ERROR: Lookup failed.';
 
   const body = await res.json().catch(() => ({}));
-  return scrubResult(body.data ?? body);
+  let payload = body.data ?? body;
+  if (user?.role === 'director') payload = filterDirectorPayload(endpointId, payload);
+  return scrubResult(payload);
 }
 
 async function executeSearchKnowledge(user, text) {
@@ -361,6 +438,12 @@ function parseToolArgs(raw) {
 }
 
 async function runTool({ user, authHeader, name, args, used }) {
+  if (name === 'company_brief') {
+    used.push('company_brief');
+    if (!LEADERS.includes(user?.role)) return 'ERROR: Not allowed for this user\'s role.';
+    const brief = await gatherCompanyBrief(user);
+    return scrubResult(brief);
+  }
   if (name === 'crm_get') {
     const endpoint = String(args.endpoint || '');
     if (endpoint) used.push(endpoint);
@@ -385,7 +468,9 @@ async function askJarvis({ user, authHeader, message, history }) {
 
   const allowed = allowedEndpoints(user);
   const allowedIds = allowed.map((e) => e.id);
-  const tools = allowedIds.length ? buildTools(allowedIds) : undefined;
+  const tools = allowedIds.length || LEADERS.includes(user?.role)
+    ? buildTools(allowedIds, user?.role)
+    : undefined;
   const used = [];
 
   const question = String(message || '').slice(0, MAX_MESSAGE);

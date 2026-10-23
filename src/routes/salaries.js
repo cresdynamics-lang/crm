@@ -6,6 +6,7 @@ const { requirePermission, requireAnyPermission, hasPermission } = require('../m
 const { asyncHandler, AppError } = require('../lib/errors');
 const { idempotency } = require('../middleware/idempotency');
 const { queueNotification } = require('../queues/jobs');
+const { removeStaffUser } = require('../services/staffRemoval');
 
 const router = express.Router();
 router.use(authenticate);
@@ -355,6 +356,24 @@ router.get(
         canSettle: canManagePayroll(req.user),
       },
     });
+  })
+);
+
+router.delete(
+  '/employees/:id',
+  requireAnyPermission([['employees', 'edit'], ['users', 'delete']]),
+  asyncHandler(async (req, res) => {
+    const { rows } = await query(
+      `SELECT e.id, e.user_id, u.name
+       FROM employees e JOIN users u ON u.id = e.user_id
+       WHERE e.id = $1`,
+      [req.params.id]
+    );
+    if (!rows[0]) throw new AppError('Employee not found', 404, 'NOT_FOUND');
+    const removed = await removeStaffUser(req.user, rows[0].user_id, {
+      reason: 'hr_employee_remove',
+    });
+    res.json({ ok: true, data: { employee_id: rows[0].id, user: removed } });
   })
 );
 

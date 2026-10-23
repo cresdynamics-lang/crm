@@ -1,24 +1,18 @@
 /**
- * Community messaging matrix - enforced server-side on /api/messages.
- * Clients are NEVER in internal Community.
- * Admin can message everyone (except clients - clients aren't in Community).
+ * Community messaging — every staff role can message every other staff role.
+ * Clients stay on the portal and are never in internal Community.
  */
-const MESSAGING_MATRIX = {
-  sales: ['developer', 'director', 'pm', 'admin', 'finance'],
-  developer: ['sales', 'director', 'pm', 'admin'],
-  director: ['sales', 'developer', 'pm', 'admin', 'finance'],
-  pm: ['sales', 'developer', 'director', 'admin', 'finance'],
-  admin: ['sales', 'developer', 'director', 'pm', 'finance', 'hr', 'admin'],
-  finance: ['admin', 'director', 'sales', 'pm', 'hr'],
-  hr: ['admin', 'finance'],
-  client: [],
-};
+const STAFF_ROLES = ['sales', 'developer', 'director', 'pm', 'admin', 'finance', 'hr'];
+
+const MESSAGING_MATRIX = Object.fromEntries(
+  STAFF_ROLES.map((role) => [role, STAFF_ROLES.slice()])
+);
+MESSAGING_MATRIX.client = [];
 
 function canMessage(senderRole, recipientRole) {
   if (!senderRole || !recipientRole) return false;
   if (recipientRole === 'client' || senderRole === 'client') return false;
-  const allowed = MESSAGING_MATRIX[senderRole] || [];
-  return allowed.includes(recipientRole);
+  return STAFF_ROLES.includes(senderRole) && STAFF_ROLES.includes(recipientRole);
 }
 
-module.exports = { MESSAGING_MATRIX, canMessage };
+module.exports = { MESSAGING_MATRIX, STAFF_ROLES, canMessage };

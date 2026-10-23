@@ -3,6 +3,7 @@ const { query } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission, requireAnyPermission } = require('../middleware/rbac');
 const { asyncHandler, AppError } = require('../lib/errors');
+const { progressPercent } = require('../services/milestones');
 
 const router = express.Router();
 router.use(authenticate);
@@ -51,6 +52,40 @@ router.get(
   '/projects.csv',
   requirePermission('projects', 'view'),
   asyncHandler(async (req, res) => {
+    if (req.user.role === 'admin') {
+      const { rows } = await query(
+        `SELECT p.id, p.name, p.status, p.value_amount, p.milestones, p.due_date, p.created_at,
+                c.name AS client_name, d.name AS developer_name,
+                COALESCE(SUM(i.amount), 0)::float AS invoiced,
+                COALESCE(SUM(COALESCE(i.amount_paid, 0)), 0)::float AS paid,
+                COALESCE(SUM(GREATEST(i.amount - COALESCE(i.amount_paid, 0), 0)), 0)::float AS balance
+         FROM projects p
+         LEFT JOIN clients c ON c.id = p.client_id
+         LEFT JOIN users d ON d.id = p.assigned_developer_id
+         LEFT JOIN invoices i ON i.project_id = p.id
+         GROUP BY p.id, p.name, p.status, p.value_amount, p.milestones, p.due_date, p.created_at,
+                  c.name, d.name
+         ORDER BY p.name ASC
+         LIMIT 2000`
+      );
+      const csv = toCsv(rows, [
+        { label: 'project', key: 'name' },
+        { label: 'client', key: 'client_name' },
+        { label: 'status', key: 'status' },
+        { label: 'progress_pct', value: (r) => progressPercent(r.milestones) },
+        { label: 'value_kes', key: 'value_amount' },
+        { label: 'invoiced_kes', key: 'invoiced' },
+        { label: 'paid_kes', key: 'paid' },
+        { label: 'balance_kes', key: 'balance' },
+        { label: 'developer', key: 'developer_name' },
+        { label: 'due_date', key: 'due_date' },
+      ]);
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename="projects.csv"');
+      res.send(csv);
+      return;
+    }
+
     const { rows } = await query(
       `SELECT p.id, p.name, p.status, p.created_at, c.name AS client_name, d.name AS developer_name
        FROM projects p

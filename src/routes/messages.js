@@ -11,9 +11,7 @@ router.use(authenticate);
 
 /**
  * GET /api/messages/contacts
- * Contact list filtered SERVER-SIDE by messaging matrix.
- * A developer's request never receives client records.
- * Finance gets empty list (notification feed only).
+ * Staff directory minus clients, filtered server-side.
  */
 router.get(
   '/contacts',

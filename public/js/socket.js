@@ -9,6 +9,7 @@ const CresRealtime = (() => {
     status: [],
     notification: [],
     message: [],
+    call: [],
   };
 
   function on(event, fn) {
@@ -68,6 +69,11 @@ const CresRealtime = (() => {
 
     socket.on('notification:new', (n) => emitLocal('notification', n));
     socket.on('message:new', (m) => emitLocal('message', m));
+    ['call:invite', 'call:accept', 'call:reject', 'call:offer', 'call:answer', 'call:ice', 'call:hangup'].forEach(
+      (event) => {
+        socket.on(event, (payload) => emitLocal('call', { event, ...payload }));
+      }
+    );
   }
 
   function disconnect() {
@@ -147,6 +153,12 @@ const CresRealtime = (() => {
     return socket;
   }
 
+  function emitCall(event, payload) {
+    if (!socket?.connected) return false;
+    socket.emit(event, payload);
+    return true;
+  }
+
   return {
     connect,
     disconnect,
@@ -154,6 +166,7 @@ const CresRealtime = (() => {
     joinConversation,
     leaveConversation,
     sendMessage,
+    emitCall,
     getStatus,
     getSocket,
     startPollFallback,

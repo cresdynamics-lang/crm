@@ -334,6 +334,70 @@ body.modal-open {
   margin-bottom: 4px;
 }
 
+.coverage-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 8px;
+}
+@media (max-width: 720px) {
+  .coverage-grid { grid-template-columns: 1fr; }
+}
+.coverage-col {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  padding: 12px;
+}
+.coverage-col h3 {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+}
+.coverage-col ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 280px;
+  overflow: auto;
+}
+.coverage-col li {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface, rgba(255,255,255,0.02));
+}
+.coverage-col li.clickable {
+  cursor: pointer;
+}
+.coverage-col li.clickable:hover {
+  border-color: var(--accent);
+}
+.engagement-list.coverage-reports {
+  max-height: none;
+}
+.engagement-list.coverage-reports li.clickable {
+  cursor: pointer;
+}
+.engagement-list.coverage-reports li.clickable:hover {
+  border-color: var(--accent);
+}
+.report-qa {
+  margin: 0;
+}
+.report-qa dt {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin: 12px 0 4px;
+  font-weight: 600;
+}
+.report-qa dd {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
 .empty-state {
   padding: 28px;
   text-align: center;

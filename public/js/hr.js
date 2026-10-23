@@ -152,6 +152,8 @@ const CresHR = (() => {
         tbody.innerHTML = '<tr><td colspan="5" class="muted">No employees yet. Add one to get started.</td></tr>';
         return;
       }
+      const me = CresAPI.getUser();
+      const canRemove = ['hr', 'admin', 'director'].includes(me.role);
       tbody.innerHTML = rows
         .map(
           (e) => `
@@ -159,8 +161,15 @@ const CresHR = (() => {
           <td>${esc(e.name)}</td>
           <td>${esc(e.position || '-')}</td>
           <td>${esc(e.pay_cycle || '-')}</td>
-          <td>${statusPill(e.current_salary_status || 'owed')}</td>
-          <td><button type="button" class="btn btn-ghost btn-sm" data-edit="${esc(e.id)}">Edit</button></td>
+          <td>${statusPill(e.current_salary_status || 'owed')}${e.user_status === 'inactive' ? ' · removed' : ''}</td>
+          <td>
+            <button type="button" class="btn btn-ghost btn-sm" data-edit="${esc(e.id)}">Edit</button>
+            ${
+              canRemove && e.user_status !== 'inactive' && e.user_id !== me.id
+                ? `<button type="button" class="btn btn-ghost btn-sm" data-remove-emp="${esc(e.id)}" style="color:#ffb4b4;">Remove</button>`
+                : ''
+            }
+          </td>
         </tr>`
         )
         .join('');
@@ -175,6 +184,20 @@ const CresHR = (() => {
         btn.addEventListener('click', (ev) => {
           ev.stopPropagation();
           openEmployeeForm(btn.dataset.edit);
+        });
+      });
+      tbody.querySelectorAll('[data-remove-emp]').forEach((btn) => {
+        btn.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          const row = rows.find((x) => x.id === btn.dataset.removeEmp);
+          if (!row) return;
+          if (!confirm(`Remove ${row.name}? They will lose access. Payroll history stays.`)) return;
+          try {
+            await CresAPI.request(`/api/salaries/employees/${row.id}`, { method: 'DELETE' });
+            await mountEmployees();
+          } catch (err) {
+            alert(err.message);
+          }
         });
       });
     } catch (err) {

@@ -163,7 +163,7 @@
 
     if (user.role === 'admin' && ['users', 'login-audit', 'health', 'organization', 'email'].includes(faceId)) {
       insertTabs(document.getElementById(`face-${faceId}`), [
-        { href: '#/users', id: 'users', label: 'Users' },
+        { href: '#/users', id: 'users', label: 'Staff' },
         { href: '#/login-audit', id: 'login-audit', label: 'Login audit' },
         { href: '#/health', id: 'health', label: 'Health' },
         { href: '#/organization', id: 'organization', label: 'Company' },
@@ -230,6 +230,7 @@
     '/settings': 'Settings',
     '/community': 'Community',
     '/ops': 'Help',
+    '/jarvis': 'Jarvis',
   };
 
   const shell = document.getElementById('app-shell');
@@ -254,7 +255,7 @@
     const path = faceId === 'home' ? '/' : `/${faceId}`;
     const face = document.getElementById(`face-${faceId}`);
 
-    if (faceId === 'community' && (user.role === 'client' || !permissions.includes('messages:view'))) {
+    if (faceId === 'community' && user.role === 'client') {
       location.hash = '#/';
       return;
     }
@@ -402,7 +403,10 @@
       const blurb = document.getElementById('reports-blurb');
       if (isAdminHub) {
         if (heading) heading.textContent = 'Reports';
-        if (blurb) blurb.textContent = 'What happened today across Finance, Director, and Admin — plus analytics and the action log.';
+        if (blurb) {
+          blurb.textContent =
+            'See who shared a report, who did not, and the work they logged. Open a report to view it.';
+        }
       } else if (isPmHub) {
         if (heading) heading.textContent = 'Reports hub';
         if (blurb) blurb.textContent = 'Review today’s reports, then approve or forward to the Director.';
@@ -482,11 +486,13 @@
     const clientProjects = document.getElementById('client-projects-panel');
     const clientDetail = document.getElementById('client-project-detail');
     const financeProjects = document.getElementById('finance-projects-panel');
+    const adminProjects = document.getElementById('admin-projects-panel');
     if (faceId === 'projects') {
       const isPm = user.role === 'pm';
       const isClient = user.role === 'client';
       const isFinance = user.role === 'finance';
       const isDirector = user.role === 'director';
+      const isAdmin = user.role === 'admin';
       const timelineOn =
         faceQuery().get('tab') === 'timeline' && ['admin', 'director', 'pm'].includes(user.role);
       const timelinePanel = document.getElementById('projects-timeline-panel');
@@ -498,18 +504,20 @@
         if (clientProjects) clientProjects.hidden = true;
         if (clientDetail) clientDetail.hidden = true;
         if (financeProjects) financeProjects.hidden = true;
+        if (adminProjects) adminProjects.hidden = true;
       } else {
-        if (salesProjects) salesProjects.hidden = isPm || isClient || isFinance;
+        if (salesProjects) salesProjects.hidden = isPm || isClient || isFinance || isAdmin;
         if (pmProjects) pmProjects.hidden = isPm ? !!faceParam : true;
         if (pmDetail) pmDetail.hidden = !(isPm && faceParam);
         if (clientProjects) clientProjects.hidden = isClient ? !!faceParam : true;
         if (clientDetail) clientDetail.hidden = !(isClient && faceParam);
         if (financeProjects) financeProjects.hidden = !isFinance;
+        if (adminProjects) adminProjects.hidden = !isAdmin;
       }
       const newProjBtn = document.getElementById('btn-new-project');
       if (newProjBtn) {
         newProjBtn.hidden =
-          timelineOn || isFinance || isClient || isPm || isDirector || user.role === 'developer';
+          timelineOn || isFinance || isClient || isPm || isDirector || isAdmin || user.role === 'developer';
       }
       const hero = salesProjects?.querySelector('.face-hero');
       if (hero) {
@@ -520,7 +528,7 @@
           if (p) {
             p.textContent = 'Open a project to review progress and milestones.';
           }
-        } else if (user.role === 'sales' || user.role === 'admin') {
+        } else if (user.role === 'sales') {
           if (h2) h2.textContent = 'Projects';
           if (p) {
             p.textContent = 'Create a project or check progress for a client.';
@@ -560,6 +568,9 @@
     if (faceId === 'community') {
       await CresCommunity.mount();
     }
+    if (faceId === 'jarvis' && typeof CresJarvis !== 'undefined') {
+      await CresJarvis.show();
+    }
 
     const timelineOn =
       faceId === 'projects' &&
@@ -570,11 +581,7 @@
     if (typeof CresSales !== 'undefined') {
       if (user.role === 'sales') {
         jobs.push(CresSales.mount(faceId, user));
-      } else if (
-        user.role === 'admin' &&
-        ['projects', 'followups', 'email'].includes(faceId) &&
-        !timelineOn
-      ) {
+      } else if (user.role === 'admin' && ['followups', 'email'].includes(faceId)) {
         jobs.push(CresSales.mount(faceId, user));
       } else if (['director', 'pm'].includes(user.role) && faceId === 'pipeline') {
         jobs.push(CresSales.mount(faceId, user));
@@ -601,7 +608,7 @@
       jobs.push(CresPM.mount(faceId, user, faceParam));
     }
 
-    if (typeof CresAdmin !== 'undefined' && user.role === 'admin') {
+    if (typeof CresAdmin !== 'undefined' && ['admin', 'director', 'hr'].includes(user.role)) {
       jobs.push(CresAdmin.mount(faceId, user));
     }
 
@@ -962,6 +969,7 @@
   if (typeof CresMyWork !== 'undefined') CresMyWork.bind();
   if (typeof CresOps !== 'undefined') CresOps.bind();
   CresCommunity.bind();
+  if (typeof CresCalls !== 'undefined') CresCalls.bind();
   if (typeof CresProjectDetail !== 'undefined') CresProjectDetail.bind();
   if (typeof CresClientCard !== 'undefined') CresClientCard.bind();
   CresSales.bindModals();

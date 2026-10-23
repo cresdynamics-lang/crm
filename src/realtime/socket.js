@@ -7,9 +7,14 @@ const jwt = require('jsonwebtoken');
 const config = require('../config');
 const { findActiveUserById, loadUserPermissions } = require('../services/authService');
 const { query } = require('../config/database');
-const { canMessage } = require('../lib/messagingMatrix');
+const { canMessage, STAFF_ROLES } = require('../lib/messagingMatrix');
 
 let io = null;
+const liveCalls = new Map();
+
+function isStaffRole(role) {
+  return (STAFF_ROLES || []).includes(role);
+}
 
 function getIo() {
   return io;
@@ -152,8 +157,88 @@ function initSocket(server) {
       }
     });
 
+    socket.on('call:invite', (payload = {}) => {
+      const to = payload.to;
+      const kind = ['audio', 'video', 'screen'].includes(payload.kind) ? payload.kind : 'audio';
+      if (!to || to === socket.user.id) return;
+      if (!isStaffRole(socket.user.role)) return;
+      const callId = String(payload.callId || '').trim();
+      if (!callId) return;
+      liveCalls.set(callId, { from: socket.user.id, to, kind });
+      io.to(userRoom(to)).emit('call:invite', {
+        callId,
+        from: socket.user.id,
+        fromName: socket.user.name,
+        fromRole: socket.user.role,
+        kind,
+        conversationId: payload.conversationId || null,
+      });
+    });
+
+    socket.on('call:accept', (payload = {}) => {
+      const call = liveCalls.get(payload.callId);
+      if (!call || call.to !== socket.user.id) return;
+      io.to(userRoom(call.from)).emit('call:accept', {
+        callId: payload.callId,
+        from: socket.user.id,
+      });
+    });
+
+    socket.on('call:reject', (payload = {}) => {
+      const call = liveCalls.get(payload.callId);
+      if (!call || (call.to !== socket.user.id && call.from !== socket.user.id)) return;
+      const other = call.from === socket.user.id ? call.to : call.from;
+      liveCalls.delete(payload.callId);
+      io.to(userRoom(other)).emit('call:reject', { callId: payload.callId });
+    });
+
+    socket.on('call:offer', (payload = {}) => {
+      const call = liveCalls.get(payload.callId);
+      if (!call || (call.from !== socket.user.id && call.to !== socket.user.id)) return;
+      const other = call.from === socket.user.id ? call.to : call.from;
+      io.to(userRoom(other)).emit('call:offer', {
+        callId: payload.callId,
+        sdp: payload.sdp,
+      });
+    });
+
+    socket.on('call:answer', (payload = {}) => {
+      const call = liveCalls.get(payload.callId);
+      if (!call || (call.from !== socket.user.id && call.to !== socket.user.id)) return;
+      const other = call.from === socket.user.id ? call.to : call.from;
+      io.to(userRoom(other)).emit('call:answer', {
+        callId: payload.callId,
+        sdp: payload.sdp,
+      });
+    });
+
+    socket.on('call:ice', (payload = {}) => {
+      const call = liveCalls.get(payload.callId);
+      if (!call || (call.from !== socket.user.id && call.to !== socket.user.id)) return;
+      const other = call.from === socket.user.id ? call.to : call.from;
+      io.to(userRoom(other)).emit('call:ice', {
+        callId: payload.callId,
+        candidate: payload.candidate,
+      });
+    });
+
+    socket.on('call:hangup', (payload = {}) => {
+      const call = liveCalls.get(payload.callId);
+      if (!call) return;
+      if (call.from !== socket.user.id && call.to !== socket.user.id) return;
+      const other = call.from === socket.user.id ? call.to : call.from;
+      liveCalls.delete(payload.callId);
+      io.to(userRoom(other)).emit('call:hangup', { callId: payload.callId });
+    });
+
     socket.on('disconnect', () => {
-      // no-op - client falls back to REST poll
+      for (const [callId, call] of liveCalls) {
+        if (call.from === socket.user.id || call.to === socket.user.id) {
+          const other = call.from === socket.user.id ? call.to : call.from;
+          liveCalls.delete(callId);
+          io.to(userRoom(other)).emit('call:hangup', { callId, reason: 'disconnect' });
+        }
+      }
     });
   });
 

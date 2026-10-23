@@ -12,6 +12,19 @@ const CresNav = (() => {
       icon: '⌂',
     },
     {
+      id: 'jarvis',
+      label: 'Jarvis',
+      href: '#/jarvis',
+      icon: '✦',
+    },
+    {
+      id: 'community',
+      label: 'Community',
+      href: '#/community',
+      icon: '💬',
+      hideRoles: ['client'],
+    },
+    {
       id: 'approvals',
       label: 'Approvals',
       href: '#/approvals',
@@ -175,15 +188,6 @@ const CresNav = (() => {
       anyOf: ['users:create', 'users:view'],
       rolesOnly: ['admin'],
     },
-    {
-      id: 'community',
-      label: 'Community',
-      href: '#/community',
-      icon: '💬',
-      anyOf: ['messages:view'],
-      hideRoles: ['client', 'admin'],
-      labelByRole: { finance: 'Team chat' },
-    },
   ];
 
   function visibleItems(user, permissions) {
@@ -211,9 +215,6 @@ const CresNav = (() => {
     }
     if (staff) {
       items.push({ id: 'help', label: 'Help', href: '#/ops' });
-    }
-    if (user.role === 'admin' && perms.includes('messages:view')) {
-      items.push({ id: 'community', label: 'Team chat', href: '#/community' });
     }
     return items;
   }
@@ -249,7 +250,8 @@ const CresNav = (() => {
           (item.id === 'projects' && (hrefPath === '#/projects' || hrefPath === '#/timeline')) ||
           (item.id === 'pipeline' && (hrefPath === '#/leads' || hrefPath === '#/clients'));
         const label = item.labelByRole?.[user.role] || item.label;
-        return `<li>
+        const liClass = item.id === 'community' ? ' class="nav-core-end"' : '';
+        return `<li${liClass}>
           <a href="${item.href}" class="${active ? 'active' : ''}" data-nav="${item.id}">
             <span class="nav-icon">${item.icon}</span>
             <span>${label}</span>

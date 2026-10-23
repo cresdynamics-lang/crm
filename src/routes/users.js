@@ -5,6 +5,7 @@ const { authenticate } = require('../middleware/auth');
 const { requirePermission, requireAnyPermission } = require('../middleware/rbac');
 const { asyncHandler, AppError } = require('../lib/errors');
 const { idempotency } = require('../middleware/idempotency');
+const { removeStaffUser } = require('../services/staffRemoval');
 
 const router = express.Router();
 router.use(authenticate);
@@ -214,6 +215,17 @@ router.patch(
         ? { note: 'Role takes effect on the user next authenticated request (DB re-verify)' }
         : undefined,
     });
+  })
+);
+
+router.delete(
+  '/:id',
+  requireAnyPermission([['users', 'delete'], ['users', 'edit'], ['employees', 'edit']]),
+  asyncHandler(async (req, res) => {
+    const data = await removeStaffUser(req.user, req.params.id, {
+      reason: req.body?.reason || req.query?.reason,
+    });
+    res.json({ ok: true, data });
   })
 );
 

@@ -10,6 +10,7 @@ const CresCommunity = (() => {
   let ctxConversationId = null;
   let messagePoll = null;
   let peerCache = {};
+  let activePeer = null;
 
   function me() {
     return CresAPI.getUser();
@@ -113,6 +114,7 @@ const CresCommunity = (() => {
     }
     document.getElementById('chat-peer-name').textContent = peer.name;
     document.getElementById('chat-peer-role').textContent = peer.role || '';
+    activePeer = peer;
 
     await CresRealtime.joinConversation(id);
     await loadMessages();
@@ -249,6 +251,23 @@ const CresCommunity = (() => {
   }
 
   function bind() {
+    function startPeerCall(kind) {
+      if (!activePeer?.id) return;
+      if (typeof CresCalls === 'undefined') {
+        alert('Calling is not available.');
+        return;
+      }
+      CresCalls.startCall({
+        peerId: activePeer.id,
+        peerName: activePeer.name,
+        kind,
+        conversationId: activeId,
+      });
+    }
+    document.getElementById('btn-call-audio')?.addEventListener('click', () => startPeerCall('audio'));
+    document.getElementById('btn-call-video')?.addEventListener('click', () => startPeerCall('video'));
+    document.getElementById('btn-call-screen')?.addEventListener('click', () => startPeerCall('screen'));
+
     document.getElementById('new-chat-btn')?.addEventListener('click', () => {
       openNewChatModal().catch((err) => alert(err.message));
     });

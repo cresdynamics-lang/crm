@@ -11,9 +11,9 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/tokens.css?v=20261023" />
   <link rel="stylesheet" href="/css/shell.css?v=20261023" />
-  <link rel="stylesheet" href="/css/community.css" />
+  <link rel="stylesheet" href="/css/community.css?v=20261023k" />
   <link rel="stylesheet" href="/css/sales.css" />
-  <link rel="stylesheet" href="/css/jarvis.css?v=20261023" />
+  <link rel="stylesheet" href="/css/jarvis.css?v=20261023f" />
 </head>
 <body class="shell-page">
   <div class="app-shell" id="app-shell">
@@ -87,6 +87,36 @@
         <div id="client-dashboard"></div>
         <div id="generic-home" class="placeholder-card" hidden>
           Open a page from the sidebar to get started.
+        </div>
+      </section>
+
+      <section class="face" id="face-jarvis" data-title="Jarvis">
+        <div class="face-hero">
+          <h2>Jarvis</h2>
+          <p>Ask about your work. Jarvis only answers with what your role can see.</p>
+        </div>
+        <div class="jarvis-workspace" id="jarvis-workspace">
+          <header class="jarvis-head">
+            <div>
+              <h2 id="jarvis-title">JARVIS</h2>
+              <p id="jarvis-subtitle">Your role-scoped assistant</p>
+            </div>
+            <div class="jarvis-head-actions">
+              <button type="button" id="jarvis-speak" class="jarvis-icon-btn" aria-label="Read answers aloud" aria-pressed="false" title="Read answers aloud">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a9 9 0 0 1 0 14"/></svg>
+              </button>
+            </div>
+          </header>
+          <div class="jarvis-chips" id="jarvis-chips"></div>
+          <div class="jarvis-log" id="jarvis-log" aria-live="polite"></div>
+          <p class="jarvis-status" id="jarvis-status"></p>
+          <form class="jarvis-composer" id="jarvis-form">
+            <button type="button" id="jarvis-mic" class="jarvis-icon-btn" aria-label="Dictate question">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+            </button>
+            <textarea id="jarvis-input" rows="1" placeholder="Ask Jarvis…" aria-label="Ask Jarvis"></textarea>
+            <button type="submit" id="jarvis-send" class="jarvis-send" aria-label="Send">Send</button>
+          </form>
         </div>
       </section>
 
@@ -421,6 +451,29 @@
             </table>
           </div>
         </div>
+
+        <div id="admin-projects-panel" hidden>
+          <div class="face-hero">
+            <h2>Projects</h2>
+            <p>Financial status and progress for every project. Export the list when you need it.</p>
+          </div>
+          <div id="admin-projects-flash" class="flash"></div>
+          <div class="toolbar">
+            <div class="spacer"></div>
+            <button type="button" class="btn btn-ghost" id="btn-export-admin-projects">Export CSV</button>
+          </div>
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Project</th><th>Client</th><th>Status</th><th>Progress</th>
+                  <th>Value</th><th>Invoiced</th><th>Paid</th><th>Balance</th>
+                </tr>
+              </thead>
+              <tbody id="admin-projects-tbody"></tbody>
+            </table>
+          </div>
+        </div>
       </section>
 
       <section class="face" id="face-timeline" data-title="Projects"></section>
@@ -608,10 +661,11 @@
           <div id="admin-action-audit" class="settings-section" style="max-width:none;margin-bottom:20px;"></div>
           <div id="admin-reports-daily">
           <p style="margin:0 0 12px;color:var(--text-muted);font-size:0.9rem;">
-            Review daily reports and leave a response where you can.
+            Who shared a report, who did not, and the questions they answered about their work. Open a report to view it. A note you leave is visible to the Director only.
           </p>
-          <h3 style="margin:0 0 10px;font-size:0.95rem;">Daily reports</h3>
           <div class="toolbar">
+            <label class="meta" for="admin-reports-day">Day</label>
+            <input id="admin-reports-day" type="date" />
             <select id="admin-reports-role">
               <option value="">All departments</option>
               <option value="sales">Sales</option>
@@ -619,13 +673,13 @@
               <option value="pm">PM</option>
               <option value="director">Director</option>
               <option value="finance">Finance</option>
-              <option value="hr">HR</option>
             </select>
             <select id="admin-reports-person"><option value="">All people</option></select>
-            <input id="admin-reports-from" type="date" />
-            <input id="admin-reports-to" type="date" />
           </div>
-          <ul class="engagement-list" id="admin-reports-list"></ul>
+          <div class="kpi-grid" id="admin-reports-coverage-kpis" style="margin:12px 0;"></div>
+          <div class="coverage-grid" id="admin-reports-coverage"></div>
+          <h3 style="margin:16px 0 10px;font-size:0.95rem;">Reports for this day</h3>
+          <ul class="engagement-list coverage-reports" id="admin-reports-list"></ul>
           </div>
         </div>
       </section>
@@ -1194,10 +1248,10 @@
         </div>
       </section>
 
-      <section class="face" id="face-users" data-title="Users">
+      <section class="face" id="face-users" data-title="Staff">
         <div class="face-hero">
-          <h2>Users &amp; roles</h2>
-          <p>Invite someone, change a role, or deactivate an account.</p>
+          <h2>Staff</h2>
+          <p>Invite someone, change a role, or remove an account. Same process for HR, Finance, Director, and every other staff role.</p>
         </div>
         <div id="users-flash" class="flash"></div>
         <div class="toolbar">
@@ -1384,6 +1438,11 @@
                   <div class="peer-name" id="chat-peer-name">-</div>
                   <div class="peer-role" id="chat-peer-role">-</div>
                 </div>
+                <div class="chat-call-actions" id="chat-call-actions">
+                  <button type="button" class="btn btn-ghost btn-sm" id="btn-call-audio" title="Voice call">Call</button>
+                  <button type="button" class="btn btn-ghost btn-sm" id="btn-call-video" title="Video call">Video</button>
+                  <button type="button" class="btn btn-ghost btn-sm" id="btn-call-screen" title="Share screen">Share</button>
+                </div>
               </div>
               <div class="chat-messages" id="chat-messages"></div>
               <form class="chat-composer" id="chat-composer">
@@ -1524,6 +1583,27 @@
         <div id="vf-working" style="display:none;text-align:center;padding:14px 0;font-size:0.85rem;color:var(--text-muted);">
           <span style="display:inline-block;animation:pulse 1s infinite;">Processing audio with AI...</span>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="admin-report-view-modal">
+    <div class="modal-card wide">
+      <header>
+        <h3 id="admin-report-view-title">Daily report</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body">
+        <div id="admin-report-view-body"></div>
+        <div class="settings-section" style="margin-top:16px;max-width:none;">
+          <h3 style="margin:0 0 8px;font-size:0.9rem;">Note to Director</h3>
+          <p class="meta" style="margin:0 0 8px;">Optional. The reporter never sees this — only the Director does.</p>
+          <textarea id="admin-report-director-note" rows="3" placeholder="Private note for the Director…" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);"></textarea>
+          <div class="form-actions" style="margin-top:8px;">
+            <button type="button" class="btn btn-primary" id="admin-report-director-note-send">Send to Director</button>
+          </div>
+        </div>
+        <div id="admin-report-view-flash" class="flash"></div>
       </div>
     </div>
   </div>
@@ -1697,6 +1777,22 @@
     <button type="button" data-action="mute">Mute</button>
     <button type="button" data-action="archive">Archive</button>
     <button type="button" data-action="clear" class="danger">Clear chat</button>
+  </div>
+
+  <div id="call-overlay" hidden>
+    <div class="call-stage">
+      <video id="call-remote" autoplay playsinline></video>
+      <video id="call-local" autoplay playsinline muted></video>
+      <div class="call-banner" id="call-banner">Connecting…</div>
+      <div class="call-actions">
+        <button type="button" class="btn btn-ghost" id="call-mute">Mute</button>
+        <button type="button" class="btn btn-ghost" id="call-cam">Camera off</button>
+        <button type="button" class="btn btn-ghost" id="call-share">Share screen</button>
+        <button type="button" class="btn btn-primary" id="call-accept">Accept</button>
+        <button type="button" class="btn btn-ghost" id="call-decline">Decline</button>
+        <button type="button" class="btn btn-primary" id="call-hangup">End</button>
+      </div>
+    </div>
   </div>
 
   <div class="new-chat-modal" id="new-chat-modal">
@@ -2051,32 +2147,33 @@
   <script src="/vendor/chart.umd.min.js"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/js/api.js?v=20261021e"></script>
-  <script src="/js/jarvis.js?v=20261023"></script>
+  <script src="/js/jarvis.js?v=20261023g"></script>
   <script src="/js/format.js?v=20261021e"></script>
   <script src="/js/receipts.js?v=20260815g"></script>
-  <script src="/js/nav.js?v=20261023e"></script>
-  <script src="/js/socket.js?v=20261021e"></script>
+  <script src="/js/nav.js?v=20261023k"></script>
+  <script src="/js/socket.js?v=20261023i"></script>
+  <script src="/js/calls.js?v=20261023i"></script>
   <script src="/js/settings.js?v=20260815g"></script>
   <script src="/js/tasks.js?v=20261021b"></script>
   <script src="/js/myWork.js?v=20261021b"></script>
   <script src="/js/approvals.js?v=20261021e"></script>
   <script src="/js/projectDetail.js?v=20261021d"></script>
   <script src="/js/clientCard.js?v=20261021d"></script>
-  <script src="/js/community.js?v=20261021e"></script>
+  <script src="/js/community.js?v=20261023i"></script>
   <script src="/js/voiceReport.js?v=20260827b"></script>
   <script src="/js/voiceForms.js?v=20260827b"></script>
   <script src="/js/ops.js?v=20260826a"></script>
   <script src="/js/sales.js?v=20261023b"></script>
-  <script src="/js/director.js?v=20261021e"></script>
+  <script src="/js/director.js?v=20261023h"></script>
   <script src="/js/developer.js?v=20261021d"></script>
   <script src="/js/finance.js?v=20261023c"></script>
-  <script src="/js/hr.js?v=20261021e"></script>
+  <script src="/js/hr.js?v=20261023i"></script>
   <script src="/js/pm.js?v=20261021e"></script>
-  <script src="/js/admin.js?v=20261023e"></script>
+  <script src="/js/admin.js?v=20261023i"></script>
   <script src="/js/client.js?v=20261021d"></script>
   <script src="/js/traffic.js?v=20261021e"></script>
   <script src="/js/websitePayments.js?v=20261021e"></script>
   <script src="/js/adminHealth.js?v=20261021e"></script>
-  <script src="/js/shell.js?v=20261023e"></script>
+  <script src="/js/shell.js?v=20261023k"></script>
 </body>
 </html>

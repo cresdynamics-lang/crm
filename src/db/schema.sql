@@ -923,6 +923,9 @@ ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS ai_analysis JSONB;
 ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS remarks_reply TEXT;
 ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS remarks_reply_at TIMESTAMPTZ;
 ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS remarks_reply_by UUID REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS admin_director_note TEXT;
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS admin_director_note_by UUID;
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS admin_director_note_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS report_attendance (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),

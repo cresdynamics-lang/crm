@@ -283,8 +283,8 @@ router.post(
   requirePermission('projects', 'create'),
   idempotency,
   asyncHandler(async (req, res) => {
-    if (req.user.role === 'finance') {
-      throw new AppError('Finance cannot create projects', 403, 'FORBIDDEN');
+    if (req.user.role === 'finance' || req.user.role === 'admin') {
+      throw new AppError('This role cannot create projects', 403, 'FORBIDDEN');
     }
     const {
       name, client_id, description, milestones, summary,
@@ -977,6 +977,9 @@ router.post(
   requirePermission('projects', 'create'),
   projMemUpload.single('audio'),
   asyncHandler(async (req, res) => {
+    if (req.user.role === 'finance' || req.user.role === 'admin') {
+      throw new AppError('This role cannot create projects', 403, 'FORBIDDEN');
+    }
     let transcript;
     if (req.file) {
       const result = await transcribeAudio({
