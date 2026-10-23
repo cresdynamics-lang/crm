@@ -9,8 +9,8 @@ body.login-page {
   display: grid;
   place-items: center;
   background:
-    radial-gradient(ellipse 80% 60% at 10% 20%, rgba(31, 167, 160, 0.18), transparent 55%),
-    radial-gradient(ellipse 70% 50% at 90% 80%, rgba(45, 90, 120, 0.22), transparent 50%),
+    radial-gradient(ellipse 80% 60% at 10% 20%, rgba(0, 168, 197, 0.20), transparent 55%),
+    radial-gradient(ellipse 70% 50% at 90% 80%, rgba(245, 166, 35, 0.14), transparent 50%),
     linear-gradient(145deg, var(--login-bg-1), var(--login-bg-2));
   padding: 24px;
 }
@@ -29,18 +29,22 @@ body.login-page {
   margin-bottom: 28px;
 }
 
-.login-brand .mark {
+.login-brand .brand-logo-wrap {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 11px;
-  background: var(--accent);
-  color: #041312;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  margin-bottom: 14px;
+  background: #fff;
+  border-radius: 14px;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+}
+
+.login-brand .brand-logo {
+  display: block;
+  height: 56px;
+  width: auto;
+  max-width: 240px;
+  object-fit: contain;
 }
 
 .login-brand h1 {
@@ -138,7 +142,7 @@ body.login-page {
   padding: 12px 16px;
   border-radius: 10px;
   background: var(--accent);
-  color: #041312;
+  color: var(--accent-contrast);
   font-weight: 600;
   transition: background 0.15s ease, transform 0.1s ease;
 }

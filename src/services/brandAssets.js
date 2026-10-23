@@ -68,7 +68,7 @@ function resolveBrandSrc(urlOrPath, fallbackFile, publicBaseUrl = '', { embed = 
   }
   if (urlOrPath && /^data:/i.test(urlOrPath)) return urlOrPath;
 
-  const root = (publicBaseUrl || 'https://crm.cresdynamics.com').replace(/\/$/, '');
+  const root = (publicBaseUrl || 'https://cresos.cresdynamics.com').replace(/\/$/, '');
   let pathname = `/brand/${fallbackFile || 'logo.png'}`;
   let query = '';
 

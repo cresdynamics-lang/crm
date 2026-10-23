@@ -18,8 +18,7 @@ router.use(authenticate);
 router.get(
   '/contacts',
   asyncHandler(async (req, res) => {
-    // Finance / clients: no Community chat - empty list, not a leakable contact dump
-    if (req.user.role === 'finance' || req.user.role === 'client') {
+    if (req.user.role === 'client') {
       return res.json({ ok: true, data: [], meta: { reason: 'role_has_no_community_chat' } });
     }
 
@@ -46,7 +45,7 @@ router.get(
   '/conversations',
   requirePermission('messages', 'view'),
   asyncHandler(async (req, res) => {
-    if (req.user.role === 'finance' || req.user.role === 'client') {
+    if (req.user.role === 'client') {
       return res.json({ ok: true, data: [] });
     }
 

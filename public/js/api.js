@@ -51,11 +51,25 @@ const CresAPI = (() => {
       body = JSON.stringify(body);
     }
 
-    const res = await fetch(path, {
-      ...options,
-      headers,
-      body,
-    });
+    const timeoutMs = options.timeoutMs ?? 15000;
+    const controller = options.signal ? null : new AbortController();
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    let res;
+    try {
+      res = await fetch(path, {
+        ...options,
+        headers,
+        body,
+        signal: options.signal || controller.signal,
+      });
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        throw new Error('Request timed out');
+      }
+      throw err;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
 
     if (res.status === 401 && retry && getRefresh()) {
       const refreshed = await refresh();

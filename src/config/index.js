@@ -8,6 +8,7 @@ const config = {
   env: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT) || 3000,
   databaseUrl: process.env.DATABASE_URL,
+  websiteDatabaseUrl: process.env.WEBSITE_DATABASE_URL || '',
   redisUrl: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
   jwt: {
     secret: process.env.JWT_SECRET || 'dev-insecure-secret',
@@ -45,6 +46,15 @@ const config = {
         ? process.env.GROQ_MODEL
         : 'qwen/qwen3.8-27b',
     whisperModel: process.env.GROQ_WHISPER_MODEL || 'whisper-large-v3-turbo',
+  },
+  // Daily ops briefing. Claude Sonnet is the strongest cheap brief-writer on OpenRouter:
+  // it stays on the supplied numbers and organises Finance / Director / Admin cleanly.
+  openRouter: {
+    apiKey: process.env.OPENROUTER_API_KEY || '',
+    model: process.env.OPENROUTER_MODEL || 'anthropic/claude-sonnet-4.5',
+    fallbackModel: process.env.OPENROUTER_FALLBACK_MODEL || 'openai/gpt-4.1-mini',
+    siteUrl: process.env.OPENROUTER_SITE_URL || 'https://cresos.cresdynamics.com',
+    appName: process.env.OPENROUTER_APP_NAME || 'CRES Dynamics CRM',
   },
   leadEmail: {
     apiUrl: process.env.LEAD_EMAIL_API_URL || '',

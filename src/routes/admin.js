@@ -5,6 +5,7 @@ const { requirePermission } = require('../middleware/rbac');
 const { asyncHandler, AppError } = require('../lib/errors');
 const { enqueue, getQueues } = require('../queues');
 const config = require('../config');
+const { buildDailyDigest } = require('../services/dailyOpsDigest');
 
 const router = express.Router();
 router.use(authenticate);
@@ -31,6 +32,15 @@ const DEFAULT_SETTINGS = {
       subject: 'Cres Dynamics password reset code',
       body: 'Hi {{name}},\n\nYour password reset code is: {{code}}\n\nIt expires in 10 minutes.',
     },
+  },
+  email_automations: {
+    invoiceIssued: true,
+    paymentReceipt: true,
+    overdueReminder: true,
+    overduePenalty: true,
+    overdueFollowup: true,
+    userInvite: true,
+    leadMessage: true,
   },
   integrations: {
     email: {
@@ -288,7 +298,7 @@ router.patch(
     const key = req.params.key;
     if (
       !DEFAULT_SETTINGS[key]
-      && !['notification_rules', 'email_templates', 'integrations', 'expense_approval'].includes(key)
+      && !['notification_rules', 'email_templates', 'integrations', 'expense_approval', 'email_automations'].includes(key)
     ) {
       throw new AppError('Unknown settings key', 400, 'VALIDATION');
     }
@@ -365,6 +375,139 @@ router.delete(
     );
     if (!rows[0]) throw new AppError('Failed job not found', 404, 'NOT_FOUND');
     res.json({ ok: true, data: { dismissed: true } });
+  })
+);
+
+router.get(
+  '/email-activity',
+  requirePermission('settings', 'view'),
+  asyncHandler(async (req, res) => {
+    assertAdmin(req);
+    const toInvoice = await query(
+      `SELECT l.created_at, l.channel, l.status, l.detail,
+              i.invoice_number, c.name AS client_name, c.email AS client_email
+         FROM invoice_email_log l
+         LEFT JOIN invoices i ON i.id = l.invoice_id
+         LEFT JOIN clients c ON c.id = i.client_id
+        ORDER BY l.created_at DESC
+        LIMIT 40`
+    ).catch(() => ({ rows: [] }));
+
+    const toManual = await query(
+      `SELECT oe.created_at, oe.to_email, oe.subject, oe.status, oe.body,
+              u.name AS sender_name, c.name AS client_name
+         FROM outbound_emails oe
+         LEFT JOIN users u ON u.id = oe.sent_by
+         LEFT JOIN clients c ON c.id = oe.client_id
+        ORDER BY oe.created_at DESC
+        LIMIT 40`
+    ).catch(() => ({ rows: [] }));
+
+    const toLeads = await query(
+      `SELECT m.created_at, m.subject, m.status, m.error, l.name AS lead_name, l.email AS lead_email
+         FROM lead_messages m
+         JOIN leads l ON l.id = m.lead_id
+        ORDER BY m.created_at DESC
+        LIMIT 30`
+    ).catch(() => ({ rows: [] }));
+
+    const fromMessages = await query(
+      `SELECT m.created_at, m.body, u.name AS sender_name, p.name AS project_name
+         FROM project_messages m
+         JOIN users u ON u.id = m.sender_id
+         JOIN roles r ON r.id = u.role_id
+         JOIN projects p ON p.id = m.project_id
+        WHERE r.name = 'client'
+        ORDER BY m.created_at DESC
+        LIMIT 40`
+    ).catch(() => ({ rows: [] }));
+
+    const fromChanges = await query(
+      `SELECT cr.created_at, cr.subject, cr.details, cr.status,
+              u.name AS sender_name, p.name AS project_name
+         FROM client_change_requests cr
+         LEFT JOIN users u ON u.id = cr.client_user_id
+         LEFT JOIN projects p ON p.id = cr.project_id
+        ORDER BY cr.created_at DESC
+        LIMIT 30`
+    ).catch(() => ({ rows: [] }));
+
+    const to = [
+      ...toInvoice.rows.map((r) => ({
+        direction: 'to_client',
+        kind: 'invoice',
+        at: r.created_at,
+        title: r.invoice_number || r.channel || 'Invoice email',
+        summary: r.detail || r.status,
+        who: r.client_name || r.client_email || 'Client',
+        status: r.status,
+      })),
+      ...toManual.rows.map((r) => ({
+        direction: 'to_client',
+        kind: 'manual',
+        at: r.created_at,
+        title: r.subject,
+        summary: `${r.status} · ${r.to_email}`,
+        who: r.client_name || r.to_email,
+        status: r.status,
+      })),
+      ...toLeads.rows.map((r) => ({
+        direction: 'to_client',
+        kind: 'lead',
+        at: r.created_at,
+        title: r.subject,
+        summary: r.error || r.status,
+        who: r.lead_name || r.lead_email,
+        status: r.status,
+      })),
+    ]
+      .sort((a, b) => new Date(b.at) - new Date(a.at))
+      .slice(0, 50);
+
+    const from = [
+      ...fromMessages.rows.map((r) => ({
+        direction: 'from_client',
+        kind: 'project_message',
+        at: r.created_at,
+        title: r.project_name || 'Project message',
+        summary: r.body,
+        who: r.sender_name,
+        status: 'received',
+      })),
+      ...fromChanges.rows.map((r) => ({
+        direction: 'from_client',
+        kind: 'change_request',
+        at: r.created_at,
+        title: r.subject,
+        summary: r.details,
+        who: r.sender_name,
+        status: r.status,
+      })),
+    ]
+      .sort((a, b) => new Date(b.at) - new Date(a.at))
+      .slice(0, 50);
+
+    res.json({ ok: true, data: { to, from } });
+  })
+);
+
+router.get(
+  '/daily-digest',
+  requirePermission('reports', 'view'),
+  asyncHandler(async (req, res) => {
+    assertAdmin(req);
+    try {
+      const data = await buildDailyDigest({
+        date: req.query.date,
+        refresh: req.query.refresh === '1' || req.query.refresh === 'true',
+      });
+      res.json({ ok: true, data });
+    } catch (err) {
+      if (err.message && /date/i.test(err.message)) {
+        throw new AppError(err.message, 400, 'BAD_DATE');
+      }
+      throw err;
+    }
   })
 );
 

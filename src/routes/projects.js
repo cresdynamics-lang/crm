@@ -70,17 +70,11 @@ function canSeePreviewUrl(role) {
 }
 
 function canSeeClientDetails(role) {
-  // PM: operational only — client name may appear via dedicated PM queries, not contact
-  return ['sales', 'director', 'admin', 'finance'].includes(role);
+  return ['sales', 'director', 'admin', 'finance', 'pm'].includes(role);
 }
 
 function canSeeClientContact(role, status) {
-  // Director/Admin/Finance: always see contact
-  if (['director', 'admin', 'finance'].includes(role)) return true;
-  // Sales: only sees contact before approval
-  if (role === 'sales') {
-    return ['pending_approval', 'rejected'].includes(status);
-  }
+  if (['director', 'admin', 'finance', 'pm', 'sales'].includes(role)) return true;
   return false;
 }
 
@@ -294,7 +288,7 @@ router.post(
     }
     const {
       name, client_id, description, milestones, summary,
-      assigned_developer_id, value_amount,
+      assigned_developer_id, value_amount, due_date,
     } = req.body || {};
     if (!name) throw new AppError('name is required', 400, 'VALIDATION');
 
@@ -303,8 +297,8 @@ router.post(
 
     const { rows } = await query(
       `INSERT INTO projects
-        (name, client_id, description, milestones, summary, assigned_developer_id, created_by, value_amount, status)
-       VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8,'pending_approval')
+        (name, client_id, description, milestones, summary, assigned_developer_id, created_by, value_amount, due_date, status)
+       VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$9,'pending_approval')
        RETURNING *`,
       [
         name,
@@ -315,6 +309,7 @@ router.post(
         assigned_developer_id || null,
         req.user.id,
         value_amount || null,
+        due_date || null,
       ]
     );
 
@@ -435,10 +430,25 @@ router.get(
       developerName = devRows[0]?.name || null;
     }
 
+    const shaped = shapeProject(project, req.user.role, client);
+    const showLedger = canSeeProjectMoney(req.user.role, project.status)
+      && ['admin', 'finance', 'director'].includes(req.user.role);
+    if (showLedger) {
+      const { rows: inv } = await query(
+        `SELECT COALESCE(SUM(amount),0)::float AS invoiced,
+                COALESCE(SUM(amount_paid),0)::float AS paid
+         FROM invoices WHERE project_id = $1`,
+        [project.id]
+      );
+      shaped.invoiced = inv[0].invoiced;
+      shaped.paid = inv[0].paid;
+      shaped.balance = Math.max(0, inv[0].invoiced - inv[0].paid);
+    }
+
     res.json({
       ok: true,
       data: {
-        ...shapeProject(project, req.user.role, client),
+        ...shaped,
         developer_name: developerName,
         ...pendingHours(
           normalizeMilestones(Array.isArray(project.milestones) ? project.milestones : [])
@@ -451,6 +461,7 @@ router.get(
         canSeeClient: canSeeClientDetails(req.user.role),
         canSeeMoney: canSeeProjectMoney(req.user.role, project.status),
         canSeeContact: canSeeClientContact(req.user.role, project.status),
+        canUseThread: canUseProjectThread(req.user, project),
         isApproved: !['pending_approval', 'rejected'].includes(project.status),
       },
     });
@@ -476,13 +487,20 @@ router.post(
       // Sync: create invoice row immediately (user-facing result)
       let invoice = null;
       if (project.value_amount != null) {
-        const inv = await tx.query(
-          `INSERT INTO invoices (project_id, client_id, amount, status, due_date, amount_paid)
-           VALUES ($1, $2, $3, 'issued', CURRENT_DATE + INTERVAL '14 days', 0)
-           RETURNING *`,
-          [project.id, project.client_id, project.value_amount]
+        const paid = await tx.query(
+          `SELECT COALESCE(SUM(amount),0)::float AS total FROM invoices WHERE project_id = $1`,
+          [project.id]
         );
-        invoice = inv.rows[0];
+        const remaining = Math.round((Number(project.value_amount) - Number(paid.rows[0].total || 0)) * 100) / 100;
+        if (remaining > 0) {
+          const inv = await tx.query(
+            `INSERT INTO invoices (project_id, client_id, amount, status, due_date, amount_paid)
+             VALUES ($1, $2, $3, 'issued', CURRENT_DATE + INTERVAL '14 days', 0)
+             RETURNING *`,
+            [project.id, project.client_id, remaining]
+          );
+          invoice = inv.rows[0];
+        }
       }
       return { project, invoice };
     });
@@ -651,7 +669,7 @@ router.patch(
       throw new AppError('Your role cannot update project progress', 403, 'FORBIDDEN');
     }
 
-    const { status, milestones, note, milestone_status, preview_url, name, description } =
+    const { status, milestones, note, milestone_status, preview_url, name, description, due_date } =
       req.body || {};
     const allowedStatuses = ['in_progress', 'blocked', 'completed', 'approved'];
     if (status && !allowedStatuses.includes(status)) {
@@ -717,6 +735,10 @@ router.patch(
       sets.push(`description = $${params.length}`);
       params.push(overview);
       sets.push(`summary = $${params.length}`);
+    }
+    if (canEditFields && due_date !== undefined) {
+      params.push(due_date || null);
+      sets.push(`due_date = $${params.length}`);
     }
     if (preview_url !== undefined && canSeePreviewUrl(req.user.role)) {
       const url = String(preview_url || '').trim();
@@ -955,13 +977,18 @@ router.post(
   requirePermission('projects', 'create'),
   projMemUpload.single('audio'),
   asyncHandler(async (req, res) => {
-    if (!req.file) throw new AppError('No audio file', 400, 'VALIDATION');
-
-    const { text: transcript } = await transcribeAudio({
-      buffer: req.file.buffer,
-      filename: req.file.originalname || 'recording.webm',
-      mimetype: req.file.mimetype || 'audio/webm',
-    });
+    let transcript;
+    if (req.file) {
+      const result = await transcribeAudio({
+        buffer: req.file.buffer,
+        filename: req.file.originalname || 'recording.webm',
+        mimetype: req.file.mimetype || 'audio/webm',
+      });
+      transcript = result.text;
+    } else {
+      transcript = String(req.body?.text || '').trim();
+    }
+    if (!transcript) throw new AppError('No audio or text to process', 400, 'VALIDATION');
 
     // Fetch developers for matching
     let developers = [];
@@ -1018,6 +1045,183 @@ Respond with ONLY valid JSON:
         milestones: Array.isArray(parsed.milestones) ? parsed.milestones : [],
       },
     });
+  })
+);
+
+function canUseProjectThread(user, project) {
+  if (!project) return false;
+  if (['pm', 'admin', 'director', 'sales'].includes(user.role)) {
+    if (user.role === 'sales') return project.created_by === user.id || true;
+    return true;
+  }
+  if (user.role === 'developer') return project.assigned_developer_id === user.id;
+  if (user.role === 'client') return true;
+  return false;
+}
+
+router.get(
+  '/:id/messages',
+  requirePermission('projects', 'view'),
+  asyncHandler(async (req, res) => {
+    const { rows } = await query(`SELECT * FROM projects WHERE id = $1`, [req.params.id]);
+    const project = rows[0];
+    await assertCanAccessProject(req.user, project);
+    if (req.user.role === 'client') {
+      const ids = await query(
+        `SELECT 1 FROM clients WHERE id = $1 AND (user_id = $2 OR email = $3)`,
+        [project.client_id, req.user.id, req.user.email]
+      );
+      if (!ids.rows[0]) throw new AppError('Forbidden', 403, 'FORBIDDEN');
+    }
+    if (!canUseProjectThread(req.user, project) && req.user.role !== 'client') {
+      throw new AppError('Forbidden', 403, 'FORBIDDEN');
+    }
+    const { rows: msgs } = await query(
+      `SELECT m.*, u.name AS sender_name, r.name AS sender_role
+       FROM project_messages m
+       JOIN users u ON u.id = m.sender_id
+       JOIN roles r ON r.id = u.role_id
+       WHERE m.project_id = $1
+       ORDER BY m.created_at ASC
+       LIMIT 200`,
+      [req.params.id]
+    );
+    res.json({ ok: true, data: msgs });
+  })
+);
+
+router.post(
+  '/:id/messages',
+  requirePermission('projects', 'view'),
+  idempotency,
+  asyncHandler(async (req, res) => {
+    const body = String(req.body?.body || '').trim();
+    if (!body) throw new AppError('body required', 400, 'VALIDATION');
+    const { rows } = await query(`SELECT * FROM projects WHERE id = $1`, [req.params.id]);
+    const project = rows[0];
+    await assertCanAccessProject(req.user, project);
+    if (!canUseProjectThread(req.user, project)) {
+      throw new AppError('Forbidden', 403, 'FORBIDDEN');
+    }
+    const { rows: msg } = await query(
+      `INSERT INTO project_messages (project_id, sender_id, body)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [req.params.id, req.user.id, body]
+    );
+
+    const notifyRoles =
+      req.user.role === 'client' ? ['sales', 'pm', 'admin'] : ['sales', 'pm', 'admin'];
+    const { rows: people } = await query(
+      `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
+       WHERE r.name = ANY($1::text[]) AND u.status = 'active' AND u.id <> $2`,
+      [notifyRoles, req.user.id]
+    );
+    if (project.created_by && project.created_by !== req.user.id) {
+      people.push({ id: project.created_by });
+    }
+    const seen = new Set();
+    for (const p of people) {
+      if (seen.has(p.id)) continue;
+      seen.add(p.id);
+      await queueNotification({
+        userId: p.id,
+        type: 'project_message',
+        content: `New message on ${project.name}`,
+        meta: { projectId: project.id, href: `#/projects/${project.id}` },
+      });
+    }
+    res.status(201).json({ ok: true, data: msg[0] });
+  })
+);
+
+router.get(
+  '/:id/change-requests',
+  requirePermission('projects', 'view'),
+  asyncHandler(async (req, res) => {
+    const { rows: proj } = await query(`SELECT * FROM projects WHERE id = $1`, [req.params.id]);
+    await assertCanAccessProject(req.user, proj[0]);
+    const { rows } = await query(
+      `SELECT cr.*, u.name AS client_name
+       FROM client_change_requests cr
+       LEFT JOIN users u ON u.id = cr.client_user_id
+       WHERE cr.project_id = $1
+       ORDER BY cr.created_at DESC`,
+      [req.params.id]
+    );
+    res.json({ ok: true, data: rows });
+  })
+);
+
+router.post(
+  '/:id/change-requests/:crId/decide',
+  requirePermission('projects', 'view'),
+  asyncHandler(async (req, res) => {
+    if (!['sales', 'pm', 'admin', 'director'].includes(req.user.role)) {
+      throw new AppError('Forbidden', 403, 'FORBIDDEN');
+    }
+    const action = req.body?.action;
+    const map = { accept: 'accepted', quote: 'quoted', decline: 'declined' };
+    if (!map[action]) throw new AppError('action must be accept, quote, or decline', 400, 'VALIDATION');
+    const { rows } = await query(
+      `UPDATE client_change_requests
+       SET status = $1, quote_amount = $2, staff_note = $3, decided_by = $4, decided_at = NOW(), updated_at = NOW()
+       WHERE id = $5 AND project_id = $6
+       RETURNING *`,
+      [
+        map[action],
+        action === 'quote' && req.body?.quote_amount != null ? Number(req.body.quote_amount) : null,
+        req.body?.note || null,
+        req.user.id,
+        req.params.crId,
+        req.params.id,
+      ]
+    );
+    if (!rows[0]) throw new AppError('Change request not found', 404, 'NOT_FOUND');
+    if (rows[0].client_user_id) {
+      await queueNotification({
+        userId: rows[0].client_user_id,
+        type: 'change_request_update',
+        content: `Change request ${map[action]} on your project`,
+        meta: { changeRequestId: rows[0].id, projectId: req.params.id, href: `#/projects/${req.params.id}` },
+      });
+    }
+    res.json({ ok: true, data: rows[0] });
+  })
+);
+
+router.post(
+  '/:id/blocked',
+  requirePermission('projects', 'edit'),
+  asyncHandler(async (req, res) => {
+    const { rows } = await query(`SELECT * FROM projects WHERE id = $1`, [req.params.id]);
+    const project = rows[0];
+    await assertCanAccessProject(req.user, project);
+    if (!['developer', 'pm', 'admin'].includes(req.user.role)) {
+      throw new AppError('Forbidden', 403, 'FORBIDDEN');
+    }
+    const note = String(req.body?.note || 'Blocked, waiting on client').trim();
+    const { rows: updated } = await query(
+      `UPDATE projects SET status = 'blocked', updated_at = NOW() WHERE id = $1 RETURNING *`,
+      [req.params.id]
+    );
+    await query(
+      `INSERT INTO project_updates (project_id, updated_by, note, actor_role, change_summary)
+       VALUES ($1, $2, $3, $4, 'Marked blocked')`,
+      [req.params.id, req.user.id, note, req.user.role]
+    );
+    const { rows: people } = await query(
+      `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
+       WHERE r.name IN ('pm', 'sales', 'admin') AND u.status = 'active'`
+    );
+    for (const p of people) {
+      await queueNotification({
+        userId: p.id,
+        type: 'project_blocked',
+        content: `${project.name} is blocked: ${note}`,
+        meta: { projectId: project.id, href: `#/projects/${project.id}` },
+      });
+    }
+    res.json({ ok: true, data: updated[0] });
   })
 );
 

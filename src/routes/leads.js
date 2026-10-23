@@ -2,9 +2,10 @@ const express = require('express');
 const multer = require('multer');
 const { query, withTransaction } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
-const { requirePermission } = require('../middleware/rbac');
+const { requirePermission, hasPermission } = require('../middleware/rbac');
 const { asyncHandler, AppError } = require('../lib/errors');
 const { idempotency } = require('../middleware/idempotency');
+const { queueNotification } = require('../queues/jobs');
 
 const router = express.Router();
 router.use(authenticate);
@@ -79,15 +80,22 @@ router.post(
     });
   },
   asyncHandler(async (req, res) => {
-    if (!req.file) throw new AppError('Audio file is required', 400, 'VALIDATION');
-
     const { transcribeAudio, parseLeadsFromTranscript } = require('../services/voiceLeads');
 
-    const { text: transcript, model: whisperModel } = await transcribeAudio({
-      buffer: req.file.buffer,
-      filename: req.file.originalname,
-      mimetype: req.file.mimetype,
-    });
+    let transcript;
+    let whisperModel = null;
+    if (req.file) {
+      const result = await transcribeAudio({
+        buffer: req.file.buffer,
+        filename: req.file.originalname,
+        mimetype: req.file.mimetype,
+      });
+      transcript = result.text;
+      whisperModel = result.model;
+    } else {
+      transcript = String(req.body?.text || '').trim();
+    }
+    if (!transcript) throw new AppError('Audio file or text is required', 400, 'VALIDATION');
 
     let leads = [];
     let parseError = null;
@@ -200,7 +208,7 @@ router.post(
   requirePermission('leads', 'create'),
   idempotency,
   asyncHandler(async (req, res) => {
-    const { name, phone, email, business_name, business_type, force } = req.body || {};
+    const { name, phone, email, business_name, business_type, force, value_amount, status } = req.body || {};
     if (!name) throw new AppError('name is required', 400, 'VALIDATION');
 
     // Duplicate check on phone / business name (unless force=true after confirm)
@@ -233,9 +241,11 @@ router.post(
       }
     }
 
+    const PIPELINE = ['new', 'contacted', 'meeting', 'proposal', 'won', 'lost', 'contacting', 'follow_up', 'not_interested', 'converted'];
+    const nextStatus = PIPELINE.includes(status) ? status : 'new';
     const { rows } = await query(
-      `INSERT INTO leads (name, phone, email, business_name, business_type, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO leads (name, phone, email, business_name, business_type, created_by, status, value_amount)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
       [
         name,
@@ -244,6 +254,8 @@ router.post(
         business_name || null,
         (business_type || '').trim() || null,
         req.user.id,
+        nextStatus,
+        value_amount != null && value_amount !== '' ? Number(value_amount) : null,
       ]
     );
     res.status(201).json({ ok: true, data: rows[0] });
@@ -267,7 +279,7 @@ router.patch(
   '/:id',
   requirePermission('leads', 'edit'),
   asyncHandler(async (req, res) => {
-    const allowed = ['name', 'phone', 'email', 'business_name', 'business_type', 'status'];
+    const allowed = ['name', 'phone', 'email', 'business_name', 'business_type', 'status', 'value_amount'];
     const sets = [];
     const params = [];
     for (const key of allowed) {
@@ -298,7 +310,10 @@ router.post(
     const { note, follow_up_date, status } = req.body || {};
     if (!note) throw new AppError('note is required', 400, 'VALIDATION');
 
-    const allowedStatus = ['contacting', 'follow_up', 'not_interested', 'converted'];
+    const allowedStatus = [
+      'contacting', 'follow_up', 'not_interested', 'converted',
+      'new', 'contacted', 'meeting', 'proposal', 'won', 'lost',
+    ];
     if (status && !allowedStatus.includes(status)) {
       throw new AppError('Invalid status', 400, 'VALIDATION');
     }
@@ -322,7 +337,7 @@ router.post(
       if (!nextStatus && follow_up_date) nextStatus = 'follow_up';
 
       let client = null;
-      if (nextStatus === 'converted' && lead.status !== 'converted') {
+      if (['converted', 'won'].includes(nextStatus) && !['converted', 'won'].includes(lead.status)) {
         const clientRes = await tx.query(
           `INSERT INTO clients (lead_id, name, business_name, email, phone)
            VALUES ($1, $2, $3, $4, $5)
@@ -331,8 +346,8 @@ router.post(
         );
         client = clientRes.rows[0];
         await tx.query(
-          `UPDATE leads SET status = 'converted', updated_at = NOW() WHERE id = $1`,
-          [lead.id]
+          `UPDATE leads SET status = $2, updated_at = NOW() WHERE id = $1`,
+          [lead.id, nextStatus === 'won' ? 'won' : 'converted']
         );
       } else if (nextStatus && nextStatus !== lead.status) {
         await tx.query(
@@ -425,6 +440,103 @@ router.post(
     }
 
     res.status(201).json({ ok: true, data: rows[0] });
+  })
+);
+
+/**
+ * Mark lead as won: create client, project (pending approval), and optional deposit invoice.
+ */
+router.post(
+  '/:id/win',
+  requirePermission('leads', 'edit'),
+  idempotency,
+  asyncHandler(async (req, res) => {
+    if (!hasPermission(req.user, 'projects', 'create') && req.user.role !== 'admin') {
+      throw new AppError('Forbidden: missing permission projects:create', 403, 'FORBIDDEN');
+    }
+    const lead = await assertLeadAccess(req, req.params.id);
+    if (['won', 'converted'].includes(lead.status)) {
+      throw new AppError('Lead is already won', 409, 'INVALID_STATE');
+    }
+
+    const {
+      project_name,
+      value_amount,
+      deposit_amount,
+      due_date,
+      assigned_developer_id,
+      description,
+    } = req.body || {};
+    const projectName = String(project_name || `${lead.business_name || lead.name} project`).trim();
+    const value = value_amount != null && value_amount !== '' ? Number(value_amount) : Number(lead.value_amount || 0);
+    const deposit = deposit_amount != null && deposit_amount !== '' ? Number(deposit_amount) : 0;
+    if (deposit < 0) throw new AppError('deposit_amount must be ≥ 0', 400, 'VALIDATION');
+    if (value < 0) throw new AppError('value_amount must be ≥ 0', 400, 'VALIDATION');
+
+    const result = await withTransaction(async (tx) => {
+      let clientRow;
+      const existing = await tx.query(`SELECT * FROM clients WHERE lead_id = $1 LIMIT 1`, [lead.id]);
+      if (existing.rows[0]) {
+        clientRow = existing.rows[0];
+      } else {
+        const created = await tx.query(
+          `INSERT INTO clients (lead_id, name, business_name, email, phone)
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING *`,
+          [lead.id, lead.name, lead.business_name, lead.email, lead.phone]
+        );
+        clientRow = created.rows[0];
+      }
+
+      await tx.query(
+        `UPDATE leads SET status = 'won', value_amount = COALESCE($2, value_amount), updated_at = NOW() WHERE id = $1`,
+        [lead.id, value || null]
+      );
+
+      const project = await tx.query(
+        `INSERT INTO projects
+          (name, client_id, description, summary, assigned_developer_id, created_by, value_amount, due_date, status)
+         VALUES ($1,$2,$3,$3,$4,$5,$6,$7,'pending_approval')
+         RETURNING *`,
+        [
+          projectName,
+          clientRow.id,
+          description || `Won from lead ${lead.name}`,
+          assigned_developer_id || null,
+          req.user.id,
+          value || null,
+          due_date || null,
+        ]
+      );
+
+      let invoice = null;
+      if (deposit > 0) {
+        const inv = await tx.query(
+          `INSERT INTO invoices (project_id, client_id, amount, status, due_date, amount_paid)
+           VALUES ($1, $2, $3, 'issued', COALESCE($4::date, CURRENT_DATE + INTERVAL '7 days'), 0)
+           RETURNING *`,
+          [project.rows[0].id, clientRow.id, deposit, due_date || null]
+        );
+        invoice = inv.rows[0];
+      }
+
+      return { client: clientRow, project: project.rows[0], invoice };
+    });
+
+    const { rows: directors } = await query(
+      `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
+       WHERE r.name IN ('director', 'admin') AND u.status = 'active'`
+    );
+    for (const d of directors) {
+      await queueNotification({
+        userId: d.id,
+        type: 'project_pending_approval',
+        content: `Project "${result.project.name}" awaiting approval (won lead)`,
+        meta: { projectId: result.project.id, leadId: lead.id },
+      });
+    }
+
+    res.status(201).json({ ok: true, data: result });
   })
 );
 

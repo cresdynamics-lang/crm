@@ -16,8 +16,7 @@ const CresPM = (() => {
   }
 
   function fmtDate(v) {
-    if (!v) return '-';
-    return new Date(v).toLocaleDateString();
+    return CresFormat.date(v);
   }
 
   function statusPill(s) {
@@ -153,7 +152,7 @@ const CresPM = (() => {
           labels: d.healthChart.labels,
           datasets: [{
             data: d.healthChart.values.some((v) => v > 0) ? d.healthChart.values : [1],
-            backgroundColor: ['#1fa7a0', '#d4a017', '#e05a5a'],
+            backgroundColor: ['#00a8c5', '#f5a623', '#e05a5a'],
           }],
         },
         options: {
@@ -172,7 +171,7 @@ const CresPM = (() => {
           datasets: [{
             label: 'Avg completion %',
             data: dp.labels.length ? dp.values : [0],
-            backgroundColor: 'rgba(31, 167, 160, 0.65)',
+            backgroundColor: 'rgba(0, 168, 197, 0.65)',
             borderRadius: 6,
           }],
         },
@@ -370,6 +369,7 @@ const CresPM = (() => {
               : ''
           }
         </div>
+        <div id="pm-project-contact"></div>
         <div class="kpi-grid" style="margin-bottom:16px;">
           <div class="kpi-card"><div class="kpi-label">Progress</div><div class="kpi-value" style="font-size:1.2rem;">${p.progress_pct}%</div></div>
           <div class="kpi-card"><div class="kpi-label">Due date</div><div class="kpi-value" style="font-size:1.2rem;">${fmtDate(p.due_date)}</div></div>
@@ -406,6 +406,7 @@ const CresPM = (() => {
               </div>`
             : ''
         }
+        <div id="pm-project-extras"></div>
         <div class="settings-section" style="max-width:720px;">
           <h3>Audit log</h3>
           <p style="margin:0 0 8px;color:var(--text-muted);font-size:0.8rem;">Append-only. Who changed what and when.</p>
@@ -485,6 +486,35 @@ const CresPM = (() => {
         }</tbody></table></div>`;
       }
 
+      const contactHost = document.getElementById('pm-project-contact');
+      const extrasHost = document.getElementById('pm-project-extras');
+      const contactSrc = { ...p, ...projRes.data };
+      if (contactHost && typeof CresProjectDetail !== 'undefined') {
+        contactHost.innerHTML = CresProjectDetail.contactHtml(contactSrc);
+        contactHost.querySelectorAll('[data-open-client-card]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            if (typeof CresClientCard !== 'undefined') {
+              CresClientCard.open(btn.dataset.openClientCard).catch(console.error);
+            }
+          });
+        });
+      }
+      if (extrasHost && typeof CresProjectDetail !== 'undefined') {
+        await CresProjectDetail.mountExtras(extrasHost, {
+          id,
+          project: contactSrc,
+          meta,
+          user: CresAPI.getUser(),
+          onRefresh: () => mountProjectDetail(id),
+          showContact: false,
+          showMoney: false,
+          allowMessages: true,
+          allowDecide: true,
+          allowBlocked: true,
+          allowChangeForm: false,
+        });
+      }
+
       document.getElementById('pm-project-back')?.addEventListener('click', () => {
         location.hash = '#/projects';
       });
@@ -523,7 +553,7 @@ const CresPM = (() => {
             return `<li data-id="${esc(r.id)}">
               <div class="meta report-author">
                 ${typeof CresSettings !== 'undefined' ? CresSettings.avatarHtml({ name: r.author_name, avatar_url: r.author_avatar_url }, 'avatar avatar-sm') : ''}
-                <span>${esc(r.author_name)} · ${esc(r.author_role)} · ${new Date(r.created_at).toLocaleString()}
+                <span>${esc(r.author_name)} · ${esc(r.author_role)} · ${CresFormat.datetime(r.created_at)}
                 ${r.project_name ? ` · ${esc(r.project_name)}` : ''}
                 · ${statusPill(r.routing_status)}</span>
               </div>
@@ -540,7 +570,7 @@ const CresPM = (() => {
                       <button type="button" class="btn btn-primary btn-sm" data-forward="${esc(r.id)}">Forward to Director</button>
                     </div>`
                   : `<div class="meta" style="margin-top:6px;">Forwarded ${
-                      r.forwarded_at ? new Date(r.forwarded_at).toLocaleString() : ''
+                      r.forwarded_at ? CresFormat.datetime(r.forwarded_at) : ''
                     }</div>`
               }
             </li>`;
@@ -609,16 +639,18 @@ const CresPM = (() => {
   }
 
   async function mount(faceId, user, faceParam) {
+    const tab = new URLSearchParams((location.hash.split('?')[1] || '')).get('tab') || '';
+    const timelineOn = faceId === 'timeline' || (faceId === 'projects' && tab === 'timeline');
     if (user.role === 'pm') {
       bindRealtime();
       if (faceId === 'home') await mountHome();
+      else if (timelineOn) await mountTimeline();
       else if (faceId === 'projects') await mountProjects(faceParam || null);
       else if (faceId === 'tasks') await mountTasks();
       else if (faceId === 'reports') await mountReports();
-      else if (faceId === 'timeline') await mountTimeline();
       return;
     }
-    if (['director', 'admin'].includes(user.role) && faceId === 'timeline') {
+    if (['director', 'admin'].includes(user.role) && timelineOn) {
       await mountTimeline();
     }
   }

@@ -19,6 +19,8 @@ const messagesRoutes = require('./routes/messages');
 const reportsRoutes = require('./routes/reports');
 const queryRoutes = require('./routes/query');
 const healthRoutes = require('./routes/health');
+const siteAnalyticsRoutes = require('./routes/siteAnalytics');
+const adminHealthRoutes = require('./routes/adminHealth');
 const settingsRoutes = require('./routes/settings');
 const salesRoutes = require('./routes/sales');
 const emailsRoutes = require('./routes/emails');
@@ -40,6 +42,7 @@ const opsRoutes = require('./routes/ops');
 const salaryFundingRoutes = require('./routes/salaryFunding');
 const adminInboxRoutes = require('./routes/adminInbox');
 const attendanceRoutes = require('./routes/attendance');
+const approvalsRoutes = require('./routes/approvals');
 
 function createApp() {
   const app = express();
@@ -81,6 +84,8 @@ function createApp() {
   app.use('/api/query', queryRoutes);
   app.use('/api/settings', settingsRoutes);
   app.use('/api/sales', salesRoutes);
+  app.use('/api/analytics', siteAnalyticsRoutes);
+  app.use('/api/admin/health', adminHealthRoutes);
   app.use('/api/emails', emailsRoutes);
   app.use('/api/director', directorRoutes);
   app.use('/api/tasks', tasksRoutes);
@@ -99,6 +104,7 @@ function createApp() {
   app.use('/api/audit', auditRoutes);
   app.use('/api/ops', opsRoutes);
   app.use('/api/attendance', attendanceRoutes);
+  app.use('/api/approvals', approvalsRoutes);
 
   app.use('/uploads', express.static(uploadsDir));
 

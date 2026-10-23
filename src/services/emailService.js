@@ -119,37 +119,73 @@ async function sendViaProvider(provider, { to, subject, body, html, from, replyT
   };
 }
 
+function wrapBrandHtml(html) {
+  if (!html) return html;
+  const raw = String(html);
+  if (/<!DOCTYPE|<html[\s>]/i.test(raw)) return raw;
+  const root = (
+    process.env.PUBLIC_WEB_URL ||
+    process.env.APP_URL ||
+    'https://cresos.cresdynamics.com'
+  ).replace(/\/$/, '');
+  const logo = `${root}/brand/logo.png?v=20261023`;
+  return `<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;color:#1b2a4a;">
+  <div style="padding:16px 0 12px;border-bottom:3px solid #00a8c5;margin-bottom:16px;">
+    <img src="${logo}" alt="CRES Dynamics" width="180" height="82" style="height:48px;width:auto;max-width:200px;border:0;display:block;" />
+  </div>
+  ${raw}
+  <p style="margin:24px 0 0;padding-top:12px;border-top:1px solid #cfd8e0;color:#8b9aab;font-size:12px;line-height:1.5;">CRES Dynamics · cresdynamics.com</p>
+</div>`;
+}
+
 async function sendWithFailover({ to, subject, body, html, meta = {}, from, replyTo, cc, attachments } = {}) {
-  const fromAddr = from || (await resolveFromAddress(meta));
-  const reply = replyTo || resolveReplyTo(meta);
+  // Test-safety valve: when EMAIL_TEST_OVERRIDE is set OUTSIDE production, every
+  // outbound email is redirected to that address (with the original recipient kept
+  // in the subject). This is IGNORED in production so real mail is never misrouted.
+  const isProduction = process.env.NODE_ENV === 'production';
+  const testOverride = !isProduction && (process.env.EMAIL_TEST_OVERRIDE || '').trim();
+
+  let sendTo = to;
+  let sendSubject = subject;
+  let sendMeta = meta;
+  if (testOverride) {
+    sendTo = testOverride;
+    sendSubject = subject ? `[TEST→${to}] ${subject}` : subject;
+    sendMeta = { ...meta, testOverride: true, originalTo: to };
+    console.warn(`[email:test-override] redirected '${to}' -> ${testOverride}`);
+  }
+
+  const fromAddr = from || (await resolveFromAddress(sendMeta));
+  const reply = replyTo || resolveReplyTo(sendMeta);
   const primary = config.email.mailer === 'resend' ? 'resend' : config.email.primary;
   const fallback = config.email.mailer === 'resend' ? 'fallback' : config.email.fallback;
+  const brandedHtml = wrapBrandHtml(html);
 
   try {
     return await sendViaProvider(primary, {
-      to,
-      subject,
+      to: sendTo,
+      subject: sendSubject,
       body,
-      html,
+      html: brandedHtml,
       from: fromAddr,
       replyTo: reply,
       cc,
       attachments,
-      meta,
+      meta: sendMeta,
     });
   } catch (primaryErr) {
     console.warn(`[email] primary (${primary}) failed: ${primaryErr.message}; trying fallback`);
     try {
       return await sendViaProvider(fallback, {
-        to,
-        subject,
+        to: sendTo,
+        subject: sendSubject,
         body,
-        html,
+        html: brandedHtml,
         from: fromAddr,
         replyTo: reply,
         cc,
         attachments,
-        meta: { ...meta, failoverFrom: primary },
+        meta: { ...sendMeta, failoverFrom: primary },
       });
     } catch (fallbackErr) {
       const err = new Error(

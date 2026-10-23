@@ -39,7 +39,7 @@ router.get(
          ORDER BY updated_at DESC LIMIT 10`,
         params
       );
-      results.push(...rows.map((r) => ({ type: 'lead', id: r.id, title: r.name, subtitle: r.business_name || r.status, href: `#/leads` })));
+      results.push(...rows.map((r) => ({ type: 'lead', id: r.id, title: r.name, subtitle: r.business_name || r.status, href: `#/pipeline` })));
     }
 
     if (canClients && role !== 'client') {

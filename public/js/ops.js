@@ -171,7 +171,7 @@
         const blob = new Blob(chunks, { type: 'audio/webm' });
         if (blob.size < 500) { flash(flashEl, 'Recording too short', false); return; }
 
-        const title = document.getElementById('ingest-title')?.value.trim() || `Voice note — ${new Date().toLocaleDateString()}`;
+        const title = document.getElementById('ingest-title')?.value.trim() || `Voice note — ${CresFormat.date(new Date())}`;
         const category = document.getElementById('ingest-category')?.value || 'general';
         const fd = new FormData();
         fd.append('audio', blob, `voice-${Date.now()}.webm`);

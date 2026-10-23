@@ -19,6 +19,12 @@
   const { user, permissions } = session;
   const state = { user, permissions, notifs: [] };
 
+  if (typeof Chart !== 'undefined') {
+    Chart.defaults.animation = false;
+    Chart.defaults.responsive = true;
+    Chart.defaults.resizeDelay = 160;
+  }
+
   // Profile chip
   document.getElementById('profile-name').textContent = user.name;
   document.getElementById('profile-role').textContent = user.role;
@@ -33,32 +39,197 @@
     CresNav.render(navEl, user, permissions, hash || '#/');
   }
 
+  function faceQuery() {
+    const raw = location.hash.replace(/^#/, '') || '/';
+    const qi = raw.indexOf('?');
+    return new URLSearchParams(qi >= 0 ? raw.slice(qi + 1) : '');
+  }
+
+  function insertTabs(face, items, activeId, extraClass = '') {
+    if (!face || !items.length) return;
+    const tabs = document.createElement('div');
+    tabs.className = `page-tabs grouped-page-tabs ${extraClass}`.trim();
+    tabs.innerHTML = items
+      .map((t) => `<a href="${t.href}" class="${t.id === activeId ? 'active' : ''}">${t.label}</a>`)
+      .join('');
+    const existing = face.querySelector('.grouped-page-tabs:last-of-type');
+    const hero = [...face.children].find((el) => el.classList?.contains('face-hero'));
+    if (existing) existing.insertAdjacentElement('afterend', tabs);
+    else if (hero) hero.insertAdjacentElement('afterend', tabs);
+    else face.insertBefore(tabs, face.firstChild);
+  }
+
+  function paintPageTabs(faceId) {
+    document.querySelectorAll('.grouped-page-tabs, .billing-tabs').forEach((el) => el.remove());
+    const q = faceQuery();
+    const mine = q.get('mine') === '1';
+    const tab = q.get('tab') || '';
+
+    if (['projects', 'timeline'].includes(faceId) && ['admin', 'director', 'pm'].includes(user.role)) {
+      const active = tab === 'timeline' || faceId === 'timeline' ? 'timeline' : 'list';
+      insertTabs(
+        document.getElementById('face-projects'),
+        [
+          { href: '#/projects', id: 'list', label: 'List' },
+          { href: '#/projects?tab=timeline', id: 'timeline', label: 'Timeline' },
+        ],
+        active
+      );
+    }
+
+    if (
+      ['admin', 'director'].includes(user.role) &&
+      ['finance', 'invoices', 'payments', 'flag', 'expenses', 'billing'].includes(faceId)
+    ) {
+      const moneyItems =
+        user.role === 'admin'
+          ? [
+              { href: '#/finance', id: 'finance', label: 'Overview' },
+              { href: '#/invoices', id: 'billing', label: 'Billing' },
+              { href: '#/expenses', id: 'expenses', label: 'Expenses' },
+            ]
+          : [
+              { href: '#/invoices', id: 'invoices', label: 'Invoices' },
+              { href: '#/expenses', id: 'expenses', label: 'Expenses' },
+            ];
+      const moneyActive =
+        faceId === 'expenses' ? 'expenses' : faceId === 'finance' ? 'finance' : user.role === 'admin' ? 'billing' : 'invoices';
+      insertTabs(document.getElementById(`face-${faceId}`), moneyItems, moneyActive);
+    }
+
+    const onBilling =
+      ['invoices', 'payments', 'flag'].includes(faceId) ||
+      (faceId === 'projects' && user.role === 'finance');
+    if (['finance', 'admin'].includes(user.role) && onBilling) {
+      const face = document.querySelector('.face.active');
+      const items =
+        user.role === 'finance'
+          ? [
+              { href: '#/invoices', id: 'invoices', label: 'Invoices' },
+              { href: '#/payments', id: 'payments', label: 'Record payment' },
+              { href: '#/projects', id: 'projects', label: 'Project balances' },
+              { href: '#/flag', id: 'flag', label: 'Collections' },
+            ]
+          : [
+              { href: '#/invoices', id: 'invoices', label: 'Invoices' },
+              { href: '#/payments', id: 'payments', label: 'Record payment' },
+              { href: '#/flag', id: 'flag', label: 'Collections' },
+            ];
+      insertTabs(face, items, faceId, 'billing-tabs');
+    }
+
+    if (
+      ['hr', 'admin'].includes(user.role) &&
+      !mine &&
+      ['employees', 'leave', 'applicants', 'onboarding'].includes(faceId)
+    ) {
+      const peopleItems = [
+        { href: '#/employees', id: 'employees', label: 'Employees' },
+        { href: '#/leave', id: 'leave', label: 'Leave' },
+      ];
+      if (user.role === 'admin') {
+        peopleItems.push({ href: '#/salaries', id: 'salaries', label: 'Payroll' });
+      }
+      peopleItems.push(
+        { href: '#/applicants', id: 'applicants', label: 'Applicants' },
+        { href: '#/onboarding', id: 'onboarding', label: 'Onboarding' }
+      );
+      insertTabs(document.getElementById(`face-${faceId}`), peopleItems, faceId);
+    }
+
+    if (user.role === 'admin' && !mine && faceId === 'salaries') {
+      insertTabs(document.getElementById('face-salaries'), [
+        { href: '#/employees', id: 'employees', label: 'Employees' },
+        { href: '#/leave', id: 'leave', label: 'Leave' },
+        { href: '#/salaries', id: 'salaries', label: 'Payroll' },
+        { href: '#/applicants', id: 'applicants', label: 'Applicants' },
+        { href: '#/onboarding', id: 'onboarding', label: 'Onboarding' },
+      ], 'salaries');
+    }
+
+    if (user.role === 'hr' && !mine && ['salaries', 'salary-funding'].includes(faceId)) {
+      insertTabs(document.getElementById(`face-${faceId}`), [
+        { href: '#/salaries', id: 'salaries', label: 'Payroll' },
+        { href: '#/salary-funding', id: 'salary-funding', label: 'Salary funding' },
+      ], faceId);
+    }
+
+    if (user.role === 'admin' && ['traffic', 'website-payments'].includes(faceId)) {
+      insertTabs(document.getElementById(`face-${faceId}`), [
+        { href: '#/traffic', id: 'traffic', label: 'Website traffic' },
+        { href: '#/website-payments', id: 'website-payments', label: 'Event registrations' },
+      ], faceId);
+    }
+
+    if (user.role === 'admin' && ['users', 'login-audit', 'health', 'organization', 'email'].includes(faceId)) {
+      insertTabs(document.getElementById(`face-${faceId}`), [
+        { href: '#/users', id: 'users', label: 'Users' },
+        { href: '#/login-audit', id: 'login-audit', label: 'Login audit' },
+        { href: '#/health', id: 'health', label: 'Health' },
+        { href: '#/organization', id: 'organization', label: 'Company' },
+        { href: '#/email', id: 'email', label: 'Email' },
+      ], faceId);
+    }
+
+    if (['admin', 'director'].includes(user.role) && faceId === 'reports') {
+      const defaultTab = user.role === 'admin' ? 'today' : 'analytics';
+      const active = tab || defaultTab;
+      insertTabs(
+        document.getElementById('face-reports'),
+        user.role === 'admin'
+          ? [
+              { href: '#/reports?tab=today', id: 'today', label: 'Today' },
+              { href: '#/reports?tab=analytics', id: 'analytics', label: 'Analytics' },
+              { href: '#/reports?tab=daily', id: 'daily', label: 'Daily reports' },
+              { href: '#/reports?tab=audit', id: 'audit', label: 'Audit' },
+            ]
+          : [
+              { href: '#/reports?tab=analytics', id: 'analytics', label: 'Analytics' },
+              { href: '#/reports?tab=daily', id: 'daily', label: 'Daily reports' },
+              { href: '#/reports?tab=audit', id: 'audit', label: 'Audit' },
+            ],
+        active
+      );
+    }
+  }
+
   // Router
   const titles = {
     '/': 'Home',
-    '/leads': 'Leads',
-    '/clients': 'Clients',
+    '/pipeline': 'Pipeline',
+    '/leads': 'Pipeline',
+    '/clients': 'Pipeline',
+    '/billing': 'Billing',
     '/projects': 'Projects',
-    '/timeline': 'Timeline',
+    '/timeline': 'Projects',
+    '/finance': 'Finance',
     '/invoices': 'Invoices',
     '/followups': 'My Follow-ups',
     '/approvals': 'Approvals',
-    '/tasks': 'Tasks',
+    '/work': 'My work',
+    '/tasks': 'My work',
     '/email': 'Email client',
     '/flag': 'Flag follow-up',
     '/payments': 'Payments',
     '/expenses': 'Expenses',
-    '/employees': 'Employees',
-    '/leave': 'Leave',
+    '/employees': 'People',
+    '/leave': 'People',
     '/salaries': 'Payroll',
-    '/salary-funding': 'Salary funding',
-    '/inbox-ai': 'Inbox AI',
+    '/salary-funding': 'Payroll',
+    '/applicants': 'People',
+    '/onboarding': 'People',
     '/reports': 'Reports',
-    '/users': 'Users',
-    '/login-audit': 'Login audit',
+    '/traffic': 'Website traffic',
+    '/website-payments': 'Event registrations',
+    '/health': 'Organization',
+    '/users': 'Organization',
+    '/login-audit': 'Organization',
+    '/organization': 'Organization',
+    '/email': 'Email',
     '/changes': 'Change requests',
     '/settings': 'Settings',
     '/community': 'Community',
+    '/ops': 'Help',
   };
 
   const shell = document.getElementById('app-shell');
@@ -83,21 +254,79 @@
     const path = faceId === 'home' ? '/' : `/${faceId}`;
     const face = document.getElementById(`face-${faceId}`);
 
-    if (faceId === 'community' && (user.role === 'finance' || user.role === 'client' || !permissions.includes('messages:view'))) {
+    if (faceId === 'community' && (user.role === 'client' || !permissions.includes('messages:view'))) {
       location.hash = '#/';
+      return;
+    }
+
+    if (faceId === 'ops' && user.role === 'client') {
+      location.hash = '#/';
+      return;
+    }
+
+    if (faceId === 'tasks') {
+      location.hash = '#/work';
+      return;
+    }
+
+    if (faceId === 'reports' && ['sales', 'developer', 'hr'].includes(user.role)) {
+      location.hash = user.role === 'hr' ? '#/' : '#/work';
+      return;
+    }
+
+    if (faceId === 'finance' && user.role !== 'admin') {
+      location.hash = user.role === 'director' ? '#/invoices' : '#/';
+      return;
+    }
+
+    if (['pipeline', 'leads', 'clients'].includes(faceId) && !['director', 'sales', 'pm'].includes(user.role)) {
+      location.hash = '#/';
+      return;
+    }
+
+    if (faceId === 'leads' || faceId === 'clients') {
+      if (faceId === 'clients') sessionStorage.setItem('cres_pipeline_stage', 'clients');
+      location.hash = '#/pipeline';
+      return;
+    }
+
+    if (faceId === 'changes') {
+      location.hash = '#/projects';
+      return;
+    }
+
+    if (faceId === 'billing') {
+      location.hash = '#/invoices';
+      return;
+    }
+
+    if (faceId === 'timeline') {
+      location.hash = '#/projects?tab=timeline';
       return;
     }
 
     document.querySelectorAll('.face').forEach((el) => el.classList.remove('active'));
     if (face) {
       face.classList.add('active');
-      document.getElementById('page-title').textContent = face.dataset.title || titles[path] || 'Cres Dynamics';
+      const q = faceQuery();
+      let title = titles[path] || face.dataset.title || 'Cres Dynamics';
+      if (q.get('mine') === '1' && faceId === 'leave') title = 'My leave';
+      if (q.get('mine') === '1' && faceId === 'salaries') title = 'My pay';
+      if (user.role === 'admin' && ['users', 'login-audit', 'health', 'organization', 'email'].includes(faceId)) {
+        title = 'Organization';
+      }
+      if (user.role === 'admin' && ['finance', 'invoices', 'payments', 'flag', 'expenses'].includes(faceId)) {
+        title = 'Finance';
+      }
+      if (user.role === 'director' && ['invoices', 'expenses'].includes(faceId)) title = 'Money';
+      if (q.get('tab') === 'timeline' && faceId === 'projects') title = 'Projects';
+      document.getElementById('page-title').textContent = title;
     } else {
       document.getElementById('face-home').classList.add('active');
       document.getElementById('page-title').textContent = 'Home';
     }
 
-    paintNav(`#${path === '/' ? '/' : path}`);
+    paintNav(`#${pathFull.startsWith('/') ? pathFull : `/${pathFull}`}`);
 
     const salesDash = document.getElementById('sales-dashboard');
     const directorDash = document.getElementById('director-dashboard');
@@ -147,12 +376,15 @@
         if (dirInv) dirInv.hidden = true;
         if (finInv) finInv.hidden = true;
         if (clientInv) clientInv.hidden = false;
-        const heading = document.querySelector('#face-invoices .face-hero h2');
+        if (isFinance || user.role === 'admin') {
+        const heading = document.querySelector('#finance-invoices-panel .face-hero h2');
+        if (heading) heading.textContent = 'Billing';
+      }
+      const heading = document.querySelector('#face-invoices .face-hero h2');
         // client panel has its own hero
       }
     }
 
-    const salesReports = document.getElementById('sales-reports-panel');
     const directorReports = document.getElementById('director-reports-panel');
     const pmReports = document.getElementById('pm-reports-panel');
     const adminReports = document.getElementById('admin-reports-panel');
@@ -162,7 +394,6 @@
       const isPmHub = user.role === 'pm';
       const isAdminHub = user.role === 'admin';
       const isFinance = user.role === 'finance';
-      if (salesReports) salesReports.hidden = isDirectorHub || isPmHub || isAdminHub || isFinance;
       if (directorReports) directorReports.hidden = !isDirectorHub;
       if (pmReports) pmReports.hidden = !isPmHub;
       if (adminReports) adminReports.hidden = !isAdminHub;
@@ -170,23 +401,40 @@
       const heading = document.getElementById('reports-heading');
       const blurb = document.getElementById('reports-blurb');
       if (isAdminHub) {
-        if (heading) heading.textContent = 'All reports';
-        if (blurb) blurb.textContent = 'Analytics, action audit, and full company reports. Respond to Director/PM/Finance; Sales/Developer are read-only.';
+        if (heading) heading.textContent = 'Reports';
+        if (blurb) blurb.textContent = 'What happened today across Finance, Director, and Admin — plus analytics and the action log.';
       } else if (isPmHub) {
         if (heading) heading.textContent = 'Reports hub';
-        if (blurb) blurb.textContent = 'Review Sales and Developer reports, then forward to Director.';
+        if (blurb) blurb.textContent = 'Review today’s reports, then approve or forward to the Director.';
       } else if (isDirectorHub) {
-        if (heading) heading.textContent = 'Reports hub';
-        if (blurb) blurb.textContent = 'Analytics plus reports forwarded by PM. Switch filter to see the full chain.';
+        if (heading) heading.textContent = 'Reports';
+        if (blurb) blurb.textContent = 'Analytics, daily reports, and the action log.';
       } else if (isFinance) {
         if (heading) heading.textContent = 'Financial reports';
         if (blurb) {
           blurb.textContent =
             'Cash flow in and out — projects, clients, accounts, expenses, and salaries. Download as CSV or PDF.';
         }
-      } else {
-        if (heading) heading.textContent = 'Daily report';
-        if (blurb) blurb.textContent = 'Submit what you did today. Delivered to PM first, then Director.';
+      }
+      if (isAdminHub || isDirectorHub) {
+        const reportsTab = faceQuery().get('tab') || (user.role === 'admin' ? 'today' : 'analytics');
+        const ids =
+          user.role === 'admin'
+            ? {
+                today: 'admin-today-digest',
+                analytics: 'admin-analytics',
+                daily: 'admin-reports-daily',
+                audit: 'admin-action-audit',
+              }
+            : {
+                analytics: 'director-analytics',
+                daily: 'director-reports-daily',
+                audit: 'director-action-audit',
+              };
+        Object.entries(ids).forEach(([key, id]) => {
+          const el = document.getElementById(id);
+          if (el) el.hidden = key !== reportsTab;
+        });
       }
     }
 
@@ -205,8 +453,7 @@
         if (isAdmin) {
           const hero = moneyApprovals.querySelector('.face-hero p');
           if (hero) {
-            hero.textContent =
-              'Final Admin unlock for expenses escalated by Finance, and salary funding after Finance.';
+            hero.textContent = 'Approve or reject expenses and salary funding waiting on you.';
           }
           const h2 = moneyApprovals.querySelector('.face-hero h2');
           if (h2) h2.textContent = 'Money approvals';
@@ -221,9 +468,12 @@
     }
 
     const adminSystem = document.getElementById('admin-system-settings');
-    if (faceId === 'settings' && adminSystem) {
-      adminSystem.hidden = user.role !== 'admin';
-    }
+    if (adminSystem) adminSystem.hidden = true;
+    const orgCompany = document.getElementById('org-company-settings');
+    if (faceId === 'organization' && orgCompany) orgCompany.hidden = false;
+
+    const adminEmailExtra = document.getElementById('admin-email-automations');
+    if (adminEmailExtra) adminEmailExtra.hidden = !(faceId === 'email' && user.role === 'admin');
 
     // Projects: sales chrome vs PM company list vs client portal vs finance money view
     const salesProjects = document.getElementById('sales-projects-chrome');
@@ -237,16 +487,29 @@
       const isClient = user.role === 'client';
       const isFinance = user.role === 'finance';
       const isDirector = user.role === 'director';
-      if (salesProjects) salesProjects.hidden = isPm || isClient || isFinance;
-      if (pmProjects) pmProjects.hidden = isPm ? !!faceParam : true;
-      if (pmDetail) pmDetail.hidden = !(isPm && faceParam);
-      if (clientProjects) clientProjects.hidden = isClient ? !!faceParam : true;
-      if (clientDetail) clientDetail.hidden = !(isClient && faceParam);
-      if (financeProjects) financeProjects.hidden = !isFinance;
+      const timelineOn =
+        faceQuery().get('tab') === 'timeline' && ['admin', 'director', 'pm'].includes(user.role);
+      const timelinePanel = document.getElementById('projects-timeline-panel');
+      if (timelinePanel) timelinePanel.hidden = !timelineOn;
+      if (timelineOn) {
+        if (salesProjects) salesProjects.hidden = true;
+        if (pmProjects) pmProjects.hidden = true;
+        if (pmDetail) pmDetail.hidden = true;
+        if (clientProjects) clientProjects.hidden = true;
+        if (clientDetail) clientDetail.hidden = true;
+        if (financeProjects) financeProjects.hidden = true;
+      } else {
+        if (salesProjects) salesProjects.hidden = isPm || isClient || isFinance;
+        if (pmProjects) pmProjects.hidden = isPm ? !!faceParam : true;
+        if (pmDetail) pmDetail.hidden = !(isPm && faceParam);
+        if (clientProjects) clientProjects.hidden = isClient ? !!faceParam : true;
+        if (clientDetail) clientDetail.hidden = !(isClient && faceParam);
+        if (financeProjects) financeProjects.hidden = !isFinance;
+      }
       const newProjBtn = document.getElementById('btn-new-project');
       if (newProjBtn) {
         newProjBtn.hidden =
-          isFinance || isClient || isPm || isDirector || user.role === 'developer';
+          timelineOn || isFinance || isClient || isPm || isDirector || user.role === 'developer';
       }
       const hero = salesProjects?.querySelector('.face-hero');
       if (hero) {
@@ -255,20 +518,17 @@
         if (isDirector) {
           if (h2) h2.textContent = 'Projects';
           if (p) {
-            p.textContent =
-              'Open a project to review progress from developers, milestones, and edit project details.';
+            p.textContent = 'Open a project to review progress and milestones.';
           }
         } else if (user.role === 'sales' || user.role === 'admin') {
           if (h2) h2.textContent = 'Projects';
           if (p) {
-            p.textContent =
-              'Create projects for Director approval. Assigned developers see them only after approval.';
+            p.textContent = 'Create a project or check progress for a client.';
           }
         } else if (user.role === 'developer') {
           if (h2) h2.textContent = 'My projects';
           if (p) {
-            p.textContent =
-              'Update milestones and task hours. Progress % updates as you complete work.';
+            p.textContent = 'Update milestones and hours on your assigned work.';
           }
         }
       }
@@ -277,9 +537,23 @@
     if (faceId === 'settings') {
       await CresSettings.load();
     }
-    if (faceId === 'tasks' && typeof CresTasks !== 'undefined') {
-      await CresTasks.mount();
+    if (faceId === 'email' && user.role === 'admin') {
+      const heading = document.getElementById('email-heading');
+      const blurb = document.getElementById('email-blurb');
+      if (heading) heading.textContent = 'Client email';
+      if (blurb) {
+        blurb.textContent = 'Write to a client, turn automations on or off, and see mail going out and coming back.';
+      }
     }
+    if (faceId === 'approvals' && typeof CresApprovals !== 'undefined') {
+      await CresApprovals.mount();
+    }
+    if (faceId === 'work') {
+      if (typeof CresMyWork !== 'undefined') await CresMyWork.mount();
+      else if (typeof CresTasks !== 'undefined') await CresTasks.mount();
+    }
+
+    paintPageTabs(faceId);
     if (faceId === 'ops' && typeof CresOps !== 'undefined') {
       await CresOps.mount();
     }
@@ -287,56 +561,79 @@
       await CresCommunity.mount();
     }
 
+    const timelineOn =
+      faceId === 'projects' &&
+      faceQuery().get('tab') === 'timeline' &&
+      ['admin', 'director', 'pm'].includes(user.role);
+    const jobs = [];
+
     if (typeof CresSales !== 'undefined') {
       if (user.role === 'sales') {
-        await CresSales.mount(faceId, user);
+        jobs.push(CresSales.mount(faceId, user));
       } else if (
         user.role === 'admin' &&
-        ['leads', 'clients', 'projects', 'followups', 'email'].includes(faceId)
+        ['projects', 'followups', 'email'].includes(faceId) &&
+        !timelineOn
       ) {
-        await CresSales.mount(faceId, user);
+        jobs.push(CresSales.mount(faceId, user));
+      } else if (['director', 'pm'].includes(user.role) && faceId === 'pipeline') {
+        jobs.push(CresSales.mount(faceId, user));
       }
     }
 
-    if (typeof CresDirector !== 'undefined') {
-      await CresDirector.mount(faceId, user);
+    if (typeof CresDirector !== 'undefined' && ['director', 'admin'].includes(user.role)) {
+      jobs.push(CresDirector.mount(faceId, user));
     }
 
-    if (typeof CresDeveloper !== 'undefined') {
-      await CresDeveloper.mount(faceId, user);
+    if (typeof CresDeveloper !== 'undefined' && user.role === 'developer') {
+      jobs.push(CresDeveloper.mount(faceId, user));
     }
 
-    if (typeof CresFinance !== 'undefined') {
-      await CresFinance.mount(faceId, user);
+    if (typeof CresFinance !== 'undefined' && ['finance', 'admin', 'director'].includes(user.role)) {
+      jobs.push(CresFinance.mount(faceId, user));
     }
 
-    if (typeof CresHR !== 'undefined') {
-      await CresHR.mount(faceId, user, faceParam);
+    if (typeof CresHR !== 'undefined' && ['hr', 'admin'].includes(user.role)) {
+      jobs.push(CresHR.mount(faceId, user, faceParam));
     }
 
-    if (typeof CresPM !== 'undefined') {
-      await CresPM.mount(faceId, user, faceParam);
+    if (typeof CresPM !== 'undefined' && ['pm', 'director', 'admin'].includes(user.role)) {
+      jobs.push(CresPM.mount(faceId, user, faceParam));
     }
 
-    if (typeof CresAdmin !== 'undefined') {
-      await CresAdmin.mount(faceId, user);
+    if (typeof CresAdmin !== 'undefined' && user.role === 'admin') {
+      jobs.push(CresAdmin.mount(faceId, user));
     }
 
-    if (typeof CresClient !== 'undefined') {
-      await CresClient.mount(faceId, user, faceParam);
+    if (typeof CresTraffic !== 'undefined') {
+      jobs.push(CresTraffic.mount(faceId, user));
     }
+
+    if (typeof CresWebsitePayments !== 'undefined') {
+      jobs.push(CresWebsitePayments.mount(faceId, user));
+    }
+
+    if (typeof CresAdminHealth !== 'undefined') {
+      jobs.push(CresAdminHealth.mount(faceId, user));
+    }
+
+    if (typeof CresClient !== 'undefined' && user.role === 'client') {
+      jobs.push(CresClient.mount(faceId, user, faceParam));
+    }
+
+    if (jobs.length) await Promise.all(jobs);
   }
 
   function roleBlurb(role) {
     const map = {
-      sales: 'Sales workspace - leads, clients, projects, and flagged invoice follow-ups.',
-      director: 'Director workspace - approvals, reports, and projected invoice visibility.',
-      developer: 'Developer workspace - assigned projects, tasks, and daily reports.',
-      finance: 'Finance workspace - money approvals, invoices, payments, receipts, and cash-flow graphs.',
-      pm: 'PM workspace - all projects, due dates, and report routing.',
-      admin: 'Admin workspace - full access via the same shared components.',
-      hr: 'HR workspace - employees and payroll (no client invoice or cash-flow access).',
-      client: 'Client portal - your projects and invoices only. No staff chat.',
+      sales: 'Work your pipeline, follow up today, and keep deals moving.',
+      director: 'Approve work, review the team, and watch this month’s revenue.',
+      developer: 'Update your projects and log what you did today.',
+      finance: 'Bill, collect, and record spending.',
+      pm: 'Keep projects on track and review today’s reports.',
+      admin: 'See what needs you today across sales, projects, and money.',
+      hr: 'Manage people, leave, and payroll.',
+      client: 'See your project progress and invoices.',
     };
     return map[role] || 'Shared Cres Dynamics shell.';
   }
@@ -364,6 +661,18 @@
   });
   profileDd.addEventListener('click', (e) => e.stopPropagation());
   notifDd.addEventListener('click', (e) => e.stopPropagation());
+
+  function syncModalLock() {
+    const open = document.querySelector(
+      '.modal-backdrop.open, .new-chat-modal.open, .modal-overlay:not([hidden])'
+    );
+    document.body.classList.toggle('modal-open', !!open);
+  }
+  const modalLockObserver = new MutationObserver(syncModalLock);
+  document.querySelectorAll('.modal-backdrop, .new-chat-modal, .modal-overlay').forEach((el) => {
+    modalLockObserver.observe(el, { attributes: true, attributeFilter: ['class', 'hidden'] });
+  });
+  syncModalLock();
 
   document.getElementById('logout-btn').addEventListener('click', async () => {
     CresRealtime.disconnect();
@@ -416,6 +725,8 @@
             } else {
               location.hash = btn.dataset.href || `#/projects/${btn.dataset.id}`;
             }
+          } else if (btn.dataset.type === 'client' && btn.dataset.id && typeof CresClientCard !== 'undefined') {
+            CresClientCard.open(btn.dataset.id).catch(console.error);
           } else if (btn.dataset.href) {
             location.hash = btn.dataset.href;
           }
@@ -477,8 +788,8 @@
     if (meta.href) return meta.href;
     const type = String(n.type || '').toLowerCase();
     if (meta.conversationId || type.includes('message')) return '#/community';
-    if (meta.taskId || type.includes('task')) return '#/tasks';
-    if (meta.leaveId || type.includes('leave')) return '#/leave';
+    if (meta.taskId || type.includes('task')) return '#/work';
+    if (meta.leaveId || type.includes('leave')) return '#/leave?mine=1';
     if (meta.fundingId || type.includes('salary_funding') || type.includes('funding')) {
       return '#/salary-funding';
     }
@@ -491,7 +802,9 @@
     if (type.includes('approval') || type.includes('project') || type.includes('milestone')) {
       return user.role === 'director' || user.role === 'admin' ? '#/approvals' : '#/projects';
     }
-    if (type.includes('report')) return '#/reports';
+    if (type.includes('report')) {
+      return ['admin', 'director', 'pm', 'finance'].includes(user.role) ? '#/reports' : '#/work';
+    }
     if (type.includes('assign')) return '#/projects';
     return null;
   }
@@ -500,15 +813,19 @@
     const meta = parseNotifMeta(n);
     if (meta.action) return meta.action;
     const type = String(n.type || '').toLowerCase();
-    if (type.includes('expense_pending_finance')) return 'Open Expenses and approve as Finance, then Admin will review.';
-    if (type.includes('expense_pending_admin')) return 'Open Expenses and give final Admin approval to unlock the transaction.';
+    if (type.includes('expense_pending_finance')) return 'Open Expenses and approve as Finance. Admin only reviews amounts above the threshold.';
+    if (type.includes('expense_pending_admin')) return 'Open Expenses and give Admin approval (this amount is above the threshold).';
     if (type.includes('expense')) return 'Review this expense on the Expenses page.';
-    if (type.includes('task')) return 'Open Tasks to view or update this assignment.';
-    if (type.includes('leave')) return 'Open Leave to review or track this request.';
+    if (type.includes('task')) return 'Open My work to view or update this assignment.';
+    if (type.includes('leave')) return 'Open My leave to review or track this request.';
     if (type.includes('funding') || type.includes('salary')) return 'Open Salary funding for the approval chain.';
     if (type.includes('approval')) return 'Open Approvals to decide on the project.';
     if (type.includes('message')) return 'Open Community to read the conversation.';
-    if (type.includes('report')) return 'Open Reports to review or respond.';
+    if (type.includes('report')) {
+      return ['admin', 'director', 'pm', 'finance'].includes(user.role)
+        ? 'Open Reports to review or respond.'
+        : 'Open My work to review or respond.';
+    }
     if (type.includes('followup')) return 'Open My Follow-ups to contact the client.';
     return 'Review the details below. Use Open related page when a destination is available.';
   }
@@ -519,7 +836,7 @@
     const href = hrefForNotification(n);
     document.getElementById('notif-detail-title').textContent = (n.type || 'notification')
       .replace(/_/g, ' ');
-    document.getElementById('notif-detail-type').textContent = new Date(n.created_at).toLocaleString();
+    document.getElementById('notif-detail-type').textContent = CresFormat.datetime(n.created_at);
     document.getElementById('notif-detail-body').textContent = n.content || '';
     document.getElementById('notif-detail-action').textContent = actionHintForNotification(n);
     const go = document.getElementById('notif-detail-go');
@@ -554,7 +871,7 @@
       .slice(0, 40)
       .map((n) => {
         const unread = n.read_at ? '' : 'unread';
-        const when = new Date(n.created_at).toLocaleString();
+        const when = CresFormat.datetime(n.created_at);
         const href = hrefForNotification(n);
         return `<button type="button" class="notif-item ${unread}" data-id="${escapeHtml(n.id)}" data-has-href="${href ? '1' : '0'}">
           <span>${escapeHtml(n.content)}</span>
@@ -635,11 +952,18 @@
     }
   });
 
+  CresNav.renderProfile(profileDd, user, permissions);
+  profileDd.querySelectorAll('a').forEach((a) => {
+    a.addEventListener('click', () => profileDd.classList.remove('open'));
+  });
+
   CresSettings.bind();
   if (typeof CresTasks !== 'undefined') CresTasks.bind();
+  if (typeof CresMyWork !== 'undefined') CresMyWork.bind();
   if (typeof CresOps !== 'undefined') CresOps.bind();
   CresCommunity.bind();
   if (typeof CresProjectDetail !== 'undefined') CresProjectDetail.bind();
+  if (typeof CresClientCard !== 'undefined') CresClientCard.bind();
   CresSales.bindModals();
   CresDirector.bind();
   CresDeveloper.bind();
@@ -648,12 +972,13 @@
   if (typeof CresPM !== 'undefined') CresPM.bind();
   if (typeof CresAdmin !== 'undefined') CresAdmin.bind();
   if (typeof CresClient !== 'undefined') CresClient.bind();
-  CresRealtime.connect();
-  paintLive(CresRealtime.getStatus());
-
-  await loadNotifications();
   window.addEventListener('hashchange', () => {
     route().catch(console.error);
   });
   await route();
+  loadNotifications().catch(() => {});
+  setTimeout(() => {
+    CresRealtime.connect();
+    paintLive(CresRealtime.getStatus());
+  }, 50);
 })();

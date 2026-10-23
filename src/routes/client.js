@@ -7,6 +7,7 @@ const { query } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission, requireAnyPermission } = require('../middleware/rbac');
 const { asyncHandler, AppError } = require('../lib/errors');
+const { loadCompanyProfile } = require('../config/company');
 
 const router = express.Router();
 router.use(authenticate);
@@ -78,7 +79,7 @@ async function assertOwnsProject(user, projectId) {
   const ids = await clientRecordIds(user);
   if (!ids.length) throw new AppError('No client profile linked', 404, 'NOT_FOUND');
   const { rows } = await query(
-    `SELECT p.id, p.name, p.status, p.milestones, p.summary, p.updated_at, p.approved_at, p.client_id, p.preview_url
+    `SELECT p.id, p.name, p.status, p.milestones, p.summary, p.updated_at, p.approved_at, p.client_id, p.preview_url, p.due_date
      FROM projects p
      WHERE p.id = $1
        AND p.client_id = ANY($2::uuid[])
@@ -219,6 +220,7 @@ router.get(
           progress_pct: milestoneProgress(p.milestones),
           milestones: milestonesWithSignoff,
           preview_url: p.preview_url || null,
+          due_date: p.due_date || null,
           updated_at: p.updated_at,
           approved_at: p.approved_at,
         },
@@ -234,7 +236,8 @@ router.get(
   asyncHandler(async (req, res) => {
     assertClient(req);
     const { rows } = await query(
-      `SELECT i.id, i.amount, i.status, i.created_at, i.updated_at, i.auto_sent_at,
+      `SELECT i.id, i.amount, i.amount_paid, i.status, i.created_at, i.updated_at, i.auto_sent_at,
+              i.mpesa_claim_code, i.mpesa_claimed_at,
               p.id AS project_id, p.name AS project_name
        FROM invoices i
        JOIN clients c ON c.id = i.client_id
@@ -244,6 +247,54 @@ router.get(
       [req.user.id, req.user.email]
     );
     res.json({ ok: true, data: rows });
+  })
+);
+
+router.post(
+  '/invoices/:id/mpesa',
+  requirePermission('invoices', 'view'),
+  asyncHandler(async (req, res) => {
+    assertClient(req);
+    const code = String(req.body?.code || '').trim();
+    if (!code) throw new AppError('M-Pesa code is required', 400, 'VALIDATION');
+    const { rows } = await query(
+      `SELECT i.* FROM invoices i
+       JOIN clients c ON c.id = i.client_id
+       WHERE i.id = $1 AND (c.user_id = $2 OR c.email = $3)`,
+      [req.params.id, req.user.id, req.user.email]
+    );
+    const inv = rows[0];
+    if (!inv) throw new AppError('Invoice not found', 404, 'NOT_FOUND');
+    if (inv.status === 'paid') throw new AppError('Invoice is already paid', 409, 'INVALID_STATE');
+    await query(
+      `UPDATE invoices
+       SET mpesa_claim_code = $1, mpesa_claimed_at = NOW(), mpesa_claimed_by = $2, updated_at = NOW()
+       WHERE id = $3`,
+      [code, req.user.id, inv.id]
+    );
+    const { queueNotification } = require('../queues/jobs');
+    const { rows: financeUsers } = await query(
+      `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
+       WHERE r.name IN ('finance', 'admin') AND u.status = 'active'`
+    );
+    for (const fu of financeUsers) {
+      await queueNotification({
+        userId: fu.id,
+        type: 'mpesa_claim',
+        content: `${req.user.name} sent M-Pesa code ${code} for invoice ${Number(inv.amount).toLocaleString('en-KE')} KES`,
+        meta: { invoiceId: inv.id, code, href: '#/payments' },
+      });
+    }
+    const company = await loadCompanyProfile(query);
+    res.json({
+      ok: true,
+      data: {
+        paybill: company.mpesaPaybill || '542542',
+        account: company.mpesaAccount || '43869',
+        amount: Number(inv.amount) - Number(inv.amount_paid || 0),
+        code,
+      },
+    });
   })
 );
 

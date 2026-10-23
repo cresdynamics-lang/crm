@@ -5,6 +5,7 @@ const { requirePermission } = require('../middleware/rbac');
 const { asyncHandler, AppError } = require('../lib/errors');
 const { idempotency } = require('../middleware/idempotency');
 const { queueNotification } = require('../queues/jobs');
+const { INTERNAL_CATEGORIES, expenseClass } = require('../lib/expenseClasses');
 
 const router = express.Router();
 router.use(authenticate);
@@ -42,6 +43,15 @@ router.get(
       params.push(req.query.category);
       clauses.push(`e.category = $${params.length}`);
     }
+    if (req.query.class === 'internal' || req.query.class === 'external') {
+      params.push(INTERNAL_CATEGORIES);
+      const placeholder = `$${params.length}`;
+      clauses.push(
+        req.query.class === 'internal'
+          ? `e.category = ANY(${placeholder}::text[])`
+          : `NOT (e.category = ANY(${placeholder}::text[]))`
+      );
+    }
     if (req.query.approval_status) {
       // Support legacy "pending" as either finance or admin queue
       if (req.query.approval_status === 'pending') {
@@ -75,13 +85,17 @@ router.get(
        ORDER BY e.created_at DESC`,
       params
     );
-    res.json({ ok: true, data: rows });
+    res.json({
+      ok: true,
+      data: rows.map((r) => ({ ...r, expense_class: expenseClass(r.category) })),
+    });
   })
 );
 
 /**
  * Create expense.
- * Director submissions always: pending_finance → Finance → Admin → approved.
+ * Admin submissions are auto-approved.
+ * Director submissions need Finance; Admin is only required above the threshold.
  * Other roles: threshold may send to pending_admin; else auto-approved.
  */
 router.post(
@@ -93,7 +107,11 @@ router.post(
     if (!category || amount == null) {
       throw new AppError('category and amount required', 400, 'VALIDATION');
     }
-    if (!['operational', 'other', 'salary'].includes(category)) {
+    const EXPENSE_CATEGORIES = [
+      'operational', 'other', 'salary',
+      'hosting', 'domains', 'transport', 'ads', 'salaries', 'drawings',
+    ];
+    if (!EXPENSE_CATEGORIES.includes(category)) {
       throw new AppError('Invalid category', 400, 'VALIDATION');
     }
 
@@ -103,10 +121,12 @@ router.post(
     let approval_status = 'approved';
     let pipeline = 'auto';
 
-    if (req.user.role === 'director') {
-      // Director expenses always need Finance then Admin
+    if (req.user.role === 'admin') {
+      approval_status = 'approved';
+      pipeline = 'admin_auto';
+    } else if (req.user.role === 'director') {
       approval_status = 'pending_finance';
-      pipeline = 'director_finance_admin';
+      pipeline = 'director_finance';
     } else if (category !== 'salary' && !linked_salary_id) {
       const { threshold, requireAboveThreshold } = await expenseThreshold();
       if (requireAboveThreshold && amt > threshold) {
@@ -133,7 +153,7 @@ router.post(
         meta: {
           expenseId: expense.id,
           href: '#/expenses',
-          action: 'Finance must approve, then Admin.',
+          action: 'Finance must approve. Admin is only needed above the expense threshold.',
         },
       });
     } else if (approval_status === 'pending_admin') {
@@ -156,7 +176,7 @@ router.post(
   })
 );
 
-/** Finance approves Director expenses → escalate to Admin */
+/** Finance approves Director expenses. Admin is only required above the threshold. */
 router.post(
   '/:id/finance-approve',
   requirePermission('expenses', 'edit'),
@@ -166,39 +186,62 @@ router.post(
       throw new AppError('Only Finance can approve at this stage', 403, 'FORBIDDEN');
     }
 
+    const found = await query(
+      `SELECT * FROM expenses WHERE id = $1 AND approval_status IN ('pending_finance', 'pending')`,
+      [req.params.id]
+    );
+    if (!found.rows[0]) {
+      throw new AppError('Expense not found or not awaiting Finance', 409, 'INVALID_STATE');
+    }
+
+    const { threshold, requireAboveThreshold } = await expenseThreshold();
+    const needsAdmin = requireAboveThreshold && Number(found.rows[0].amount) > threshold;
+    const nextStatus = needsAdmin ? 'pending_admin' : 'approved';
+
     const { rows } = await query(
       `UPDATE expenses
-       SET approval_status = 'pending_admin',
-           finance_approved_by = $1,
+       SET approval_status = $1::varchar,
+           finance_approved_by = $2,
            finance_approved_at = NOW(),
-           approval_note = COALESCE($2, approval_note)
-       WHERE id = $3 AND approval_status IN ('pending_finance', 'pending')
+           approved_by = CASE WHEN $1::varchar = 'approved' THEN $2 ELSE approved_by END,
+           approved_at = CASE WHEN $1::varchar = 'approved' THEN NOW() ELSE approved_at END,
+           approval_note = COALESCE($3, approval_note)
+       WHERE id = $4 AND approval_status IN ('pending_finance', 'pending')
        RETURNING *`,
-      [req.user.id, req.body?.note || null, req.params.id]
+      [nextStatus, req.user.id, req.body?.note || null, req.params.id]
     );
     if (!rows[0]) {
       throw new AppError('Expense not found or not awaiting Finance', 409, 'INVALID_STATE');
     }
 
-    await notifyRoles(['admin'], {
-      type: 'expense_pending_admin',
-      content: `Finance approved expense ${rows[0].amount} — Admin final approval needed`,
-      meta: {
-        expenseId: rows[0].id,
-        href: '#/expenses',
-        action: 'Admin must approve before the transaction can happen.',
-      },
-    });
-    if (rows[0].created_by) {
+    if (needsAdmin) {
+      await notifyRoles(['admin'], {
+        type: 'expense_pending_admin',
+        content: `Finance approved expense ${rows[0].amount} — Admin approval needed (above threshold)`,
+        meta: {
+          expenseId: rows[0].id,
+          href: '#/expenses',
+          action: 'Admin must approve because this expense is above the threshold.',
+        },
+      });
+      if (rows[0].created_by) {
+        await queueNotification({
+          userId: rows[0].created_by,
+          type: 'expense_finance_approved',
+          content: `Finance approved your expense of ${rows[0].amount}; waiting on Admin (above threshold)`,
+          meta: { expenseId: rows[0].id, href: '#/expenses' },
+        });
+      }
+    } else if (rows[0].created_by) {
       await queueNotification({
         userId: rows[0].created_by,
-        type: 'expense_finance_approved',
-        content: `Finance approved your expense of ${rows[0].amount}; waiting on Admin`,
+        type: 'expense_approved',
+        content: `Finance approved your expense of ${rows[0].amount} — transaction may proceed`,
         meta: { expenseId: rows[0].id, href: '#/expenses' },
       });
     }
 
-    res.json({ ok: true, data: rows[0] });
+    res.json({ ok: true, data: rows[0], meta: { needsAdmin } });
   })
 );
 
@@ -231,7 +274,7 @@ router.post(
     );
     if (!rows[0]) {
       throw new AppError(
-        'Expense not found or not awaiting Admin (Finance must approve first for Director expenses)',
+        'Expense not found or not awaiting Admin',
         409,
         'INVALID_STATE'
       );
@@ -337,7 +380,7 @@ router.get(
     if (!rows[0]) throw new AppError('Expense not found', 404, 'NOT_FOUND');
     if (rows[0].approval_status !== 'approved') {
       throw new AppError(
-        'Receipt available only after Admin approval (transaction unlocked)',
+        'Receipt available only after approval (transaction unlocked)',
         409,
         'NOT_APPROVED'
       );
@@ -358,7 +401,7 @@ router.get(
     if (!rows[0]) throw new AppError('Expense not found', 404, 'NOT_FOUND');
     if (rows[0].approval_status !== 'approved') {
       throw new AppError(
-        'Receipt available only after Admin approval (transaction unlocked)',
+        'Receipt available only after approval (transaction unlocked)',
         409,
         'NOT_APPROVED'
       );
@@ -388,7 +431,7 @@ router.post(
     ]);
     if (!rows[0]) throw new AppError('Expense not found', 404, 'NOT_FOUND');
     if (rows[0].approval_status !== 'approved') {
-      throw new AppError('Cannot send receipt until Admin approval', 409, 'NOT_APPROVED');
+      throw new AppError('Cannot send receipt until the expense is approved', 409, 'NOT_APPROVED');
     }
     const { expenseReceipt } = require('../services/receipts');
     const { queueReceiptEmail } = require('../queues/jobs');

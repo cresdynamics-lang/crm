@@ -15,14 +15,11 @@ const CresDirector = (() => {
   }
 
   function fmtDate(v) {
-    if (!v) return '-';
-    return new Date(v).toLocaleDateString();
+    return CresFormat.date(v);
   }
 
   function fmtMoney(n) {
-    const num = Number(n);
-    if (Number.isNaN(num)) return '-';
-    return num.toLocaleString('en-KE', { style: 'currency', currency: 'KES' });
+    return CresFormat.money(n);
   }
 
   function statusPill(s) {
@@ -60,7 +57,7 @@ const CresDirector = (() => {
           </div>
         </div>
         <p style="color:var(--text-muted);font-size:0.8rem;margin:-8px 0 16px;">
-          Invoice projection only. No account balances or cash-health data on this view.
+          Issued vs collected this period.
         </p>
         <div class="chart-panel" style="margin-bottom:18px;">
           <h3>Invoices in / out projection</h3>
@@ -90,7 +87,7 @@ const CresDirector = (() => {
             {
               label: 'Expected (issued/overdue)',
               data: c.expected,
-              backgroundColor: 'rgba(31, 167, 160, 0.65)',
+              backgroundColor: 'rgba(0, 168, 197, 0.65)',
               borderRadius: 6,
             },
             {
@@ -312,8 +309,6 @@ const CresDirector = (() => {
 
     const reports = await CresAPI.request(`/api/reports?${params}`);
 
-    await mountAnalytics('director-analytics');
-
     const list = document.getElementById('director-reports-list');
     list.innerHTML = reports.data.length
       ? reports.data
@@ -328,7 +323,7 @@ const CresDirector = (() => {
               ? `<button type="button" class="btn btn-ghost btn-sm" data-ai-review="${esc(r.id)}" data-author="${esc(r.author_name)}" style="font-size:0.78rem;margin-top:4px;">AI Review</button>`
               : '';
             return `<tr>
-              <td>${new Date(r.created_at).toLocaleString()}</td>
+              <td>${CresFormat.datetime(r.created_at)}</td>
               <td><div class="report-author">${typeof CresSettings !== 'undefined' ? CresSettings.avatarHtml({ name: r.author_name, avatar_url: r.author_avatar_url }, 'avatar avatar-sm') : ''}<span>${esc(r.author_name)} · ${esc(r.author_role)}</span></div></td>
               <td>${statusPill(r.routing_status || 'pending_pm')}</td>
               <td>${esc(r.content)}${r.project_name ? `<div class="meta">${esc(r.project_name)}</div>` : ''}${r.pm_note ? `<div class="meta">PM: ${esc(r.pm_note)}</div>` : ''}</td>
@@ -542,7 +537,7 @@ const CresDirector = (() => {
           datasets: [{
             label: 'Projects',
             data: d.projectsByMonth?.labels?.length ? d.projectsByMonth.values : [0],
-            backgroundColor: 'rgba(31, 167, 160, 0.65)',
+            backgroundColor: 'rgba(0, 168, 197, 0.65)',
             borderRadius: 6,
           }],
         },
@@ -588,14 +583,19 @@ const CresDirector = (() => {
     }
 
     tbody.innerHTML = res.data
-      .map(
-        (i) => `<tr>
-          <td>${esc(clients[i.client_id] || i.client_id || '-')}</td>
-          <td>${fmtMoney(i.amount)}</td>
+      .map((i) => {
+        const paid = Number(i.amount_paid || 0);
+        const amount = Number(i.amount || 0);
+        const balance = Math.max(0, amount - paid);
+        return `<tr>
+          <td>${esc(i.client_name || clients[i.client_id] || '-')}</td>
+          <td>${fmtMoney(amount)}</td>
+          <td>${fmtMoney(paid)}</td>
+          <td>${fmtMoney(balance)}</td>
           <td>${statusPill(i.status)}</td>
-          <td>${esc(projects[i.project_id] || i.project_id || '-')}</td>
-        </tr>`
-      )
+          <td>${esc(i.project_name || projects[i.project_id] || '-')}</td>
+        </tr>`;
+      })
       .join('');
   }
 
@@ -619,11 +619,11 @@ const CresDirector = (() => {
     const thead = document.querySelector('#sales-projects-chrome thead tr');
     if (thead) {
       thead.innerHTML =
-        '<th>Project</th><th>Client</th><th>Status</th><th>Progress</th><th>Developer</th><th></th>';
+        '<th>Project</th><th>Client</th><th>Status</th><th>Due</th><th>Progress</th><th>Developer</th><th></th>';
     }
 
     if (!res.data.length) {
-      tbody.innerHTML = `<tr><td colspan="6" class="empty-state">No projects yet.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No projects yet.</td></tr>`;
       return;
     }
     tbody.innerHTML = res.data
@@ -634,6 +634,7 @@ const CresDirector = (() => {
           <td><a href="#/projects/${esc(p.id)}" class="project-link" data-open-project="${esc(p.id)}">${esc(p.name)}</a></td>
           <td>${esc(p.client_name || '-')}</td>
           <td>${statusPill(p.status)}</td>
+          <td>${fmtDate(p.due_date)}</td>
           <td>${esc(pct)}</td>
           <td>${esc(p.developer_name || '-')}</td>
           <td>${
@@ -666,15 +667,55 @@ const CresDirector = (() => {
     });
   }
 
+  async function mountAudit(hostId) {
+    const host = document.getElementById(hostId);
+    if (!host) return;
+    try {
+      const res = await CresAPI.request('/api/audit/actions');
+      const rows = res.data || [];
+      host.innerHTML = `
+        <div class="reports-panel-block">
+          <h3 style="margin:0 0 12px;">Action audit log</h3>
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Summary</th></tr></thead>
+              <tbody>
+                ${
+                  rows.length
+                    ? rows
+                        .map(
+                          (a) => `<tr>
+                            <td>${CresFormat.datetime(a.created_at)}</td>
+                            <td>${esc(a.actor_name || a.actor_role || '-')}</td>
+                            <td>${esc(a.action)}</td>
+                            <td>${esc(a.summary)}</td>
+                          </tr>`
+                        )
+                        .join('')
+                    : `<tr><td colspan="4" class="empty-state">No action audit entries.</td></tr>`
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>`;
+    } catch (err) {
+      host.innerHTML = `<div class="placeholder-card">${esc(err.message)}</div>`;
+    }
+  }
+
   async function mount(faceId, user) {
     if (!['director', 'admin'].includes(user.role)) return;
-    // Admin reuses Approvals + Tasks; home/reports/projects/invoices handled by Admin/Sales/Finance faces
+    const tab = new URLSearchParams((location.hash.split('?')[1] || '')).get('tab') || '';
     if (faceId === 'home' && user.role === 'director') await mountHome();
     else if (faceId === 'approvals') await mountApprovals();
     else if (faceId === 'tasks') await mountTasks();
-    else if (faceId === 'reports' && user.role === 'director') await mountReportsHub();
-    else if (faceId === 'invoices' && user.role === 'director') await mountInvoices();
-    else if (faceId === 'projects' && user.role === 'director') await mountProjects();
+    else if (faceId === 'reports' && user.role === 'director') {
+      const reportsTab = tab || 'analytics';
+      if (reportsTab === 'daily') await mountReportsHub();
+      else if (reportsTab === 'audit') await mountAudit('director-action-audit');
+      else await mountAnalytics('director-analytics');
+    } else if (faceId === 'invoices' && user.role === 'director') await mountInvoices();
+    else if (faceId === 'projects' && user.role === 'director' && tab !== 'timeline') await mountProjects();
     else if (faceId === 'expenses' && user.role === 'director') {
       if (typeof CresFinance !== 'undefined' && CresFinance.mountExpenses) {
         await CresFinance.mountExpenses();

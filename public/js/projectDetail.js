@@ -14,8 +14,7 @@ const CresProjectDetail = (() => {
   }
 
   function fmtDate(v) {
-    if (!v) return '-';
-    return new Date(v).toLocaleString();
+    return CresFormat.datetime(v);
   }
 
   function statusPill(s) {
@@ -133,7 +132,7 @@ const CresProjectDetail = (() => {
         if (!canEdit) {
           return `<div class="ms-block">
             <strong>${title}</strong> ${statusPill(normalizeMsStatus(m.status))}
-            ${m.due_date ? `<div style="font-size:0.75rem;color:var(--text-muted);">Due ${new Date(m.due_date).toLocaleDateString()}</div>` : ''}
+            ${m.due_date ? `<div style="font-size:0.75rem;color:var(--text-muted);">Due ${CresFormat.date(m.due_date)}</div>` : ''}
             ${tasks}
           </div>`;
         }
@@ -141,7 +140,7 @@ const CresProjectDetail = (() => {
           <div class="milestone-row" style="display:grid;grid-template-columns:1fr 160px;gap:8px;align-items:center;margin-bottom:8px;">
             <div>
               <input data-ms-title="${i}" value="${title}" placeholder="Milestone title" />
-              ${m.due_date ? `<div style="font-size:0.75rem;color:var(--text-muted);">Due ${new Date(m.due_date).toLocaleDateString()}</div>` : ''}
+              ${m.due_date ? `<div style="font-size:0.75rem;color:var(--text-muted);">Due ${CresFormat.date(m.due_date)}</div>` : ''}
             </div>
             <select data-ms="${i}">
               <option value="not_started">Not started</option>
@@ -165,6 +164,241 @@ const CresProjectDetail = (() => {
     if (!active) return false;
     if (role === 'developer') return true;
     return !!meta.canUpdateProgress || ['pm', 'admin', 'sales', 'director'].includes(role);
+  }
+
+  function contactHtml(p) {
+    const phone = p.client_phone || '';
+    const email = p.client_email || '';
+    if (!p.client_name && !phone && !email) return '';
+    const wa = CresFormat.waLink(phone);
+    const tel = CresFormat.telLink(phone);
+    const me = CresAPI.getUser();
+    const canOpenCard = p.client_id && ['sales', 'admin', 'director', 'finance'].includes(me?.role);
+    const openCard = canOpenCard
+      ? `<button type="button" class="btn btn-ghost btn-sm" data-open-client-card="${esc(p.client_id)}">Client card</button>`
+      : '';
+    return `<div class="settings-section" style="max-width:none;margin:0 0 16px;">
+      <h4 style="margin:0 0 8px;font-size:0.9rem;">Client contact</h4>
+      <p style="margin:0 0 8px;">${esc(p.client_name || '-')}${p.client_business ? ` · ${esc(p.client_business)}` : ''}</p>
+      <p class="meta" style="margin:0 0 10px;">${esc(phone || 'No phone')} · ${esc(email || 'No email')}</p>
+      <div class="toolbar" style="gap:8px;flex-wrap:wrap;">
+        ${tel ? `<a class="btn btn-ghost btn-sm" href="${esc(tel)}">Call</a>` : ''}
+        ${wa ? `<a class="btn btn-primary btn-sm" href="${esc(wa)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
+        ${email ? `<a class="btn btn-ghost btn-sm" href="mailto:${esc(email)}">Email</a>` : ''}
+        ${openCard}
+      </div>
+    </div>`;
+  }
+
+  function moneyHtml(p) {
+    if (p.invoiced == null && p.value_amount == null) return '';
+    return `<div class="kpi-grid" style="margin:0 0 16px;">
+      ${p.value_amount != null ? `<div class="kpi-card"><div class="kpi-label">Value</div><div class="kpi-value" style="font-size:1.1rem;">${CresFormat.money(p.value_amount)}</div></div>` : ''}
+      ${p.invoiced != null ? `<div class="kpi-card"><div class="kpi-label">Invoiced</div><div class="kpi-value" style="font-size:1.1rem;">${CresFormat.money(p.invoiced)}</div></div>` : ''}
+      ${p.paid != null ? `<div class="kpi-card"><div class="kpi-label">Paid</div><div class="kpi-value" style="font-size:1.1rem;">${CresFormat.money(p.paid)}</div></div>` : ''}
+      ${p.balance != null ? `<div class="kpi-card"><div class="kpi-label">Balance</div><div class="kpi-value" style="font-size:1.1rem;">${CresFormat.money(p.balance)}</div></div>` : ''}
+    </div>`;
+  }
+
+  /**
+   * Shared extras for the project page/modal: contact, money, CRs, messages, blocked.
+   * Used by Sales/Admin/Director modal, PM page, and client portal.
+   */
+  async function mountExtras(host, opts) {
+    if (!host) return;
+    const {
+      id,
+      project: p = {},
+      meta = {},
+      user,
+      onRefresh,
+      allowMessages = true,
+      allowDecide = true,
+      allowBlocked = true,
+      allowChangeForm = false,
+      showContact = true,
+      showMoney = false,
+    } = opts || {};
+    const role = user?.role;
+    const canDecide = allowDecide && ['sales', 'pm', 'admin', 'director'].includes(role);
+    const canBlock = allowBlocked && ['developer', 'pm', 'admin'].includes(role);
+    const canThread = allowMessages && (meta.canUseThread || ['pm', 'admin', 'director', 'sales', 'developer', 'client'].includes(role));
+    const [msgsRes, crsRes] = await Promise.all([
+      canThread ? CresAPI.request(`/api/projects/${id}/messages`).catch(() => ({ data: [] })) : { data: [] },
+      CresAPI.request(`/api/projects/${id}/change-requests`).catch(() => ({ data: [] })),
+    ]);
+    const msgs = msgsRes.data || [];
+    const crs = crsRes.data || [];
+
+    host.innerHTML = `
+      ${showContact ? contactHtml(p) : ''}
+      ${showMoney ? moneyHtml(p) : ''}
+      ${
+        canBlock && p.status !== 'blocked'
+          ? `<div class="toolbar" style="margin:0 0 16px;gap:8px;">
+              <button type="button" class="btn btn-ghost" id="pd-mark-blocked">Blocked, waiting on client</button>
+            </div>`
+          : ''
+      }
+      <div class="settings-section" style="max-width:none;">
+        <h4 style="margin:0 0 8px;font-size:0.9rem;">Change requests</h4>
+        <div id="pd-cr-flash" class="flash"></div>
+        ${
+          allowChangeForm
+            ? `<form id="pd-cr-form" class="form-grid" style="margin-bottom:14px;">
+                <div><label>Subject</label><input id="pd-cr-subject" required /></div>
+                <div style="grid-column:1/-1;"><label>Details</label>
+                  <textarea id="pd-cr-details" rows="3" required style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);"></textarea>
+                </div>
+                <div class="form-actions"><button type="submit" class="btn btn-primary">Request a change</button></div>
+              </form>`
+            : ''
+        }
+        <ul class="engagement-list" id="pd-cr-list">
+          ${
+            crs.length
+              ? crs
+                  .map(
+                    (c) => `<li data-cr="${esc(c.id)}">
+                      <div class="meta">${esc(c.client_name || '')} · ${statusPill(c.status)} · ${fmtDate(c.created_at)}</div>
+                      <div><strong>${esc(c.subject)}</strong></div>
+                      <div style="white-space:pre-wrap;margin-top:4px;">${esc(c.details || '')}</div>
+                      ${c.quote_amount != null ? `<div class="meta">Quote: ${CresFormat.money(c.quote_amount)}</div>` : ''}
+                      ${c.staff_note ? `<div class="meta">Note: ${esc(c.staff_note)}</div>` : ''}
+                      ${
+                        canDecide && ['open', 'acknowledged'].includes(c.status)
+                          ? `<div class="toolbar" style="margin-top:8px;gap:8px;">
+                              <button type="button" class="btn btn-primary btn-sm" data-cr-act="accept">Accept</button>
+                              <button type="button" class="btn btn-ghost btn-sm" data-cr-act="quote">Quote</button>
+                              <button type="button" class="btn btn-ghost btn-sm" data-cr-act="decline">Decline</button>
+                            </div>`
+                          : ''
+                      }
+                    </li>`
+                  )
+                  .join('')
+              : '<li class="empty-state">No change requests yet.</li>'
+          }
+        </ul>
+      </div>
+      ${
+        canThread
+          ? `<div class="settings-section" style="max-width:none;">
+              <h4 style="margin:0 0 8px;font-size:0.9rem;">Project messages</h4>
+              <p class="meta" style="margin:0 0 8px;">Visible to Sales and the PM. Not Community chat.</p>
+              <div id="pd-msg-flash" class="flash"></div>
+              <ul class="engagement-list" id="pd-msg-list" style="max-height:280px;overflow:auto;">
+                ${
+                  msgs.length
+                    ? msgs
+                        .map(
+                          (m) => `<li>
+                            <div class="meta">${esc(m.sender_name || '')} · ${esc(m.sender_role || '')} · ${fmtDate(m.created_at)}</div>
+                            <div style="white-space:pre-wrap;">${esc(m.body)}</div>
+                          </li>`
+                        )
+                        .join('')
+                    : '<li class="empty-state">No messages yet.</li>'
+                }
+              </ul>
+              <form id="pd-msg-form" class="form-grid" style="margin-top:10px;">
+                <div style="grid-column:1/-1;">
+                  <label for="pd-msg-body">Message</label>
+                  <textarea id="pd-msg-body" rows="2" required style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);"></textarea>
+                </div>
+                <div class="form-actions"><button type="submit" class="btn btn-primary">Send</button></div>
+              </form>
+            </div>`
+          : ''
+      }`;
+
+    host.querySelectorAll('[data-open-client-card]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (typeof CresClientCard !== 'undefined') {
+          CresClientCard.open(btn.dataset.openClientCard).catch(console.error);
+        }
+      });
+    });
+
+    host.querySelector('#pd-mark-blocked')?.addEventListener('click', async () => {
+      const note = prompt('What is blocking this project?', 'Waiting on client') || '';
+      if (!note.trim()) return;
+      try {
+        await CresAPI.request(`/api/projects/${id}/blocked`, {
+          method: 'POST',
+          body: { note: note.trim() },
+        });
+        if (typeof onRefresh === 'function') await onRefresh();
+      } catch (err) {
+        flash(host.querySelector('#pd-cr-flash'), err.message, false);
+      }
+    });
+
+    host.querySelector('#pd-cr-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await CresAPI.request('/api/client/change-requests', {
+          method: 'POST',
+          body: {
+            project_id: id,
+            subject: host.querySelector('#pd-cr-subject').value.trim(),
+            details: host.querySelector('#pd-cr-details').value.trim(),
+          },
+        });
+        e.target.reset();
+        flash(host.querySelector('#pd-cr-flash'), 'Change request submitted');
+        if (typeof onRefresh === 'function') await onRefresh();
+        else await mountExtras(host, opts);
+      } catch (err) {
+        flash(host.querySelector('#pd-cr-flash'), err.message, false);
+      }
+    });
+
+    host.querySelectorAll('[data-cr-act]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const li = btn.closest('[data-cr]');
+        const action = btn.dataset.crAct;
+        let quote_amount;
+        let note;
+        if (action === 'quote') {
+          const raw = prompt('Quote amount (KES)');
+          if (raw == null || !String(raw).trim()) return;
+          quote_amount = Number(raw);
+          if (Number.isNaN(quote_amount)) return;
+          note = prompt('Note for the client (optional)') || undefined;
+        } else if (action === 'decline') {
+          note = prompt('Reason (optional)') || undefined;
+        }
+        try {
+          await CresAPI.request(`/api/projects/${id}/change-requests/${li.dataset.cr}/decide`, {
+            method: 'POST',
+            body: { action, quote_amount, note },
+          });
+          if (typeof onRefresh === 'function') await onRefresh();
+          else await mountExtras(host, opts);
+        } catch (err) {
+          flash(host.querySelector('#pd-cr-flash'), err.message, false);
+        }
+      });
+    });
+
+    host.querySelector('#pd-msg-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = host.querySelector('#pd-msg-body').value.trim();
+      if (!body) return;
+      try {
+        await CresAPI.request(`/api/projects/${id}/messages`, {
+          method: 'POST',
+          body: { body },
+          idempotencyKey: `pmsg-${id}-${Date.now()}`,
+        });
+        e.target.reset();
+        if (typeof onRefresh === 'function') await onRefresh();
+        else await mountExtras(host, opts);
+      } catch (err) {
+        flash(host.querySelector('#pd-msg-flash'), err.message, false);
+      }
+    });
   }
 
   async function open(id, { onSaved } = {}) {
@@ -234,11 +468,19 @@ const CresProjectDetail = (() => {
           showClient
             ? `<div><strong>Client</strong><div>${esc(p.client_name || '-')}${
                 p.client_business ? ` · ${esc(p.client_business)}` : ''
-              }</div>
-              <div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">${esc(p.client_email || '')} ${esc(p.client_phone || '')}</div></div>`
+              }</div></div>`
             : ''
         }
-        ${showMoney ? `<div><strong>Project value (amount)</strong><div>${Number(p.value_amount).toLocaleString('en-KE', { style: 'currency', currency: 'KES' })}</div></div>` : ''}
+        ${
+          p.due_date || canEdit
+            ? `<div><strong>Due date</strong>${
+                canEdit
+                  ? `<input id="proj-detail-due" type="date" value="${esc(p.due_date ? String(p.due_date).slice(0, 10) : '')}" style="width:100%;margin-top:6px;" />`
+                  : `<div>${CresFormat.date(p.due_date)}</div>`
+              }</div>`
+            : ''
+        }
+        ${showMoney ? `<div><strong>Project value (amount)</strong><div>${CresFormat.money(p.value_amount)}</div></div>` : ''}
         ${
           p.preview_url
             ? `<div style="grid-column:1/-1;"><strong>Preview link</strong>
@@ -314,7 +556,7 @@ const CresProjectDetail = (() => {
 
       ${
         salesLocked
-          ? `<div style="background:rgba(31,167,160,0.08);border:1px solid rgba(31,167,160,0.3);border-radius:10px;padding:12px;margin:14px 0;">
+          ? `<div style="background:rgba(0,168,197,0.08);border:1px solid rgba(0,168,197,0.3);border-radius:10px;padding:12px;margin:14px 0;">
               <strong style="color:var(--accent);">Project locked</strong>
               <p style="margin:4px 0 0;font-size:0.85rem;">This project has been approved. You cannot edit milestones, status, or progress notes. Only the Director can unlock by rejecting.</p>
             </div>`
@@ -388,6 +630,8 @@ const CresProjectDetail = (() => {
             </div>`
           : ''
       }
+
+      <div id="proj-detail-extras"></div>
 
       <h4 style="margin:20px 0 8px;font-size:0.9rem;">Audit log</h4>
       <p style="margin:0 0 8px;color:var(--text-muted);font-size:0.8rem;">Append-only history. Entries cannot be edited or deleted.</p>
@@ -494,6 +738,23 @@ const CresProjectDetail = (() => {
       );
     }
 
+    const extrasHost = document.getElementById('proj-detail-extras');
+    if (extrasHost) {
+      await mountExtras(extrasHost, {
+        id,
+        project: p,
+        meta,
+        user,
+        onRefresh: () => open(id, { onSaved: state.onSaved }),
+        showContact: !!(meta.canSeeContact || meta.canSeeClient),
+        showMoney: !!(meta.canSeeMoney && ['admin', 'finance', 'director'].includes(user?.role)),
+        allowMessages: meta.canUseThread !== false && user?.role !== 'finance',
+        allowDecide: true,
+        allowBlocked: true,
+        allowChangeForm: false,
+      });
+    }
+
     modal.classList.add('open');
   }
 
@@ -562,10 +823,12 @@ const CresProjectDetail = (() => {
     const preview = document.getElementById('proj-detail-preview')?.value?.trim();
     const name = document.getElementById('proj-detail-name')?.value?.trim();
     const description = document.getElementById('proj-detail-description')?.value;
+    const dueDate = document.getElementById('proj-detail-due')?.value;
     const body = {};
     // After approval: sales cannot edit name/description
     if (canEdit && !(isSales && isApproved) && name !== undefined) body.name = name;
     if (canEdit && !(isSales && isApproved) && description !== undefined) body.description = description;
+    if (canEdit && !(isSales && isApproved) && dueDate !== undefined) body.due_date = dueDate || null;
     if (canUpdate) {
       // After approval: sales can only send preview_url — block status/milestones/note
       if (isSales && isApproved) {
@@ -603,5 +866,5 @@ const CresProjectDetail = (() => {
     return `<ul class="engagement-list">${renderAudit(updates)}</ul>`;
   }
 
-  return { open, bind, auditHtml, renderAudit };
+  return { open, bind, auditHtml, renderAudit, mountExtras, contactHtml };
 })();

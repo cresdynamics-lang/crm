@@ -25,24 +25,33 @@ router.get(
     const projectScope = isSales ? 'AND created_by = $1' : '';
     const params = isSales ? [userId] : [];
 
-    const { rows: leadsInContact } = await query(
-      `SELECT COUNT(*)::int AS count FROM leads
-       WHERE status = 'contacting'
-       ${leadScope}`,
+    const { rows: callsToday } = await query(
+      `SELECT COUNT(*)::int AS count
+       FROM lead_engagements e
+       JOIN leads l ON l.id = e.lead_id
+       WHERE e.created_at::date = CURRENT_DATE
+         ${isSales ? 'AND l.created_by = $1' : ''}`,
       params
     );
 
-    const { rows: prospects } = await query(
-      `SELECT COUNT(*)::int AS count FROM leads
-       WHERE status = 'follow_up'
-       ${leadScope}`,
+    const { rows: meetingsThisWeek } = await query(
+      `SELECT COUNT(DISTINCT l.id)::int AS count
+       FROM leads l
+       JOIN lead_engagements e ON e.lead_id = l.id
+       WHERE l.status IN ('meeting', 'follow_up')
+         AND e.follow_up_date BETWEEN date_trunc('week', CURRENT_DATE)::date
+                                 AND (date_trunc('week', CURRENT_DATE) + INTERVAL '6 days')::date
+         ${isSales ? 'AND l.created_by = $1' : ''}`,
       params
     );
 
-    // Deals = converted leads / clients created by this sales user
-    const { rows: deals } = await query(
-      `SELECT COUNT(*)::int AS count FROM leads
-       WHERE status = 'converted' ${leadScope}`,
+    const { rows: depositsCollected } = await query(
+      `SELECT COALESCE(SUM(pay.amount),0)::float AS total
+       FROM payments pay
+       JOIN invoices i ON i.id = pay.invoice_id
+       JOIN projects p ON p.id = i.project_id
+       WHERE pay.paid_at >= date_trunc('month', CURRENT_DATE)
+         ${isSales ? 'AND p.created_by = $1' : ''}`,
       params
     );
 
@@ -50,9 +59,9 @@ router.get(
       `SELECT COUNT(DISTINCT l.id)::int AS count
        FROM leads l
        JOIN lead_engagements e ON e.lead_id = l.id
-       WHERE l.status = 'follow_up'
+       WHERE l.status NOT IN ('won', 'converted', 'lost', 'not_interested')
          AND e.follow_up_date IS NOT NULL
-         AND e.follow_up_date <= CURRENT_DATE
+         AND e.follow_up_date < CURRENT_DATE
          ${isSales ? 'AND l.created_by = $1' : ''}`,
       params
     );
@@ -122,9 +131,10 @@ router.get(
       ok: true,
       data: {
         kpis: {
-          leadsInContact: leadsInContact[0].count,
-          prospects: prospects[0].count,
-          deals: deals[0].count,
+          callsToday: callsToday[0].count,
+          callsTarget: 5,
+          meetingsThisWeek: meetingsThisWeek[0].count,
+          depositsCollected: depositsCollected[0].total,
           followUpsDue: followUpsDue[0].count,
           projectsCreated: projectsCreated[0].count,
           leadsConverted: leadsConverted[0].count,

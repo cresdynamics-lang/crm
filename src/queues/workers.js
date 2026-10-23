@@ -3,6 +3,7 @@ const { sendWithFailover } = require('../services/emailService');
 const { queueInvoiceEmail, queueNotification, queueNotificationDigestEmail } = require('./jobs');
 const { Worker, QUEUE_NAMES, connection, moveToDeadLetter, defaultJobOpts } = require('./index');
 const { resolveDelivery } = require('../services/notificationPrefs');
+const { isEmailAutomationOn, getEmailTemplates, fillTemplate } = require('../services/orgSettings');
 
 /**
  * Build the PDF attachment for a receipt/invoice email at send time so the
@@ -162,16 +163,24 @@ async function handleEmail(job) {
   const { name, data } = job;
 
   if (name === 'password.reset') {
+    const templates = await getEmailTemplates();
+    const tpl = templates.password_reset || {};
+    const vars = { name: data.name || 'there', code: data.code, email: data.email };
     const result = await sendWithFailover({
       to: data.email,
-      subject: 'Cres Dynamics password reset code',
-      body: `Hi ${data.name || 'there'},\n\nYour password reset code is: ${data.code}\n\nIt expires in 10 minutes. If you did not request this, ignore this email.`,
+      subject: fillTemplate(tpl.subject, vars) || 'Cres Dynamics password reset code',
+      body:
+        fillTemplate(tpl.body, vars) ||
+        `Hi ${vars.name},\n\nYour password reset code is: ${data.code}\n\nIt expires in 10 minutes. If you did not request this, ignore this email.`,
       meta: { type: 'password_reset', expiresAt: data.expiresAt },
     });
     return result;
   }
 
   if (name === 'user.invite') {
+    if (!(await isEmailAutomationOn('userInvite'))) {
+      return { skipped: true, reason: 'automation_off' };
+    }
     const result = await sendWithFailover({
       to: data.email,
       subject: 'You are invited to Cres Dynamics',
@@ -207,6 +216,15 @@ async function handleEmail(job) {
   }
 
   if (name === 'receipt.send') {
+    const flag =
+      data.receiptType === 'payment'
+        ? 'paymentReceipt'
+        : data.receiptType === 'invoice'
+          ? 'invoiceIssued'
+          : null;
+    if (flag && !(await isEmailAutomationOn(flag))) {
+      return { skipped: true, reason: 'automation_off' };
+    }
     const attachment = await buildPdfAttachment(data.receiptType, data.receiptId);
     const result = await sendWithFailover({
       to: data.to,
@@ -226,7 +244,42 @@ async function handleEmail(job) {
     return result;
   }
 
+  if (name === 'site.payer-contact') {
+    const result = await sendWithFailover({
+      to: data.to,
+      subject: data.subject,
+      body: data.message,
+      html: `<p style="font-family:Arial,Helvetica,sans-serif;color:#2F3B52;line-height:1.6;">${String(
+        data.message || ''
+      ).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')}</p><p style="color:#8b9aab;font-size:12px;">Sent via CRES Dynamics CRM | Event: ${String(
+        data.context?.event_title || ''
+      ).replace(/&/g, '&amp;').replace(/</g, '&lt;')} · Ticket ${String(
+        data.context?.ticket_type || ''
+      ).replace(/&/g, '&amp;').replace(/</g, '&lt;')}</p>`,
+      meta: {
+        type: 'site_payer_contact',
+        reservationId: data.reservationId,
+        sentBy: data.sentBy,
+      },
+    });
+    await query(
+      `INSERT INTO website_payer_emails (reservation_id, payer_email, payer_name, send_by, status, detail)
+       VALUES ($1, $2, $3, $4, 'sent', $5)`,
+      [
+        data.reservationId,
+        data.to,
+        data.name,
+        data.sentBy?.name || 'finance',
+        result?.messageId || result?.id || 'sent',
+      ]
+    );
+    return result;
+  }
+
   if (name === 'lead.message') {
+    if (!(await isEmailAutomationOn('leadMessage'))) {
+      return { skipped: true, reason: 'automation_off' };
+    }
     const { sendLeadEmail } = require('../services/leadEmail');
     const { queueNotification } = require('./jobs');
     const { rows } = await query(
@@ -298,15 +351,106 @@ async function handleEmail(job) {
     }
   }
 
-  // Default: invoice email (issued / residual balance) — HTML tax invoice + PDF
-  const { invoiceId, clientEmail, channel } = data;
-  try {
-    const { invoiceReceipt } = require('../services/receipts');
-    const receipt = await invoiceReceipt(invoiceId);
+  // Overdue invoice automation emails (reminder-before / penalty / followup)
+  if (name === 'invoice.overdue') {
+    const kindFlag =
+      data.kind === 'reminder_before'
+        ? 'overdueReminder'
+        : data.kind === 'followup'
+          ? 'overdueFollowup'
+          : 'overduePenalty';
+    if (!(await isEmailAutomationOn(kindFlag))) {
+      return { skipped: true, reason: 'automation_off' };
+    }
+    const { invoiceId, clientEmail, kind, penaltyAmount, newAmount, penaltyNumber } = data;
+    const { rows } = await query(
+      `SELECT i.id, i.invoice_number, i.amount, i.amount_paid, i.due_date,
+              c.name AS client_name, p.name AS project_name
+       FROM invoices i
+       LEFT JOIN clients c ON c.id = i.client_id
+       LEFT JOIN projects p ON p.id = i.project_id
+       WHERE i.id = $1`,
+      [invoiceId]
+    );
+    const inv = rows[0];
+    if (!inv) return { skipped: true, reason: 'missing_invoice' };
+
+    const label = inv.invoice_number ? `invoice ${inv.invoice_number}` : `invoice ${String(invoiceId).slice(0, 8)}`;
+    const balance = Number(inv.amount) - Number(inv.amount_paid || 0);
+    const dueIso = inv.due_date instanceof Date
+      ? `${inv.due_date.getUTCFullYear()}-${String(inv.due_date.getUTCMonth() + 1).padStart(2, '0')}-${String(inv.due_date.getUTCDate()).padStart(2, '0')}`
+      : String(inv.due_date || '').slice(0, 10);
+    const dueText = dueIso ? new Date(`${dueIso}T00:00:00Z`).toLocaleDateString('en-KE') : '-';
+    const ksh = (n) =>
+      `KSh ${Number(n || 0).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    let subject;
+    let greeting = `Hello ${inv.client_name || 'there'},`;
+    let para1;
+    let para2;
+
+    if (kind === 'reminder_before') {
+      subject = `Payment reminder — CRES Dynamics (2% penalty applies imminently)`;
+      para1 = `This is a reminder that ${label}, due on ${dueText}, is still outstanding (balance ${ksh(balance)}).`;
+      para2 = `Please arrange payment before the next working day, after which a 2% penalty will be added to the expected amount as per your agreement with CRES Dynamics.`;
+    } else if (kind === 'followup') {
+      subject = `Payment follow-up — CRES Dynamics`;
+      para1 = `Following up on ${label} (due ${dueText}), outstanding balance ${ksh(balance)}.`;
+      para2 = `Payment is now past due. Kindly settle your balance so we can keep your account in good standing.`;
+    } else {
+      subject = `Penalty applied to ${label} — CRES Dynamics Finance`;
+      para1 = `A 2% penalty of ${ksh(penaltyAmount)} has been applied to ${label} (due ${dueText}), so the expected amount is now ${ksh(newAmount)} (outstanding balance ${ksh(balance)}).`;
+      para2 = `If this is an error or you have already made payment, please let us know immediately. Otherwise kindly settle your account to avoid further penalties.`;
+    }
+
+    const html = `
+      <div style="font-family:Arial,Helvetica,sans-serif;color:#2F3B52;line-height:1.6;max-width:560px;margin:0 auto;">
+        <p>${greeting}</p>
+        <p>${para1}</p>
+        <p>${para2}</p>
+        <p>Regards,<br><strong>CRES Dynamics — Finance</strong><br>info@cresdynamics.com · +254 708 805 496</p>
+      </div>`;
+
     const attachment = await buildPdfAttachment('invoice', invoiceId);
     const result = await sendWithFailover({
       to: clientEmail,
-      subject: receipt.subject,
+      subject,
+      body: `${greeting}\n\n${para1}\n\n${para2}\n\nRegards,\nCRES Dynamics — Finance`,
+      html,
+      attachments: attachment ? [attachment] : undefined,
+      meta: { type: 'invoice_overdue', kind, invoiceId, penaltyNumber, fromRole: 'finance' },
+    });
+
+    await query(
+      `INSERT INTO invoice_email_log (invoice_id, channel, status, detail)
+       VALUES ($1, $2, 'sent', $3)`,
+      [
+        invoiceId,
+        kind === 'penalty' ? 'overdue_penalty' : kind === 'followup' ? 'overdue_followup' : 'overdue_reminder',
+        `${kind} reached ${clientEmail}`,
+      ]
+    );
+    return result;
+  }
+
+  // Default: invoice email (issued / residual balance) — HTML tax invoice + PDF
+  const { invoiceId, clientEmail, channel } = data;
+  try {
+    if (!(await isEmailAutomationOn('invoiceIssued'))) {
+      return { skipped: true, reason: 'automation_off' };
+    }
+    const { invoiceReceipt } = require('../services/receipts');
+    const receipt = await invoiceReceipt(invoiceId);
+    const templates = await getEmailTemplates();
+    const tpl = templates.invoice_issued || {};
+    const vars = {
+      invoiceId: receipt.documentNumber || invoiceId,
+      amount: receipt.totals?.grandTotal || receipt.totals?.total || '',
+    };
+    const attachment = await buildPdfAttachment('invoice', invoiceId);
+    const result = await sendWithFailover({
+      to: clientEmail,
+      subject: fillTemplate(tpl.subject, vars) || receipt.subject,
       body: receipt.text,
       html: receipt.html,
       attachments: attachment ? [attachment] : undefined,

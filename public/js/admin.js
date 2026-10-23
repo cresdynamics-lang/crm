@@ -17,9 +17,7 @@ const CresAdmin = (() => {
   }
 
   function fmtMoney(n) {
-    const num = Number(n);
-    if (Number.isNaN(num)) return '-';
-    return num.toLocaleString('en-KE', { style: 'currency', currency: 'KES' });
+    return CresFormat.money(n);
   }
 
   function statusPill(s) {
@@ -37,6 +35,7 @@ const CresAdmin = (() => {
     return {
       responsive: true,
       maintainAspectRatio: false,
+      animation: false,
       plugins: { legend: { labels: { color: '#8b9aab' } } },
       scales: {
         x: { ticks: { color: '#8b9aab' }, grid: { color: 'rgba(255,255,255,0.04)' } },
@@ -78,7 +77,7 @@ const CresAdmin = (() => {
           <div class="chart-wrap"><canvas id="admin-salary-chart"></canvas></div>
         </div>
         <p style="margin-top:12px;color:var(--text-muted);font-size:0.85rem;">
-          Full cross-department overview. Department faces (Invoices, Employees, etc.) reuse the same components unlocked by Admin RBAC.
+          Open Approvals for anything waiting on you, or pick a department from the sidebar.
         </p>`;
 
       if (cashChart) cashChart.destroy();
@@ -87,7 +86,7 @@ const CresAdmin = (() => {
         data: {
           labels: d.charts.cashFlow.labels,
           datasets: [
-            { label: 'Money in', data: d.charts.cashFlow.moneyIn, backgroundColor: 'rgba(31,167,160,0.65)', borderRadius: 6 },
+            { label: 'Money in', data: d.charts.cashFlow.moneyIn, backgroundColor: 'rgba(0,168,197,0.65)', borderRadius: 6 },
             { label: 'Money out', data: d.charts.cashFlow.moneyOut, backgroundColor: 'rgba(224,90,90,0.55)', borderRadius: 6 },
           ],
         },
@@ -101,7 +100,7 @@ const CresAdmin = (() => {
           labels: d.charts.projectHealth.labels,
           datasets: [{
             data: d.charts.projectHealth.values.some((v) => v > 0) ? d.charts.projectHealth.values : [1],
-            backgroundColor: ['#1fa7a0', '#d4a017', '#e05a5a'],
+            backgroundColor: ['#00a8c5', '#f5a623', '#e05a5a'],
           }],
         },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#8b9aab' } } } },
@@ -113,7 +112,7 @@ const CresAdmin = (() => {
         data: {
           labels: d.charts.salaries.labels,
           datasets: [
-            { label: 'Settled', data: d.charts.salaries.settled, backgroundColor: 'rgba(31,167,160,0.65)', borderRadius: 6 },
+            { label: 'Settled', data: d.charts.salaries.settled, backgroundColor: 'rgba(0,168,197,0.65)', borderRadius: 6 },
             { label: 'Owed', data: d.charts.salaries.owed, backgroundColor: 'rgba(224,90,90,0.55)', borderRadius: 6 },
           ],
         },
@@ -213,7 +212,7 @@ const CresAdmin = (() => {
       ? res.data
           .map(
             (r) => `<tr>
-              <td>${new Date(r.created_at).toLocaleString()}</td>
+              <td>${CresFormat.datetime(r.created_at)}</td>
               <td>${esc(r.email || '-')}</td>
               <td>${esc(r.user_name || '-')}</td>
               <td>${r.success ? statusPill('approved') : statusPill('rejected')}</td>
@@ -225,6 +224,95 @@ const CresAdmin = (() => {
   }
 
   async function mountReports() {
+    const tab = new URLSearchParams((location.hash.split('?')[1] || '')).get('tab') || 'today';
+    if (tab === 'daily') return mountDailyReports();
+    if (tab === 'audit') return mountActionAudit();
+    if (tab === 'analytics') return mountAnalytics();
+    return mountTodayDigest();
+  }
+
+  function digestSourceLabel(d) {
+    if (d.source === 'ai') return d.model || 'Claude Sonnet';
+    if (d.source === 'facts-fallback') return 'Facts only — AI unavailable';
+    if (!d.configured) return 'Facts only — add OPENROUTER_API_KEY';
+    return 'Facts only';
+  }
+
+  function digestList(items) {
+    if (!items?.length) return '';
+    return `<ul class="digest-list">${items.map((h) => `<li>${esc(h)}</li>`).join('')}</ul>`;
+  }
+
+  function digestCard(title, section) {
+    return `
+      <article class="digest-card">
+        <h3>${esc(title)}</h3>
+        <p>${esc(section?.summary || 'No activity.')}</p>
+        ${digestList(section?.highlights)}
+      </article>`;
+  }
+
+  async function mountTodayDigest(opts = {}) {
+    const host = document.getElementById('admin-today-digest');
+    if (!host) return;
+    const dateEl = document.getElementById('admin-digest-date');
+    const day = opts.date || dateEl?.value || '';
+    host.innerHTML = `<div class="placeholder-card">Building today’s briefing…</div>`;
+    try {
+      const qs = new URLSearchParams();
+      if (day) qs.set('date', day);
+      if (opts.refresh) qs.set('refresh', '1');
+      const res = await CresAPI.request(`/api/admin/daily-digest?${qs}`);
+      const d = res.data || {};
+      const t = d.totals || {};
+      const b = d.briefing || {};
+      const watch = b.watch || [];
+      host.innerHTML = `
+        <div class="reports-panel-block digest-wrap">
+          <div class="toolbar" style="margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+            <label class="meta" for="admin-digest-date">Day</label>
+            <input id="admin-digest-date" type="date" value="${esc(d.day || '')}" />
+            <button type="button" class="btn btn-ghost" id="btn-admin-digest-refresh">Refresh briefing</button>
+            <span class="meta" style="margin-left:auto;">${esc(digestSourceLabel(d))}${d.cached ? ' · cached' : ''}</span>
+          </div>
+          <p class="digest-headline">${esc(b.headline || 'No briefing yet.')}</p>
+          <div class="kpi-grid" style="margin-bottom:16px;">
+            <div class="kpi-card"><div class="kpi-label">In today</div><div class="kpi-value">${fmtMoney(t.revenue)}</div></div>
+            <div class="kpi-card"><div class="kpi-label">Out today</div><div class="kpi-value">${fmtMoney(t.expenses)}</div></div>
+            <div class="kpi-card"><div class="kpi-label">Invoices issued</div><div class="kpi-value">${esc(t.invoices_count || 0)}</div></div>
+            <div class="kpi-card"><div class="kpi-label">Reports filed</div><div class="kpi-value">${esc(t.reports_count || 0)}</div></div>
+          </div>
+          <div class="digest-grid">
+            ${digestCard('Finance', b.finance)}
+            ${digestCard('Director', b.director)}
+            ${digestCard('Admin', b.admin)}
+          </div>
+          <div class="digest-grid digest-grid-2" style="margin-top:12px;">
+            ${digestCard('Operations', b.operations)}
+            <article class="digest-card digest-watch">
+              <h3>Needs attention</h3>
+              ${watch.length ? digestList(watch) : '<p class="meta">Nothing flagged.</p>'}
+            </article>
+          </div>
+          ${
+            d.error
+              ? `<p class="meta" style="margin-top:12px;">AI note: ${esc(d.error)}. Showing the facts briefing instead.</p>`
+              : ''
+          }
+        </div>`;
+      document.getElementById('admin-digest-date')?.addEventListener('change', (e) => {
+        mountTodayDigest({ date: e.target.value }).catch(console.error);
+      });
+      document.getElementById('btn-admin-digest-refresh')?.addEventListener('click', () => {
+        const picked = document.getElementById('admin-digest-date')?.value;
+        mountTodayDigest({ date: picked, refresh: true }).catch(console.error);
+      });
+    } catch (err) {
+      host.innerHTML = `<div class="placeholder-card">${esc(err.message)}</div>`;
+    }
+  }
+
+  async function mountDailyReports() {
     const role = document.getElementById('admin-reports-role')?.value;
     const from = document.getElementById('admin-reports-from')?.value;
     const to = document.getElementById('admin-reports-to')?.value;
@@ -254,9 +342,6 @@ const CresAdmin = (() => {
 
     const reports = await CresAPI.request(`/api/reports?${params}`);
 
-    await mountAnalytics();
-    await mountActionAudit();
-
     const list = document.getElementById('admin-reports-list');
     if (!list) return;
     list.innerHTML = reports.data.length
@@ -276,7 +361,7 @@ const CresAdmin = (() => {
                 ? `<div class="meta" style="margin-top:6px;">Read-only (Sales/Developer reports)</div>`
                 : '';
             return `<li>
-              <div class="meta report-author">${typeof CresSettings !== 'undefined' ? CresSettings.avatarHtml({ name: r.author_name, avatar_url: r.author_avatar_url }, 'avatar avatar-sm') : ''}<span>${esc(r.author_name)} · ${esc(r.author_role)} · ${new Date(r.created_at).toLocaleString()}
+              <div class="meta report-author">${typeof CresSettings !== 'undefined' ? CresSettings.avatarHtml({ name: r.author_name, avatar_url: r.author_avatar_url }, 'avatar avatar-sm') : ''}<span>${esc(r.author_name)} · ${esc(r.author_role)} · ${CresFormat.datetime(r.created_at)}
                 ${r.project_name ? ` · ${esc(r.project_name)}` : ''} · ${statusPill(r.routing_status || '')}</span>
               </div>
               <div>${esc(r.content)}</div>
@@ -296,7 +381,7 @@ const CresAdmin = (() => {
         try {
           await CresAPI.request(`/api/reports/${id}/react`, { method: 'POST', body: { content } });
           flash(document.getElementById('admin-reports-flash'), 'Response sent');
-          await mountReports();
+          await mountDailyReports();
         } catch (err) {
           flash(document.getElementById('admin-reports-flash'), err.message, false);
         }
@@ -371,7 +456,7 @@ const CresAdmin = (() => {
           datasets: [{
             label: 'Projects',
             data: d.projectsByMonth?.labels?.length ? d.projectsByMonth.values : [0],
-            backgroundColor: 'rgba(31, 167, 160, 0.65)',
+            backgroundColor: 'rgba(0, 168, 197, 0.65)',
             borderRadius: 6,
           }],
         },
@@ -412,7 +497,7 @@ const CresAdmin = (() => {
                     ? rows
                         .map(
                           (a) => `<tr>
-                            <td>${new Date(a.created_at).toLocaleString()}</td>
+                            <td>${CresFormat.datetime(a.created_at)}</td>
                             <td>${esc(a.actor_name || a.actor_role || '-')}</td>
                             <td>${esc(a.action)}</td>
                             <td>${esc(a.summary)}</td>
@@ -430,8 +515,34 @@ const CresAdmin = (() => {
     }
   }
 
+  const RULE_LABELS = {
+    notifyPmOnDailyReport: 'Notify PM when a daily report is filed',
+    notifyDirectorOnForward: 'Notify Director when a report is forwarded',
+    notifyFinanceOnSalarySettle: 'Notify Finance when a salary is settled',
+    notifyDevOnProjectApprove: 'Notify the developer when a project is approved',
+  };
+
+  const AUTO_FLAGS = [
+    { key: 'invoiceIssued', label: 'Invoice issued — email the client the tax invoice' },
+    { key: 'paymentReceipt', label: 'Payment received — email the client a receipt' },
+    { key: 'overdueReminder', label: 'Overdue reminder — warn the client before a penalty' },
+    { key: 'overduePenalty', label: 'Overdue penalty — tell the client a 2% fee was added' },
+    { key: 'overdueFollowup', label: 'Overdue follow-up — chase an unpaid invoice' },
+    { key: 'userInvite', label: 'User invite — email new staff their set-password link' },
+    { key: 'leadMessage', label: 'Lead email — send scheduled messages to leads' },
+  ];
+
+  function orgFlash(msg, ok = true) {
+    flash(document.getElementById('org-settings-flash') || document.getElementById('email-flash') || document.getElementById('settings-flash'), msg, ok);
+  }
+
+  async function saveOrgKey(key, value, okMsg) {
+    await CresAPI.request(`/api/admin/system/${key}`, { method: 'PATCH', body: { value } });
+    orgFlash(okMsg);
+  }
+
   async function mountSystemSettings() {
-    const host = document.getElementById('admin-system-settings');
+    const host = document.getElementById('org-company-settings');
     if (!host) return;
     try {
       const [sys, dlq] = await Promise.all([
@@ -446,7 +557,7 @@ const CresAdmin = (() => {
             ${Object.entries(s.notification_rules || {})
               .map(
                 ([k, v]) => `<label style="display:flex;gap:8px;align-items:center;">
-                  <input type="checkbox" name="${esc(k)}" ${v ? 'checked' : ''} /> ${esc(k)}
+                  <input type="checkbox" name="${esc(k)}" ${v ? 'checked' : ''} /> ${esc(RULE_LABELS[k] || k)}
                 </label>`
               )
               .join('')}
@@ -518,7 +629,7 @@ const CresAdmin = (() => {
                   ? dlq.data
                       .map(
                         (j) => `<tr>
-                          <td>${new Date(j.created_at).toLocaleString()}</td>
+                          <td>${CresFormat.datetime(j.created_at)}</td>
                           <td>${esc(j.queue)}</td>
                           <td>${esc(j.job_name)}</td>
                           <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;">${esc(j.error)}</td>
@@ -542,11 +653,11 @@ const CresAdmin = (() => {
         [...e.target.elements].forEach((el) => {
           if (el.name && el.type === 'checkbox') value[el.name] = el.checked;
         });
-        await CresAPI.request('/api/admin/system/notification_rules', {
-          method: 'PATCH',
-          body: { value },
-        });
-        flash(document.getElementById('settings-flash'), 'Notification rules saved');
+        try {
+          await saveOrgKey('notification_rules', value, 'Notification rules saved');
+        } catch (err) {
+          orgFlash(err.message, false);
+        }
       });
 
       document.getElementById('admin-email-templates')?.addEventListener('submit', async (e) => {
@@ -556,11 +667,11 @@ const CresAdmin = (() => {
           invoice_issued: { subject: f.invoice_subject.value, body: f.invoice_body.value },
           password_reset: { subject: f.reset_subject.value, body: f.reset_body.value },
         };
-        await CresAPI.request('/api/admin/system/email_templates', {
-          method: 'PATCH',
-          body: { value },
-        });
-        flash(document.getElementById('settings-flash'), 'Email templates saved');
+        try {
+          await saveOrgKey('email_templates', value, 'Email templates saved');
+        } catch (err) {
+          orgFlash(err.message, false);
+        }
       });
 
       document.getElementById('admin-integrations')?.addEventListener('submit', async (e) => {
@@ -579,36 +690,38 @@ const CresAdmin = (() => {
             note: 'Configure when M-Pesa credentials are available',
           },
         };
-        await CresAPI.request('/api/admin/system/integrations', {
-          method: 'PATCH',
-          body: { value },
-        });
-        flash(document.getElementById('settings-flash'), 'Integrations saved');
+        try {
+          await saveOrgKey('integrations', value, 'Integrations saved');
+        } catch (err) {
+          orgFlash(err.message, false);
+        }
       });
 
       document.getElementById('admin-expense-approval')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const f = e.target;
-        await CresAPI.request('/api/admin/system/expense_approval', {
-          method: 'PATCH',
-          body: {
-            value: {
+        try {
+          await saveOrgKey(
+            'expense_approval',
+            {
               threshold: Number(f.threshold.value) || 0,
               requireAboveThreshold: f.requireAboveThreshold.value === 'true',
             },
-          },
-        });
-        flash(document.getElementById('settings-flash'), 'Expense approval threshold saved');
+            'Expense approval threshold saved'
+          );
+        } catch (err) {
+          orgFlash(err.message, false);
+        }
       });
 
       host.querySelectorAll('[data-retry]').forEach((btn) => {
         btn.addEventListener('click', async () => {
           try {
             await CresAPI.request(`/api/admin/failed-jobs/${btn.dataset.retry}/retry`, { method: 'POST', body: {} });
-            flash(document.getElementById('settings-flash'), 'Job re-queued');
+            orgFlash('Job re-queued');
             await mountSystemSettings();
           } catch (err) {
-            flash(document.getElementById('settings-flash'), err.message, false);
+            orgFlash(err.message, false);
           }
         });
       });
@@ -616,12 +729,79 @@ const CresAdmin = (() => {
         btn.addEventListener('click', async () => {
           try {
             await CresAPI.request(`/api/admin/failed-jobs/${btn.dataset.dismiss}`, { method: 'DELETE' });
-            flash(document.getElementById('settings-flash'), 'Job dismissed');
+            orgFlash('Job dismissed');
             await mountSystemSettings();
           } catch (err) {
-            flash(document.getElementById('settings-flash'), err.message, false);
+            orgFlash(err.message, false);
           }
         });
+      });
+    } catch (err) {
+      host.innerHTML = `<div class="placeholder-card">${esc(err.message)}</div>`;
+    }
+  }
+
+  function activityList(rows) {
+    if (!rows?.length) return `<li class="empty-state">Nothing yet.</li>`;
+    return rows
+      .map(
+        (r) => `<li>
+          <div class="meta">${CresFormat.datetime(r.at)} · ${esc(r.kind || '')} · ${esc(r.who || '')} · ${esc(r.status || '')}</div>
+          <strong>${esc(r.title || '-')}</strong>
+          <div style="margin-top:4px;color:var(--text-muted);font-size:0.85rem;">${esc((r.summary || '').slice(0, 180))}</div>
+        </li>`
+      )
+      .join('');
+  }
+
+  async function mountEmailOrg() {
+    const host = document.getElementById('admin-email-automations');
+    if (!host) return;
+    host.hidden = false;
+    try {
+      const [sys, act] = await Promise.all([
+        CresAPI.request('/api/admin/system'),
+        CresAPI.request('/api/admin/email-activity'),
+      ]);
+      const flags = sys.data?.email_automations || {};
+      const to = act.data?.to || [];
+      const from = act.data?.from || [];
+      host.innerHTML = `
+        <div class="settings-section" style="max-width:none;margin-top:24px;">
+          <h3>Email automations</h3>
+          <p class="meta" style="margin:0 0 12px;">Turn automatic mail to clients and staff on or off. Manual “Send email” above always works.</p>
+          <form id="admin-email-autos" class="form-grid">
+            ${AUTO_FLAGS.map(
+              (f) => `<label style="display:flex;gap:8px;align-items:center;grid-column:1/-1;">
+                <input type="checkbox" name="${esc(f.key)}" ${flags[f.key] !== false ? 'checked' : ''} /> ${esc(f.label)}
+              </label>`
+            ).join('')}
+            <div class="form-actions"><button type="submit" class="btn btn-primary">Save automations</button></div>
+          </form>
+        </div>
+        <div class="digest-grid digest-grid-2" style="margin-top:16px;">
+          <div class="settings-section" style="max-width:none;margin:0;">
+            <h3>To clients</h3>
+            <p class="meta" style="margin:0 0 10px;">Invoices, receipts, reminders, and mail you send from here.</p>
+            <ul class="engagement-list">${activityList(to)}</ul>
+          </div>
+          <div class="settings-section" style="max-width:none;margin:0;">
+            <h3>From clients</h3>
+            <p class="meta" style="margin:0 0 10px;">Project messages and change requests they send in.</p>
+            <ul class="engagement-list">${activityList(from)}</ul>
+          </div>
+        </div>`;
+      document.getElementById('admin-email-autos')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const value = {};
+        AUTO_FLAGS.forEach((f) => {
+          value[f.key] = Boolean(e.target.elements[f.key]?.checked);
+        });
+        try {
+          await saveOrgKey('email_automations', value, 'Email automations saved');
+        } catch (err) {
+          orgFlash(err.message, false);
+        }
       });
     } catch (err) {
       host.innerHTML = `<div class="placeholder-card">${esc(err.message)}</div>`;
@@ -700,18 +880,109 @@ const CresAdmin = (() => {
       document.getElementById(id)?.addEventListener('change', () => mountUsers().catch(console.error));
     });
     ['admin-reports-role', 'admin-reports-person', 'admin-reports-from', 'admin-reports-to'].forEach((id) => {
-      document.getElementById(id)?.addEventListener('change', () => mountReports().catch(console.error));
+      document.getElementById(id)?.addEventListener('change', () => mountDailyReports().catch(console.error));
     });
+  }
+
+  function healthPill(h) {
+    const map = {
+      healthy: ['on_track', 'Healthy'],
+      watch: ['due_soon', 'Watch'],
+      tight: ['overdue', 'Tight'],
+    };
+    const [cls, label] = map[h] || ['pending', h || '-'];
+    return `<span class="status-pill ${esc(cls)}">${esc(label)}</span>`;
+  }
+
+  async function mountFinance() {
+    const host = document.getElementById('admin-finance-overview');
+    if (!host) return;
+    try {
+      const res = await CresAPI.request('/api/finance/overview');
+      const d = res.data;
+      const k = d.kpis;
+      const cats = (bucket) =>
+        (bucket.byCategory || [])
+          .map((c) => `<li><strong>${esc(c.category)}</strong> · ${fmtMoney(c.total)}</li>`)
+          .join('') || '<li class="meta">None this month</li>';
+      host.innerHTML = `
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-label">Financial health</div>
+            <div class="kpi-value" style="font-size:1.15rem;">${healthPill(d.health)}</div>
+            <div class="meta">Collected ${(k.collectionRate * 100).toFixed(0)}% · ${k.overdueCount} overdue</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Revenue this month</div>
+            <div class="kpi-value" style="font-size:1.25rem;">${fmtMoney(k.revenueThisMonth)}</div>
+            <div class="meta">${esc(d.monthLabel)}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Expenses this month</div>
+            <div class="kpi-value" style="font-size:1.25rem;">${fmtMoney(k.expensesThisMonth)}</div>
+            <div class="meta">Internal ${fmtMoney(k.internalThisMonth)} · External ${fmtMoney(k.externalThisMonth)}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Net this month</div>
+            <div class="kpi-value" style="font-size:1.25rem;">${fmtMoney(k.netThisMonth)}</div>
+            <div class="meta">Account ${fmtMoney(k.accountBalance)} · Outstanding ${fmtMoney(k.outstanding)}</div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px;">
+          <div class="settings-section" style="margin:0;">
+            <h3>Internal expenses this month</h3>
+            <p class="meta" style="margin:0 0 8px;">Salaries and hosting</p>
+            <ul class="engagement-list">${cats(d.expensesThisMonth.internal)}</ul>
+          </div>
+          <div class="settings-section" style="margin:0;">
+            <h3>External expenses this month</h3>
+            <p class="meta" style="margin:0 0 8px;">Ads, transport, domains, drawings, and other</p>
+            <ul class="engagement-list">${cats(d.expensesThisMonth.external)}</ul>
+          </div>
+        </div>
+        <div class="settings-section" style="margin-top:16px;">
+          <h3>All projects</h3>
+          <p class="meta" style="margin:0 0 10px;">Value, invoiced, paid, and outstanding balance for every project.</p>
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>Project</th><th>Client</th><th>Value</th><th>Invoiced</th><th>Paid</th><th>Balance</th><th>Status</th></tr>
+              </thead>
+              <tbody>
+                ${
+                  d.projects.length
+                    ? d.projects
+                        .map(
+                          (p) => `<tr>
+                            <td>${esc(p.name)}</td>
+                            <td>${esc(p.client_name || p.client_business || '-')}</td>
+                            <td>${p.value_amount != null ? fmtMoney(p.value_amount) : '—'}</td>
+                            <td>${fmtMoney(p.invoiced)}</td>
+                            <td>${fmtMoney(p.paid)}</td>
+                            <td>${fmtMoney(p.balance)}</td>
+                            <td>${statusPill(p.status)}</td>
+                          </tr>`
+                        )
+                        .join('')
+                    : `<tr><td colspan="7" class="empty-state">No projects yet.</td></tr>`
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>`;
+    } catch (err) {
+      host.innerHTML = `<div class="placeholder-card">${esc(err.message)}</div>`;
+    }
   }
 
   async function mount(faceId, user) {
     if (user.role !== 'admin') return;
     if (faceId === 'home') await mountHome();
-    else if (faceId === 'inbox-ai') {
-      if (typeof CresAdminInbox !== 'undefined') await CresAdminInbox.mount();
-    } else if (faceId === 'users') await mountUsers();
+    else if (faceId === 'finance') await mountFinance();
+    else if (faceId === 'users') await mountUsers();
     else if (faceId === 'reports') await mountReports();
-    else if (faceId === 'settings') await mountSystemSettings();
+    else if (faceId === 'organization') await mountSystemSettings();
+    else if (faceId === 'email') await mountEmailOrg();
     else if (faceId === 'login-audit') await mountLoginAudit();
   }
 

@@ -183,11 +183,19 @@ CREATE TABLE IF NOT EXISTS invoices (
   client_id   UUID REFERENCES clients(id) ON DELETE SET NULL,
   amount      NUMERIC(14, 2) NOT NULL CHECK (amount >= 0),
   status      VARCHAR(20) NOT NULL DEFAULT 'issued'
-              CHECK (status IN ('issued', 'paid', 'overdue')),
+              CHECK (status IN ('issued', 'partially_paid', 'paid', 'overdue')),
   auto_sent_at TIMESTAMPTZ,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  penalty_count     INTEGER NOT NULL DEFAULT 0,
+  last_penalty_at   TIMESTAMPTZ,
+  overdue_state     JSONB NOT NULL DEFAULT '{}'::jsonb
 );
+
+-- Existing installs (migrate.js re-runs schema.sql): add columns if missing
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS penalty_count   INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS last_penalty_at TIMESTAMPTZ;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS overdue_state   JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);
 CREATE INDEX IF NOT EXISTS idx_invoices_project ON invoices(project_id);
@@ -567,7 +575,7 @@ VALUES (
   '{
     "legalName": "Cres Dynamics Ltd",
     "tradingName": "Cres Dynamics Ltd",
-    "tagline": "Building digital systems that Businesses Run On.",
+    "tagline": "Building Intelligent Systems that Run Your Business",
     "addressLines": ["P.O. BOX 1112 – 00100, NAIROBI, KENYA", "Kivuli Towers, 3rd floor, Westlands, Nairobi"],
     "phone": "+254 743 869 564 / +254 708 805 496",
     "email": "info@cresdynamics.com",
@@ -585,8 +593,8 @@ VALUES (
     "mpesaAccount": "43869",
     "paymentNote": "Please use the invoice number as your payment reference.",
     "lateFeeNote": "Late payments attract 2% monthly interest after the due date. For payment queries contact info@cresdynamics.com or +254 708 805 496.",
-    "footer": "Thank you for your business. Cres Dynamics Ltd — cresdynamics.com",
-    "logoUrl": "/brand/logo.png",
+    "footer": "Thank you for your business. Building Intelligent Systems that Run Your Business — cresdynamics.com",
+    "logoUrl": "/brand/logo.png?v=20261023",
     "signatureUrl": "/brand/signature.png?v=20260815e",
     "financeSignatureUrl": "/brand/signature-scholastica.png?v=20260815f",
     "invoicedBy": {"name": "Scholastica Omoro", "title": "Finance, Cres Dynamics Ltd"},
@@ -834,3 +842,94 @@ ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS easy_today TEXT;
 ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS happiness TEXT;
 ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS concerns TEXT;
 ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS assigned_director_id UUID REFERENCES users(id) ON DELETE SET NULL;
+
+-- System health snapshots (Admin health dashboard, sampled by crm-api)
+CREATE TABLE IF NOT EXISTS health_snapshots (
+  id BIGSERIAL PRIMARY KEY,
+  checked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  category TEXT NOT NULL,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL,
+  latency_ms INTEGER,
+  detail JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_health_snapshots ON health_snapshots (category, checked_at DESC);
+
+-- Website payer contact log (finance email trigger, CRM-side only)
+CREATE TABLE IF NOT EXISTS website_payer_emails (
+  id BIGSERIAL PRIMARY KEY,
+  reservation_id INTEGER NOT NULL,
+  payer_email TEXT NOT NULL,
+  payer_name TEXT,
+  send_by TEXT,
+  status TEXT NOT NULL DEFAULT 'sent',
+  detail TEXT,
+  sent_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_website_payer_emails_res ON website_payer_emails (reservation_id, sent_at DESC);
+
+-- AI report review + attendance + partial salary payments (migration 012)
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS ai_analysis JSONB;
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS remarks_reply TEXT;
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS remarks_reply_at TIMESTAMPTZ;
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS remarks_reply_by UUID REFERENCES users(id) ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS report_attendance (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  report_date DATE NOT NULL,
+  submitted   BOOLEAN NOT NULL DEFAULT FALSE,
+  report_id   UUID REFERENCES daily_reports(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, report_date)
+);
+CREATE INDEX IF NOT EXISTS idx_attendance_user ON report_attendance(user_id);
+CREATE INDEX IF NOT EXISTS idx_attendance_date ON report_attendance(report_date);
+CREATE INDEX IF NOT EXISTS idx_attendance_user_date ON report_attendance(user_id, report_date);
+
+ALTER TABLE salary_payments ADD COLUMN IF NOT EXISTS attendance_deductions JSONB;
+ALTER TABLE salary_payments DROP CONSTRAINT IF EXISTS salary_payments_status_check;
+ALTER TABLE salary_payments ADD CONSTRAINT salary_payments_status_check
+  CHECK (status IN ('owed', 'partially_paid', 'settled'));
+ALTER TABLE salary_payments ADD COLUMN IF NOT EXISTS hr_note TEXT;
+
+-- Phase 3 pipeline / billing (also in migrations/013_pipeline_billing.sql)
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS value_amount NUMERIC(14, 2);
+ALTER TABLE leads DROP CONSTRAINT IF EXISTS leads_status_check;
+ALTER TABLE leads ADD CONSTRAINT leads_status_check
+  CHECK (status IN (
+    'contacting', 'follow_up', 'not_interested', 'converted',
+    'new', 'contacted', 'meeting', 'proposal', 'won', 'lost'
+  ));
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS method VARCHAR(20) NOT NULL DEFAULT 'bank';
+ALTER TABLE payments DROP CONSTRAINT IF EXISTS payments_method_check;
+ALTER TABLE payments ADD CONSTRAINT payments_method_check
+  CHECK (method IN ('mpesa', 'bank', 'cash'));
+ALTER TABLE expenses DROP CONSTRAINT IF EXISTS expenses_category_check;
+ALTER TABLE expenses ADD CONSTRAINT expenses_category_check
+  CHECK (category IN (
+    'salary', 'operational', 'other',
+    'hosting', 'domains', 'transport', 'ads', 'salaries', 'drawings'
+  ));
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS due_date DATE;
+
+CREATE TABLE IF NOT EXISTS project_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  body TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_project_messages_project ON project_messages(project_id, created_at);
+
+ALTER TABLE client_change_requests DROP CONSTRAINT IF EXISTS client_change_requests_status_check;
+ALTER TABLE client_change_requests ADD CONSTRAINT client_change_requests_status_check
+  CHECK (status IN ('open', 'acknowledged', 'closed', 'accepted', 'quoted', 'declined'));
+ALTER TABLE client_change_requests ADD COLUMN IF NOT EXISTS quote_amount NUMERIC(14, 2);
+ALTER TABLE client_change_requests ADD COLUMN IF NOT EXISTS staff_note TEXT;
+ALTER TABLE client_change_requests ADD COLUMN IF NOT EXISTS decided_by UUID REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE client_change_requests ADD COLUMN IF NOT EXISTS decided_at TIMESTAMPTZ;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS mpesa_claim_code VARCHAR(40);
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS mpesa_claimed_at TIMESTAMPTZ;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS mpesa_claimed_by UUID REFERENCES users(id) ON DELETE SET NULL;

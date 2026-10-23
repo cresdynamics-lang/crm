@@ -5,7 +5,7 @@
 const DEFAULT_COMPANY = {
   legalName: 'Cres Dynamics Ltd',
   tradingName: 'Cres Dynamics Ltd',
-  tagline: 'Building digital systems that Businesses Run On.',
+  tagline: 'Building Intelligent Systems that Run Your Business',
   addressLines: [
     'P.O. BOX 1112 – 00100, NAIROBI, KENYA',
     'Kivuli Towers, 3rd floor, Westlands, Nairobi',
@@ -28,8 +28,8 @@ const DEFAULT_COMPANY = {
   paymentNote: 'Please use the invoice number as your payment reference.',
   lateFeeNote:
     'Late payments attract 2% monthly interest after the due date. For payment queries contact info@cresdynamics.com or +254 708 805 496.',
-  footer: 'Thank you for your business. Cres Dynamics Ltd — cresdynamics.com',
-  logoUrl: '/brand/logo.png',
+  footer: 'Thank you for your business. Building Intelligent Systems that Run Your Business — cresdynamics.com',
+  logoUrl: '/brand/logo.png?v=20261023',
   signatureUrl: '/brand/signature.png?v=20260815e',
   financeSignatureUrl: '/brand/signature-scholastica.png?v=20260815f',
   invoicedBy: {
@@ -61,12 +61,20 @@ async function loadCompanyProfile(queryFn) {
           ...rows[0].value.invoicedBy,
         };
       }
-      return merged;
+      return lockMpesaPaybill(merged);
     }
   } catch {
     // DB may be unavailable during early boot — use defaults
   }
-  return { ...DEFAULT_COMPANY };
+  return lockMpesaPaybill({ ...DEFAULT_COMPANY });
+}
+
+function lockMpesaPaybill(company) {
+  return {
+    ...company,
+    mpesaPaybill: '542542',
+    mpesaAccount: '43869',
+  };
 }
 
 module.exports = { DEFAULT_COMPANY, loadCompanyProfile };

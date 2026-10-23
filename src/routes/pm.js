@@ -45,7 +45,7 @@ function healthFlag(dueDate, status) {
 function enrichProject(row) {
   const milestones = normalizeMilestones(row.milestones);
   const progress_pct = milestoneProgress(milestones);
-  const due_date = projectDueDate(milestones);
+  const due_date = row.due_date || projectDueDate(milestones);
   const health = healthFlag(due_date, row.status);
   const workload = pendingHours(milestones);
   const { value_amount, ...rest } = row;
@@ -231,7 +231,7 @@ router.get(
     const { rows } = await query(
       `SELECT p.id, p.name, p.status, p.milestones, p.summary, p.description,
               p.assigned_developer_id, p.client_id, p.created_by, p.preview_url,
-              p.created_at, p.updated_at, p.approved_at,
+              p.created_at, p.updated_at, p.approved_at, p.due_date,
               c.name AS client_name,
               d.name AS developer_name,
               s.name AS sales_name
@@ -265,8 +265,8 @@ router.get(
     const { rows } = await query(
       `SELECT p.id, p.name, p.status, p.milestones, p.summary, p.description,
               p.assigned_developer_id, p.client_id, p.created_by, p.preview_url,
-              p.created_at, p.updated_at, p.approved_at, p.approved_by,
-              c.name AS client_name,
+              p.created_at, p.updated_at, p.approved_at, p.approved_by, p.due_date,
+              c.name AS client_name, c.email AS client_email, c.phone AS client_phone,
               d.name AS developer_name, d.email AS developer_email,
               s.name AS sales_name
        FROM projects p
@@ -282,10 +282,7 @@ router.get(
     }
 
     const project = enrichProject(rows[0]);
-    // Explicitly strip any money / client contact fields
     delete project.value_amount;
-    delete project.client_email;
-    delete project.client_phone;
 
     const { rows: updates } = await query(
       `SELECT pu.*, u.name AS author_name

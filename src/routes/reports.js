@@ -21,7 +21,12 @@ router.get(
     const params = [];
     const clauses = [];
 
-    if (['sales', 'developer'].includes(req.user.role)) {
+    const ownOnly =
+      ['sales', 'developer'].includes(req.user.role) ||
+      req.query.mine === '1' ||
+      req.query.user_id === req.user.id;
+
+    if (['sales', 'developer'].includes(req.user.role) || ownOnly) {
       params.push(req.user.id);
       clauses.push(`dr.user_id = $${params.length}`);
     } else if (req.query.user_id) {
@@ -48,22 +53,19 @@ router.get(
       clauses.push(`dr.created_at < ($${params.length}::date + INTERVAL '1 day')`);
     }
 
-    if (req.query.routing_status === 'all') {
-      // no routing filter
-    } else if (req.query.routing_status) {
-      params.push(req.query.routing_status);
-      clauses.push(`dr.routing_status = $${params.length}`);
-    } else if (req.user.role === 'director') {
-      // Director hub defaults to PM-forwarded reports (the sync point)
-      clauses.push(`dr.routing_status = 'forwarded_director'`);
-    } else if (req.user.role === 'pm') {
-      // PM hub: inbox + reviewed (not yet only forwarded)
-      // no default filter - show all; UI filters pending
-    }
+    if (!ownOnly) {
+      if (req.query.routing_status === 'all') {
+        // no routing filter
+      } else if (req.query.routing_status) {
+        params.push(req.query.routing_status);
+        clauses.push(`dr.routing_status = $${params.length}`);
+      } else if (req.user.role === 'director') {
+        // Small team: show every report unless a routing filter is set
+      }
 
-    // PM never needs finance authors mixed in as routing targets, but can view
-    if (req.user.role === 'pm' && !req.query.role) {
-      clauses.push(`r.name IN ('sales', 'developer')`);
+      if (req.user.role === 'pm' && !req.query.role) {
+        clauses.push(`r.name IN ('sales', 'developer')`);
+      }
     }
 
     // Admin: no default routing filter - full reports viewer
@@ -256,13 +258,20 @@ router.post(
   requirePermission('reports', 'create'),
   memoryUpload.single('audio'),
   asyncHandler(async (req, res) => {
-    if (!req.file) throw new AppError('No audio file', 400, 'VALIDATION');
-
-    const { text: transcript, model: whisperModel } = await transcribeAudio({
-      buffer: req.file.buffer,
-      filename: req.file.originalname || 'recording.webm',
-      mimetype: req.file.mimetype || 'audio/webm',
-    });
+    let transcript;
+    let whisperModel = null;
+    if (req.file) {
+      const result = await transcribeAudio({
+        buffer: req.file.buffer,
+        filename: req.file.originalname || 'recording.webm',
+        mimetype: req.file.mimetype || 'audio/webm',
+      });
+      transcript = result.text;
+      whisperModel = result.model;
+    } else {
+      transcript = String(req.body?.text || '').trim();
+    }
+    if (!transcript) throw new AppError('No audio or text to process', 400, 'VALIDATION');
 
     // Fetch user's projects for DB-aligned project matching
     let projects = [];

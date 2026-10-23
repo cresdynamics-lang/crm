@@ -177,7 +177,7 @@ router.post(
   requirePermission('payments', 'create'),
   idempotency,
   asyncHandler(async (req, res) => {
-    const { invoice_id, amount, paid_at, bank_reference, client_id, client } = req.body || {};
+    const { invoice_id, amount, paid_at, bank_reference, client_id, client, method } = req.body || {};
     if (!invoice_id || amount == null) {
       throw new AppError('invoice_id and amount required', 400, 'VALIDATION');
     }
@@ -186,8 +186,9 @@ router.post(
 
     const bankRef = String(bank_reference || '').trim();
     if (!bankRef) {
-      throw new AppError('bank_reference is required for the payment', 400, 'VALIDATION');
+      throw new AppError('M-Pesa code / bank ref is required', 400, 'VALIDATION');
     }
+    const payMethod = ['mpesa', 'bank', 'cash'].includes(method) ? method : 'bank';
 
     const result = await withTransaction(async (tx) => {
       const inv = await tx.query(
@@ -220,10 +221,10 @@ router.post(
       }
 
       const { rows } = await tx.query(
-        `INSERT INTO payments (invoice_id, amount, paid_at, recorded_by, bank_reference)
-         VALUES ($1, $2, COALESCE($3::timestamptz, NOW()), $4, $5)
+        `INSERT INTO payments (invoice_id, amount, paid_at, recorded_by, bank_reference, method)
+         VALUES ($1, $2, COALESCE($3::timestamptz, NOW()), $4, $5, $6)
          RETURNING *`,
-        [invoice_id, amt, paid_at || null, req.user.id, bankRef]
+        [invoice_id, amt, paid_at || null, req.user.id, bankRef, payMethod]
       );
       const payment = rows[0];
 
@@ -463,13 +464,21 @@ router.post(
       query(`SELECT id, name FROM projects WHERE status NOT IN ('pending_approval','rejected','deleted') ORDER BY name LIMIT 200`),
     ]);
 
-    const result = await capturePaymentVoice({
-      buffer: req.file.buffer,
-      filename: req.file.originalname || 'payment-voice.webm',
-      mimetype: req.file.mimetype || 'audio/webm',
-      clients: clientsRes.rows,
-      projects: projectsRes.rows,
-    });
+    let result;
+    if (req.file) {
+      result = await capturePaymentVoice({
+        buffer: req.file.buffer,
+        filename: req.file.originalname || 'payment-voice.webm',
+        mimetype: req.file.mimetype || 'audio/webm',
+        clients: clientsRes.rows,
+        projects: projectsRes.rows,
+      });
+    } else {
+      const transcript = String(req.body?.text || '').trim();
+      if (!transcript) throw new AppError('No audio or text to process', 400, 'VALIDATION');
+      const parsed = await parsePaymentFromTranscript(transcript, clientsRes.rows, projectsRes.rows);
+      result = { transcript, whisper_model: null, ...parsed };
+    }
 
     // Try to find matching invoice if client + project are resolved
     let invoice = null;

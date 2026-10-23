@@ -43,10 +43,12 @@ const CresRealtime = (() => {
     socket = io({
       path: '/socket.io',
       auth: { token },
-      transports: ['websocket', 'polling'],
+      transports: ['websocket'],
+      timeout: 4000,
       reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 8000,
+      reconnectionAttempts: 6,
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 10000,
     });
 
     socket.on('connect', () => {
@@ -56,12 +58,12 @@ const CresRealtime = (() => {
 
     socket.on('disconnect', () => {
       setStatus('degraded');
-      startPollFallback();
+      startPollFallback(2000);
     });
 
     socket.on('connect_error', () => {
       setStatus('degraded');
-      startPollFallback();
+      startPollFallback(2000);
     });
 
     socket.on('notification:new', (n) => emitLocal('notification', n));
@@ -107,19 +109,30 @@ const CresRealtime = (() => {
     });
   }
 
-  function startPollFallback() {
-    if (pollTimer) return;
-    pollTimer = setInterval(async () => {
-      try {
-        const res = await CresAPI.request('/api/notifications?unread=true');
-        emitLocal('notification', { __poll: true, items: res.data || [] });
-      } catch {
-        // ignore transient poll errors
-      }
-    }, 8000);
+  let pollDelay = null;
+  function startPollFallback(delayMs = 0) {
+    if (pollTimer || pollDelay) return;
+    const begin = () => {
+      pollDelay = null;
+      if (pollTimer || status === 'online') return;
+      pollTimer = setInterval(async () => {
+        try {
+          const res = await CresAPI.request('/api/notifications?unread=true');
+          emitLocal('notification', { __poll: true, items: res.data || [] });
+        } catch {
+          // ignore transient poll errors
+        }
+      }, 8000);
+    };
+    if (delayMs > 0) pollDelay = setTimeout(begin, delayMs);
+    else begin();
   }
 
   function stopPollFallback() {
+    if (pollDelay) {
+      clearTimeout(pollDelay);
+      pollDelay = null;
+    }
     if (pollTimer) {
       clearInterval(pollTimer);
       pollTimer = null;

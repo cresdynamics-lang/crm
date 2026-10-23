@@ -39,6 +39,7 @@ async function transcribeAudio({ buffer, filename = 'audio.webm', mimetype = 'au
         method: 'POST',
         headers: { Authorization: `Bearer ${key}` },
         body: form,
+        signal: AbortSignal.timeout(240000),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -49,6 +50,9 @@ async function transcribeAudio({ buffer, filename = 'audio.webm', mimetype = 'au
       return { text, model: data.model || config.groq.whisperModel };
     } catch (err) {
       lastErr = err;
+      if (err && err.name === 'TimeoutError') {
+        lastErr = new Error('Transcription timed out after 4 minutes — try a shorter take or retry');
+      }
       console.warn(`[voiceLeads] transcription key failed: ${err.message}`);
     }
   }

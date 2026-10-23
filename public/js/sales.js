@@ -15,14 +15,11 @@ const CresSales = (() => {
   }
 
   function fmtDate(v) {
-    if (!v) return '-';
-    return new Date(v).toLocaleDateString();
+    return CresFormat.date(v);
   }
 
   function fmtMoney(n) {
-    const num = Number(n);
-    if (Number.isNaN(num)) return '-';
-    return num.toLocaleString('en-KE', { style: 'currency', currency: 'KES' });
+    return CresFormat.money(n);
   }
 
   function statusPill(s) {
@@ -46,15 +43,13 @@ const CresSales = (() => {
       const { kpis, chart: chartData } = res.data;
       host.innerHTML = `
         <div class="kpi-grid">
-          <div class="kpi-card"><div class="kpi-label">Leads in contact</div><div class="kpi-value">${kpis.leadsInContact}</div></div>
-          <div class="kpi-card"><div class="kpi-label">Prospects</div><div class="kpi-value">${kpis.prospects}</div></div>
-          <div class="kpi-card"><div class="kpi-label">Deals</div><div class="kpi-value">${kpis.deals}</div></div>
-          <a href="#/leads" class="kpi-card kpi-link" id="kpi-followups-due" title="View follow-up leads">
-            <div class="kpi-label">Follow-ups due</div>
+          <div class="kpi-card"><div class="kpi-label">Calls today (target ${kpis.callsTarget || 5})</div><div class="kpi-value">${kpis.callsToday ?? 0}</div></div>
+          <div class="kpi-card"><div class="kpi-label">Meetings this week</div><div class="kpi-value">${kpis.meetingsThisWeek ?? 0}</div></div>
+          <div class="kpi-card"><div class="kpi-label">Deposits collected</div><div class="kpi-value" style="font-size:1.25rem;">${fmtMoney(kpis.depositsCollected || 0)}</div></div>
+          <a href="#/pipeline" class="kpi-card kpi-link" id="kpi-followups-due" title="Overdue follow-ups">
+            <div class="kpi-label">Overdue follow-ups</div>
             <div class="kpi-value">${kpis.followUpsDue}</div>
           </a>
-          <div class="kpi-card"><div class="kpi-label">Projects created</div><div class="kpi-value">${kpis.projectsCreated}</div></div>
-          <div class="kpi-card"><div class="kpi-label">Leads converted</div><div class="kpi-value">${kpis.leadsConverted}</div></div>
         </div>
         <div class="chart-panel">
           <h3>Leads contacted this week</h3>
@@ -63,8 +58,8 @@ const CresSales = (() => {
 
       document.getElementById('kpi-followups-due')?.addEventListener('click', (e) => {
         e.preventDefault();
-        sessionStorage.setItem('cres_leads_status', 'follow_up');
-        location.hash = '#/leads';
+        sessionStorage.setItem('cres_pipeline_stage', 'meeting');
+        location.hash = '#/pipeline';
       });
 
       const ctx = document.getElementById('sales-leads-chart');
@@ -76,7 +71,7 @@ const CresSales = (() => {
           datasets: [{
             label: 'Engagements',
             data: chartData.values,
-            backgroundColor: 'rgba(31, 167, 160, 0.65)',
+            backgroundColor: 'rgba(0, 168, 197, 0.65)',
             borderRadius: 6,
           }],
         },
@@ -99,35 +94,75 @@ const CresSales = (() => {
     }
   }
 
-  // ---------- Leads ----------
-  async function mountLeads() {
-    const statusFilter = sessionStorage.getItem('cres_leads_status');
-    if (statusFilter) {
-      const sel = document.getElementById('leads-status');
-      if (sel) sel.value = statusFilter;
-      sessionStorage.removeItem('cres_leads_status');
+  const PIPELINE_STAGES = {
+    new: ['new', 'contacting'],
+    contacted: ['contacted'],
+    meeting: ['meeting', 'follow_up'],
+    proposal: ['proposal'],
+    won: ['won', 'converted'],
+    lost: ['lost', 'not_interested'],
+  };
+
+  function pipelineStage(status) {
+    for (const [stage, list] of Object.entries(PIPELINE_STAGES)) {
+      if (list.includes(status)) return stage;
     }
-    const q = document.getElementById('leads-search')?.value || '';
-    const status = document.getElementById('leads-status')?.value || '';
-    const params = new URLSearchParams();
-    if (q) params.set('q', q);
-    if (status) params.set('status', status);
-    const res = await CresAPI.request(`/api/leads?${params}`);
-    const tbody = document.getElementById('leads-tbody');
-    if (!res.data.length) {
-      tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No leads yet. Add your first lead.</td></tr>`;
+    return 'new';
+  }
+
+  function stageLabel(status) {
+    const s = pipelineStage(status);
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+
+  // ---------- Pipeline (leads + won clients) ----------
+  async function mountLeads() {
+    const me = CresAPI.getUser();
+    const stored = sessionStorage.getItem('cres_pipeline_stage');
+    if (stored) {
+      document.querySelectorAll('#pipeline-tabs [data-stage]').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.stage === stored);
+      });
+      sessionStorage.removeItem('cres_pipeline_stage');
+    }
+    const stage = document.querySelector('#pipeline-tabs button.active')?.dataset.stage || '';
+    const leadsWrap = document.getElementById('pipeline-leads-wrap');
+    const clientsWrap = document.getElementById('pipeline-clients-wrap');
+    const canEditLeads = ['sales', 'admin'].includes(me?.role);
+    ['btn-new-lead', 'btn-voice-capture'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.hidden = !canEditLeads || stage === 'clients';
+    });
+    if (stage === 'clients') {
+      if (leadsWrap) leadsWrap.hidden = true;
+      if (clientsWrap) clientsWrap.hidden = false;
+      await mountClients();
       return;
     }
-    tbody.innerHTML = res.data
+    if (leadsWrap) leadsWrap.hidden = false;
+    if (clientsWrap) clientsWrap.hidden = true;
+    const q = document.getElementById('leads-search')?.value || '';
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    const res = await CresAPI.request(`/api/leads?${params}`);
+    const tbody = document.getElementById('leads-tbody');
+    let rows = res.data || [];
+    if (stage && PIPELINE_STAGES[stage]) {
+      rows = rows.filter((l) => PIPELINE_STAGES[stage].includes(l.status));
+    }
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="6" class="empty-state">No leads in this stage. Add a lead to start.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = rows
       .map(
         (l) => `<tr data-id="${l.id}">
-          <td>${esc(l.name)}</td>
+          <td>${esc(l.name)}<div class="meta">${esc(l.email || '')}</div></td>
           <td>${esc(l.phone || '-')}</td>
-          <td>${esc(l.email || '-')}</td>
           <td>${esc(l.business_name || '-')}</td>
-          <td>${esc(l.business_type || '-')}</td>
-          <td>${statusPill(l.status)}</td>
-          <td>${fmtDate(l.last_engagement_at)}</td>
+          <td>${l.value_amount != null ? fmtMoney(l.value_amount) : '—'}</td>
+          <td>${fmtDate(l.next_follow_up)}</td>
+          <td>${statusPill(stageLabel(l.status))}</td>
         </tr>`
       )
       .join('');
@@ -151,14 +186,29 @@ const CresSales = (() => {
     document.getElementById('lead-edit-business').value = lead.business_name || '';
     const typeEl = document.getElementById('lead-edit-business-type');
     if (typeEl) typeEl.value = lead.business_type || '';
-    document.getElementById('lead-edit-status').value = lead.status;
+    const mapped = pipelineStage(lead.status);
+    document.getElementById('lead-edit-status').value = mapped;
+    const valueEl = document.getElementById('lead-edit-value');
+    if (valueEl) valueEl.value = lead.value_amount != null ? lead.value_amount : '';
+    const winBox = document.getElementById('lead-win-box');
+    const me = CresAPI.getUser();
+    if (winBox) {
+      winBox.hidden =
+        ['won', 'converted'].includes(lead.status) || !['sales', 'admin'].includes(me?.role);
+    }
+    const newLeadBtn = document.getElementById('btn-new-lead');
+    if (newLeadBtn) newLeadBtn.hidden = !['sales', 'admin'].includes(me?.role);
+    const winName = document.getElementById('win-project-name');
+    if (winName && !winName.value) winName.value = `${lead.business_name || lead.name} project`;
+    const winVal = document.getElementById('win-value');
+    if (winVal && lead.value_amount != null) winVal.value = lead.value_amount;
 
     const list = document.getElementById('engagement-list');
     list.innerHTML = engRes.data.length
       ? engRes.data
           .map(
             (e) => `<li>
-              <div class="meta">${esc(e.created_by_name || '')} · ${new Date(e.created_at).toLocaleString()}${
+              <div class="meta">${esc(e.created_by_name || '')} · ${CresFormat.datetime(e.created_at)}${
                 e.follow_up_date ? ` · follow-up ${fmtDate(e.follow_up_date)}` : ''
               }</div>
               <div>${esc(e.note)}</div>
@@ -173,8 +223,8 @@ const CresSales = (() => {
         ? msgRes.data
             .map(
               (m) => `<li>
-                <div class="meta">${statusPill(m.status)} · scheduled ${new Date(m.scheduled_for).toLocaleString()}${
-                  m.sent_at ? ` · sent ${new Date(m.sent_at).toLocaleString()}` : ''
+                <div class="meta">${statusPill(m.status)} · scheduled ${CresFormat.datetime(m.scheduled_for)}${
+                  m.sent_at ? ` · sent ${CresFormat.datetime(m.sent_at)}` : ''
                 }</div>
                 <div><strong>${esc(m.subject)}</strong></div>
                 <div style="white-space:pre-wrap;margin-top:4px;">${esc(m.body)}</div>
@@ -222,6 +272,9 @@ const CresSales = (() => {
         business_name: document.getElementById('lead-edit-business').value,
         business_type: document.getElementById('lead-edit-business-type')?.value || null,
         status: document.getElementById('lead-edit-status').value,
+        value_amount: document.getElementById('lead-edit-value')?.value
+          ? Number(document.getElementById('lead-edit-value').value)
+          : null,
       },
     });
     await mountLeads();
@@ -258,6 +311,10 @@ const CresSales = (() => {
       email: document.getElementById('new-lead-email').value.trim(),
       business_name: document.getElementById('new-lead-business').value.trim(),
       business_type: document.getElementById('new-lead-business-type')?.value.trim() || '',
+      value_amount: document.getElementById('new-lead-value')?.value
+        ? Number(document.getElementById('new-lead-value').value)
+        : null,
+      status: 'new',
     };
     try {
       await CresAPI.request('/api/leads', {
@@ -292,21 +349,28 @@ const CresSales = (() => {
     const res = await CresAPI.request('/api/clients');
     const tbody = document.getElementById('clients-tbody');
     if (!res.data.length) {
-      tbody.innerHTML = `<tr><td colspan="4" class="empty-state">No clients yet. Convert a lead to create one.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" class="empty-state">No clients yet. Mark a lead as won to create one.</td></tr>`;
       return;
     }
     tbody.innerHTML = res.data
       .map(
-        (c) => `<tr data-id="${c.id}">
+        (c) => `<tr class="clickable-row" data-id="${c.id}">
           <td>${esc(c.name)}</td>
+          <td>${esc(c.phone || '-')}</td>
+          <td>${esc(c.email || '-')}</td>
           <td>${esc(c.business_name || '-')}</td>
-          <td>${fmtDate(c.converted_at)}</td>
           <td>${c.project_count ?? 0}</td>
         </tr>`
       )
       .join('');
     tbody.querySelectorAll('tr[data-id]').forEach((tr) => {
-      tr.addEventListener('click', () => openClientProjects(tr.dataset.id));
+      tr.addEventListener('click', () => {
+        if (typeof CresClientCard !== 'undefined') {
+          CresClientCard.open(tr.dataset.id).catch(console.error);
+        } else {
+          openClientProjects(tr.dataset.id);
+        }
+      });
     });
   }
 
@@ -350,10 +414,10 @@ const CresSales = (() => {
             const remarksHtml = r.remarks
               ? `<div class="rejection-banner" style="margin:0 0 6px;">${esc(r.remarks)}</div>
                  <div class="meta">${esc(r.remarks_by_name || 'Director')} · ${
-                  r.remarks_at ? new Date(r.remarks_at).toLocaleString() : ''
+                  r.remarks_at ? CresFormat.datetime(r.remarks_at) : ''
                 }</div>
                  ${r.remarks_reply
-                   ? `<div style="margin-top:6px;padding:8px;border-left:3px solid var(--accent);background:rgba(31,167,160,0.06);border-radius:0 6px 6px 0;">
+                   ? `<div style="margin-top:6px;padding:8px;border-left:3px solid var(--accent);background:rgba(0,168,197,0.06);border-radius:0 6px 6px 0;">
                         <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:2px;">Your reply</div>
                         <div>${esc(r.remarks_reply)}</div>
                       </div>`
@@ -364,7 +428,7 @@ const CresSales = (() => {
                  }`
               : '<span class="meta">No remarks yet</span>';
             return `<tr>
-              <td>${new Date(r.created_at).toLocaleString()}</td>
+              <td>${CresFormat.datetime(r.created_at)}</td>
               <td>${statusPill(r.routing_status || 'pending_pm')}</td>
               <td>${esc(reviewed)}${r.reviewed_by_name ? ` · ${esc(r.reviewed_by_name)}` : ''}</td>
               <td>${esc(r.content)}${
@@ -506,7 +570,7 @@ const CresSales = (() => {
       ? hist.data
           .map(
             (m) => `<li>
-              <div class="meta">${new Date(m.created_at).toLocaleString()} · ${esc(m.status)} · to ${esc(m.to_email)}</div>
+              <div class="meta">${CresFormat.datetime(m.created_at)} · ${esc(m.status)} · to ${esc(m.to_email)}</div>
               <strong>${esc(m.subject)}</strong>
               <div style="margin-top:4px;color:var(--text-muted);font-size:0.85rem;">${esc(m.body.slice(0, 160))}${m.body.length > 160 ? '…' : ''}</div>
             </li>`
@@ -554,11 +618,11 @@ const CresSales = (() => {
     const thead = document.querySelector('#sales-projects-chrome thead tr');
     if (thead) {
       thead.innerHTML =
-        '<th>Name</th><th>Client</th><th>Status</th><th>Assignment</th><th>Developer</th><th></th>';
+        '<th>Name</th><th>Client</th><th>Status</th><th>Value</th><th>Due</th><th>Progress</th><th>Developer</th><th></th>';
     }
 
     if (!projects.data.length) {
-      tbody.innerHTML = `<tr><td colspan="6" class="empty-state">No projects yet.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-state">No projects yet.</td></tr>`;
     } else {
       tbody.innerHTML = projects.data
         .map((p) => {
@@ -578,6 +642,7 @@ const CresSales = (() => {
               `<button type="button" class="btn btn-primary btn-sm" data-reassign="${esc(p.id)}" style="padding:6px 10px;font-size:0.8rem;">Reassign</button>`
             );
           }
+          const pct = p.progress_percent != null ? `${Number(p.progress_percent)}%` : '—';
           return `<tr class="clickable-row" data-id="${esc(p.id)}">
             <td>${esc(p.name)}
               ${rejected && p.rejection_reason
@@ -588,7 +653,9 @@ const CresSales = (() => {
             </td>
             <td>${esc(p.client_name || clientMap[p.client_id] || '-')}</td>
             <td>${statusPill(p.status)}</td>
-            <td>${statusPill(assignStatus)}</td>
+            <td>${p.value_amount != null ? fmtMoney(p.value_amount) : '—'}</td>
+            <td>${fmtDate(p.due_date)}</td>
+            <td>${esc(pct)}</td>
             <td>${esc(devMap[p.assigned_developer_id] || '-')}</td>
             <td>${actions.length ? actions.join(' ') : '-'}</td>
           </tr>`;
@@ -744,6 +811,7 @@ const CresSales = (() => {
         value_amount: document.getElementById('proj-value').value
           ? Number(document.getElementById('proj-value').value)
           : null,
+        due_date: document.getElementById('proj-due')?.value || null,
       },
       idempotencyKey: `proj-${Date.now()}`,
     });
@@ -850,9 +918,7 @@ const CresSales = (() => {
       );
     });
 
-    document.getElementById('report-form')?.addEventListener('submit', (e) =>
-      submitReport(e).catch((err) => alert(err.message))
-    );
+    // Daily report submit is bound by CresMyWork on #/work.
     document.getElementById('email-form')?.addEventListener('submit', (e) => {
       if (CresAPI.getUser()?.role === 'finance') return;
       sendEmail(e).catch((err) => alert(err.message));
@@ -873,33 +939,64 @@ const CresSales = (() => {
       if (opt?.dataset.email) document.getElementById('email-to').value = opt.dataset.email;
     });
 
-    initVoiceCapture();
-    CresVoiceReport?.initVoiceReport();
-    CresVoiceForms?.initVoiceForms();
+    document.getElementById('lead-win-form')?.addEventListener('submit', (e) =>
+      submitWin(e).catch((err) => flash(document.getElementById('lead-detail-flash'), err.message, false))
+    );
 
-    // New report toggle
-    const btnNewReport = document.getElementById('btn-new-report');
-    const reportForm = document.getElementById('report-form');
-    if (btnNewReport && reportForm) {
-      btnNewReport.addEventListener('click', () => {
-        const isHidden = reportForm.style.display === 'none';
-        reportForm.style.display = isHidden ? '' : 'none';
-        btnNewReport.textContent = isHidden ? 'Close form' : 'New report';
+    document.querySelectorAll('#pipeline-tabs [data-stage]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#pipeline-tabs [data-stage]').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        mountLeads().catch(console.error);
       });
-    }
+    });
+    document.getElementById('leads-search')?.addEventListener('input', () => {
+      clearTimeout(mountLeads._t);
+      mountLeads._t = setTimeout(() => mountLeads().catch(console.error), 250);
+    });
+
+    initVoiceCapture();
+    CresVoiceForms?.initVoiceForms();
+  }
+
+  async function submitWin(e) {
+    e.preventDefault();
+    if (!leadModalId) return;
+    const res = await CresAPI.request(`/api/leads/${leadModalId}/win`, {
+      method: 'POST',
+      body: {
+        project_name: document.getElementById('win-project-name').value.trim(),
+        value_amount: document.getElementById('win-value').value
+          ? Number(document.getElementById('win-value').value)
+          : undefined,
+        deposit_amount: document.getElementById('win-deposit').value
+          ? Number(document.getElementById('win-deposit').value)
+          : 0,
+        due_date: document.getElementById('win-due').value || undefined,
+      },
+      idempotencyKey: `win-${leadModalId}-${Date.now()}`,
+    });
+    flash(
+      document.getElementById('lead-detail-flash'),
+      res.data?.invoice
+        ? 'Won — client, project, and deposit invoice created'
+        : 'Won — client and project created (awaiting Director approval)'
+    );
+    e.target.reset();
+    await openLeadDetail(leadModalId);
+    await mountLeads();
   }
 
   async function mount(faceId, user) {
-    if (!['sales', 'admin'].includes(user.role)) return;
+    if (!['sales', 'director', 'pm'].includes(user.role)) return;
 
     if (faceId === 'home' && user.role === 'sales') {
       await mountHome();
-    } else if (faceId === 'leads') {
+    } else if (faceId === 'pipeline' || faceId === 'leads') {
       await mountLeads();
     } else if (faceId === 'clients') {
       await mountClients();
-    } else if (faceId === 'reports' && user.role === 'sales') {
-      await mountReports();
+    } else if (faceId === 'work' && user.role === 'sales') {
       await mountProjects();
     } else if (faceId === 'followups') {
       await mountFollowups();
@@ -915,6 +1012,8 @@ const CresSales = (() => {
   let voiceStream = null;
   let voiceTimerInterval = null;
   let voiceStartTime = null;
+  let voicePauseStartedAt = null;
+  let voicePauseElapsed = 0;
   let voiceParsedLeads = [];
 
   function voiceFlash(msg, ok = true) {
@@ -948,6 +1047,36 @@ const CresSales = (() => {
     if (voiceTimerInterval) {
       clearInterval(voiceTimerInterval);
       voiceTimerInterval = null;
+    }
+    voicePauseStartedAt = null;
+    voicePauseElapsed = 0;
+    const pbtn = document.getElementById('btn-voice-pause');
+    if (pbtn) {
+      pbtn.style.display = 'none';
+      pbtn.textContent = 'Pause';
+    }
+  }
+
+  function toggleVoicePause() {
+    const pbtn = document.getElementById('btn-voice-pause');
+    if (!voiceMediaRecorder || !pbtn) return;
+    if (voiceMediaRecorder.state === 'recording') {
+      voicePauseStartedAt = Date.now();
+      voiceMediaRecorder.pause();
+      clearInterval(voiceTimerInterval);
+      voiceTimerInterval = null;
+      pbtn.textContent = 'Resume';
+    } else if (voiceMediaRecorder.state === 'paused') {
+      voicePauseElapsed += Date.now() - voicePauseStartedAt;
+      voicePauseStartedAt = null;
+      voiceMediaRecorder.resume();
+      pbtn.textContent = 'Pause';
+      voiceTimerInterval = setInterval(() => {
+        const sec = Math.floor((Date.now() - voiceStartTime - voicePauseElapsed) / 1000);
+        const mm = String(Math.floor(sec / 60)).padStart(2, '0');
+        const ss = String(sec % 60).padStart(2, '0');
+        document.getElementById('voice-timer').textContent = `${mm}:${ss}`;
+      }, 300);
     }
   }
 
@@ -994,9 +1123,16 @@ const CresSales = (() => {
     btn.classList.remove('btn-primary');
     btn.onclick = () => voiceMediaRecorder.stop();
 
+    const pbtn = document.getElementById('btn-voice-pause');
+    if (pbtn) {
+      pbtn.style.display = '';
+      pbtn.textContent = 'Pause';
+      pbtn.onclick = toggleVoicePause;
+    }
+
     document.getElementById('voice-timer').textContent = '00:00';
     voiceTimerInterval = setInterval(() => {
-      const sec = Math.floor((Date.now() - voiceStartTime) / 1000);
+      const sec = Math.floor((Date.now() - voiceStartTime - voicePauseElapsed) / 1000);
       const mm = String(Math.floor(sec / 60)).padStart(2, '0');
       const ss = String(sec % 60).padStart(2, '0');
       document.getElementById('voice-timer').textContent = `${mm}:${ss}`;
@@ -1059,6 +1195,8 @@ const CresSales = (() => {
     btn.style.background = '';
     btn.classList.add('btn-primary');
     btn.onclick = startVoiceRecording;
+    const pbtn = document.getElementById('btn-voice-pause');
+    if (pbtn) { pbtn.style.display = 'none'; pbtn.textContent = 'Pause'; }
   }
 
   function renderVoiceParsedLeads(leads) {

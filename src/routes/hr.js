@@ -113,4 +113,189 @@ router.get(
   })
 );
 
+const APPLICANT_STAGES = ['applied', 'interview', 'offer', 'hired', 'rejected'];
+
+const DEFAULT_ONBOARDING_ITEMS = [
+  { id: 'contract', label: 'Contract signed', done: false },
+  { id: 'email', label: 'Work email created', done: false },
+  { id: 'access', label: 'Systems access granted', done: false },
+  { id: 'intro', label: 'Team introduction done', done: false },
+  { id: 'equipment', label: 'Equipment issued', done: false },
+];
+
+function requireHrOrAdmin(req) {
+  if (!['hr', 'admin'].includes(req.user.role)) {
+    throw new AppError('Forbidden', 403, 'FORBIDDEN');
+  }
+}
+
+router.get(
+  '/applicants',
+  requirePermission('employees', 'view'),
+  asyncHandler(async (req, res) => {
+    requireHrOrAdmin(req);
+    const params = [];
+    const clauses = [];
+    if (req.query.stage && APPLICANT_STAGES.includes(req.query.stage)) {
+      params.push(req.query.stage);
+      clauses.push(`a.stage = $${params.length}`);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const { rows } = await query(
+      `SELECT a.*, u.name AS created_by_name
+       FROM applicants a
+       LEFT JOIN users u ON u.id = a.created_by
+       ${where}
+       ORDER BY a.created_at DESC`,
+      params
+    );
+    res.json({ ok: true, data: rows });
+  })
+);
+
+router.post(
+  '/applicants',
+  requirePermission('employees', 'create'),
+  asyncHandler(async (req, res) => {
+    requireHrOrAdmin(req);
+    const { name, email, phone, role_applied, stage, interview_date, notes } = req.body || {};
+    if (!name?.trim() || !role_applied?.trim()) {
+      throw new AppError('name and role applied for are required', 400, 'VALIDATION');
+    }
+    const nextStage = APPLICANT_STAGES.includes(stage) ? stage : 'applied';
+    const { rows } = await query(
+      `INSERT INTO applicants
+        (name, email, phone, role_applied, stage, interview_date, notes, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING *`,
+      [
+        name.trim(),
+        email?.trim() || null,
+        phone?.trim() || null,
+        role_applied.trim(),
+        nextStage,
+        interview_date || null,
+        notes?.trim() || null,
+        req.user.id,
+      ]
+    );
+    res.status(201).json({ ok: true, data: rows[0] });
+  })
+);
+
+router.patch(
+  '/applicants/:id',
+  requirePermission('employees', 'edit'),
+  asyncHandler(async (req, res) => {
+    requireHrOrAdmin(req);
+    const { name, email, phone, role_applied, stage, interview_date, notes } = req.body || {};
+    if (stage && !APPLICANT_STAGES.includes(stage)) {
+      throw new AppError('Invalid stage', 400, 'VALIDATION');
+    }
+    const { rows } = await query(
+      `UPDATE applicants SET
+         name = COALESCE($1, name),
+         email = COALESCE($2, email),
+         phone = COALESCE($3, phone),
+         role_applied = COALESCE($4, role_applied),
+         stage = COALESCE($5, stage),
+         interview_date = COALESCE($6, interview_date),
+         notes = COALESCE($7, notes),
+         updated_at = NOW()
+       WHERE id = $8
+       RETURNING *`,
+      [
+        name?.trim() || null,
+        email === undefined ? null : email?.trim() || null,
+        phone === undefined ? null : phone?.trim() || null,
+        role_applied?.trim() || null,
+        stage || null,
+        interview_date === undefined ? null : interview_date || null,
+        notes === undefined ? null : notes?.trim() || null,
+        req.params.id,
+      ]
+    );
+    if (!rows[0]) throw new AppError('Applicant not found', 404, 'NOT_FOUND');
+    res.json({ ok: true, data: rows[0] });
+  })
+);
+
+router.get(
+  '/onboarding',
+  requirePermission('employees', 'view'),
+  asyncHandler(async (req, res) => {
+    requireHrOrAdmin(req);
+    const { rows } = await query(
+      `SELECT e.id AS employee_id,
+              u.name,
+              e.position,
+              u.email,
+              u.phone,
+              ob.items,
+              ob.goal_30,
+              ob.goal_60,
+              ob.goal_90,
+              ob.updated_at
+       FROM employees e
+       JOIN users u ON u.id = e.user_id
+       LEFT JOIN employee_onboarding ob ON ob.employee_id = e.id
+       ORDER BY u.name`
+    );
+    res.json({
+      ok: true,
+      data: rows.map((r) => {
+        const items = Array.isArray(r.items) ? r.items : DEFAULT_ONBOARDING_ITEMS;
+        const done = items.filter((i) => i.done).length;
+        return {
+          ...r,
+          items,
+          done,
+          total: items.length,
+        };
+      }),
+      meta: { defaultItems: DEFAULT_ONBOARDING_ITEMS },
+    });
+  })
+);
+
+router.put(
+  '/onboarding/:employeeId',
+  requirePermission('employees', 'edit'),
+  asyncHandler(async (req, res) => {
+    requireHrOrAdmin(req);
+    const emp = await query(`SELECT id FROM employees WHERE id = $1`, [req.params.employeeId]);
+    if (!emp.rows[0]) throw new AppError('Employee not found', 404, 'NOT_FOUND');
+
+    let items = req.body?.items;
+    if (!Array.isArray(items) || !items.length) {
+      items = DEFAULT_ONBOARDING_ITEMS;
+    }
+    items = items.map((i, idx) => ({
+      id: String(i.id || `item-${idx}`),
+      label: String(i.label || 'Item').slice(0, 200),
+      done: Boolean(i.done),
+    }));
+
+    const { rows } = await query(
+      `INSERT INTO employee_onboarding (employee_id, items, goal_30, goal_60, goal_90)
+       VALUES ($1, $2::jsonb, $3, $4, $5)
+       ON CONFLICT (employee_id) DO UPDATE SET
+         items = EXCLUDED.items,
+         goal_30 = EXCLUDED.goal_30,
+         goal_60 = EXCLUDED.goal_60,
+         goal_90 = EXCLUDED.goal_90,
+         updated_at = NOW()
+       RETURNING *`,
+      [
+        req.params.employeeId,
+        JSON.stringify(items),
+        req.body?.goal_30?.trim() || null,
+        req.body?.goal_60?.trim() || null,
+        req.body?.goal_90?.trim() || null,
+      ]
+    );
+    res.json({ ok: true, data: rows[0] });
+  })
+);
+
 module.exports = router;

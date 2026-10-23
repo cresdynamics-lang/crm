@@ -3,9 +3,143 @@ const { query } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission, requireAnyPermission } = require('../middleware/rbac');
 const { asyncHandler, AppError } = require('../lib/errors');
+const { INTERNAL_CATEGORIES, expenseClass } = require('../lib/expenseClasses');
 
 const router = express.Router();
 router.use(authenticate);
+
+function requireFinanceAdmin(req) {
+  if (!['finance', 'admin'].includes(req.user.role)) {
+    throw new AppError('Forbidden', 403, 'FORBIDDEN');
+  }
+}
+
+/**
+ * Admin Finance overview: project figures, health, this-month revenue/expenses.
+ */
+router.get(
+  '/overview',
+  requireAnyPermission([['cash_flow', 'view'], ['account_balance', 'view'], ['invoices', 'view']]),
+  asyncHandler(async (req, res) => {
+    requireFinanceAdmin(req);
+
+    const { rows: balances } = await query(
+      `SELECT id, label, balance, updated_at FROM account_balances ORDER BY label`
+    );
+    const accountBalance = balances.reduce((s, b) => s + Number(b.balance), 0);
+
+    const { rows: monthRev } = await query(
+      `SELECT COALESCE(SUM(amount),0)::float AS total
+       FROM payments
+       WHERE paid_at >= date_trunc('month', CURRENT_DATE)`
+    );
+    const { rows: monthExpRows } = await query(
+      `SELECT category, COALESCE(SUM(amount),0)::float AS total
+       FROM expenses
+       WHERE approval_status = 'approved'
+         AND COALESCE(approved_at, created_at) >= date_trunc('month', CURRENT_DATE)
+       GROUP BY category`
+    );
+    const { rows: allExpRows } = await query(
+      `SELECT category, COALESCE(SUM(amount),0)::float AS total
+       FROM expenses
+       WHERE approval_status = 'approved'
+       GROUP BY category`
+    );
+
+    function splitExpenses(rows) {
+      const internal = { total: 0, byCategory: [] };
+      const external = { total: 0, byCategory: [] };
+      for (const r of rows) {
+        const bucket = expenseClass(r.category) === 'internal' ? internal : external;
+        bucket.total += Number(r.total || 0);
+        bucket.byCategory.push({ category: r.category, total: Number(r.total || 0) });
+      }
+      internal.byCategory.sort((a, b) => b.total - a.total);
+      external.byCategory.sort((a, b) => b.total - a.total);
+      return { internal, external, total: internal.total + external.total };
+    }
+
+    const expensesThisMonth = splitExpenses(monthExpRows);
+    const expensesAllTime = splitExpenses(allExpRows);
+    const revenueThisMonth = Number(monthRev[0].total || 0);
+
+    const { rows: outstanding } = await query(
+      `SELECT COALESCE(SUM(GREATEST(amount - COALESCE(amount_paid,0), 0)),0)::float AS total
+       FROM invoices WHERE status IN ('issued','overdue','partially_paid')`
+    );
+    const { rows: billed } = await query(
+      `SELECT COALESCE(SUM(amount),0)::float AS invoiced,
+              COALESCE(SUM(COALESCE(amount_paid,0)),0)::float AS paid
+       FROM invoices`
+    );
+    const { rows: overdueCount } = await query(
+      `SELECT COUNT(*)::int AS count FROM invoices WHERE status = 'overdue'`
+    );
+    const invoiced = Number(billed[0].invoiced || 0);
+    const paid = Number(billed[0].paid || 0);
+    const outstandingTotal = Number(outstanding[0].total || 0);
+    const collectionRate = invoiced > 0 ? paid / invoiced : 1;
+    const netThisMonth = revenueThisMonth - expensesThisMonth.total;
+
+    let health = 'healthy';
+    if (overdueCount[0].count >= 3 || netThisMonth < 0 || collectionRate < 0.45) health = 'tight';
+    else if (overdueCount[0].count > 0 || collectionRate < 0.7 || outstandingTotal > revenueThisMonth) {
+      health = 'watch';
+    }
+
+    const { rows: projects } = await query(
+      `SELECT p.id, p.name, p.status, p.value_amount,
+              c.name AS client_name, c.business_name AS client_business,
+              COALESCE(SUM(i.amount), 0)::float AS invoiced,
+              COALESCE(SUM(COALESCE(i.amount_paid, 0)), 0)::float AS paid,
+              COALESCE(SUM(GREATEST(i.amount - COALESCE(i.amount_paid, 0), 0)), 0)::float AS balance
+       FROM projects p
+       LEFT JOIN clients c ON c.id = p.client_id
+       LEFT JOIN invoices i ON i.project_id = p.id
+       WHERE p.status NOT IN ('pending_approval', 'rejected')
+       GROUP BY p.id, p.name, p.status, p.value_amount, c.name, c.business_name
+       ORDER BY p.name ASC`
+    );
+
+    res.json({
+      ok: true,
+      data: {
+        monthLabel: new Date().toLocaleString('en-KE', { month: 'long', year: 'numeric' }),
+        kpis: {
+          accountBalance,
+          revenueThisMonth,
+          expensesThisMonth: expensesThisMonth.total,
+          internalThisMonth: expensesThisMonth.internal.total,
+          externalThisMonth: expensesThisMonth.external.total,
+          netThisMonth,
+          outstanding: outstandingTotal,
+          invoiced,
+          paid,
+          collectionRate,
+          overdueCount: overdueCount[0].count,
+          projectCount: projects.length,
+        },
+        health,
+        expensesThisMonth,
+        expensesAllTime,
+        internalCategories: INTERNAL_CATEGORIES,
+        projects: projects.map((p) => ({
+          id: p.id,
+          name: p.name,
+          status: p.status,
+          client_name: p.client_name,
+          client_business: p.client_business,
+          value_amount: p.value_amount != null ? Number(p.value_amount) : null,
+          invoiced: Number(p.invoiced || 0),
+          paid: Number(p.paid || 0),
+          balance: Number(p.balance || 0),
+        })),
+        balances,
+      },
+    });
+  })
+);
 
 /**
  * Full money-health dashboard - Finance + Admin ONLY.
@@ -234,6 +368,143 @@ router.get(
       date_to: req.query.date_to,
     });
     res.json({ ok: true, data });
+  })
+);
+
+// ─── Website event payments (live from website DB, read-only) ───
+const { wQuery, wQueryRows, respondIfDisconnected } = require('../config/websiteDb');
+const { enqueue } = require('../queues');
+
+const EAT = 'Africa/Nairobi';
+
+async function ensureFinanceFor(req) {
+  if (!['finance', 'admin'].includes(req.user.role)) {
+    throw new AppError('Forbidden', 403, 'FORBIDDEN');
+  }
+}
+
+router.get(
+  '/website-payments',
+  requireAnyPermission([['cash_flow', 'view'], ['payments', 'view']]),
+  asyncHandler(async (req, res) => {
+    await ensureFinanceFor(req);
+    if (
+      await respondIfDisconnected(res, {
+        payments: [],
+        summary: { paidCount: 0, paidPeople: 0, latestPayment: null },
+        currency: 'KES',
+      })
+    ) {
+      return;
+    }
+    const { status, event, from, to } = req.query;
+    const conds = ["booking_status = 'paid'"];
+    const params = [];
+    if (event) { params.push(event); conds.push(`event_title = $${params.length}`); }
+    if (from) { params.push(from); conds.push(`paid_at >= $${params.length}`); }
+    if (to) { params.push(to); conds.push(`paid_at <= $${params.length}`); }
+
+    const rows = await wQueryRows(
+      `SELECT id, event_title, event_date, first_name, last_name, email, phone, company,
+              ticket_type, attendance_type, lanyard_category, paid_at, paid_by, paid_source,
+              ticket_number, created_at,
+              to_char(paid_at AT TIME ZONE '${EAT}', 'YYYY-MM-DD HH24:MI') AS paid_at_eat
+       FROM event_reservations
+       WHERE ${conds.join(' AND ')}
+       ORDER BY paid_at DESC, id DESC
+       LIMIT 500`,
+      params
+    );
+
+    const { rows: totals } = await wQuery(
+      `SELECT COUNT(*)::bigint AS paid_count,
+              COUNT(DISTINCT email)::bigint AS paid_people,
+              MAX(paid_at) AS latest_payment
+       FROM event_reservations WHERE booking_status = 'paid'`
+    );
+
+    // Emailed markers (CRM-side log, never written to website DB)
+    const { rows: emailedRows } = await query(
+      `SELECT DISTINCT ON (reservation_id) reservation_id, status, sent_at
+       FROM website_payer_emails ORDER BY reservation_id, id DESC`
+    );
+    const emailedBy = Object.fromEntries(emailedRows.map((e) => [String(e.reservation_id), e]));
+
+    res.json({
+      ok: true,
+      data: {
+        asOf: new Date().toISOString(),
+        timezone: EAT,
+        currency: 'KES',
+        summary: {
+          paidCount: Number(totals[0].paid_count),
+          paidPeople: Number(totals[0].paid_people),
+          latestPayment: totals[0].latest_payment,
+        },
+        payments: rows.map((r) => ({
+          id: r.id,
+          eventTitle: r.event_title,
+          eventDate: r.event_date,
+          name: [r.first_name, r.last_name].filter(Boolean).join(' ') || '-',
+          email: r.email,
+          phone: r.phone || '',
+          company: r.company || '',
+          ticketType: r.ticket_type || '-',
+          attendanceType: r.attendance_type || '',
+          lanyardCategory: r.lanyard_category || '',
+          paidAtEat: r.paid_at_eat,
+          paidAt: r.paid_at,
+          paidBy: r.paid_by || '',
+          paidSource: r.paid_source || 'manual',
+          ticketNumber: r.ticket_number || '',
+          currency: 'KES',
+          emailed: Boolean(emailedBy[r.id]?.status === 'sent'),
+          emailedAt: emailedBy[r.id]?.sent_at || null,
+        })),
+      },
+    });
+  })
+);
+
+router.post(
+  '/website-payments/:id/email',
+  requireAnyPermission([['cash_flow', 'view'], ['payments', 'view']]),
+  asyncHandler(async (req, res) => {
+    await ensureFinanceFor(req);
+    const { websiteDbAvailable } = require('../config/websiteDb');
+    const dbStatus = await websiteDbAvailable();
+    if (dbStatus.status !== 'up') {
+      throw new AppError('Not connected yet — website database is not available.', 503, 'NOT_CONNECTED');
+    }
+    const { subject, message } = req.body;
+    if (!message?.trim()) {
+      throw new AppError('message is required', 400, 'VALIDATION');
+    }
+
+    const payers = await wQueryRows(
+      `SELECT id, first_name, last_name, email, phone, event_title, ticket_type, ticket_number
+       FROM event_reservations WHERE id = $1 AND booking_status = 'paid'`,
+      [req.params.id]
+    );
+    const payer = payers[0];
+    if (!payer) throw new AppError('Paid registration not found', 404, 'NOT_FOUND');
+    if (!payer.email) throw new AppError('Payer has no email address', 400, 'VALIDATION');
+
+    await enqueue('email', 'site.payer-contact', {
+      reservationId: payer.id,
+      to: payer.email,
+      name: [payer.first_name, payer.last_name].filter(Boolean).join(' ') || 'there',
+      subject: subject?.trim() || `Your reservation — ${payer.event_title}`,
+      message: message.trim(),
+      context: {
+        event_title: payer.event_title,
+        ticket_type: payer.ticket_type,
+        ticket_number: payer.ticket_number,
+      },
+      sentBy: { id: req.user.id, name: req.user.name, role: req.user.role },
+    });
+
+    res.status(202).json({ ok: true, queued: true, to: payer.email });
   })
 );
 

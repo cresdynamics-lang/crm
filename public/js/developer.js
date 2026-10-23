@@ -15,8 +15,7 @@ const CresDeveloper = (() => {
   }
 
   function fmtDate(v) {
-    if (!v) return '-';
-    return new Date(v).toLocaleDateString();
+    return CresFormat.date(v);
   }
 
   function statusPill(s) {
@@ -104,7 +103,7 @@ const CresDeveloper = (() => {
           datasets: [{
             label: 'Completion %',
             data: c.values.length ? c.values : [0],
-            backgroundColor: 'rgba(31, 167, 160, 0.65)',
+            backgroundColor: 'rgba(0, 168, 197, 0.65)',
             borderRadius: 6,
           }],
         },
@@ -227,7 +226,10 @@ const CresDeveloper = (() => {
   }
 
   async function mountProjects() {
-    const res = await CresAPI.request('/api/developer/projects');
+    const [res, inviteRes] = await Promise.all([
+      CresAPI.request('/api/developer/projects'),
+      CresAPI.request('/api/assignments/pending').catch(() => ({ data: [] })),
+    ]);
     const tbody = document.getElementById('projects-tbody');
     const btn = document.getElementById('btn-new-project');
     if (btn) btn.hidden = true;
@@ -235,8 +237,23 @@ const CresDeveloper = (() => {
     if (thead) thead.innerHTML = '<th>Name</th><th>Status</th><th>Progress</th>';
     const hero = document.querySelector('#face-projects .face-hero p');
     if (hero) {
-      hero.textContent =
-        'Assigned projects only. Client contact and financial details are not available to developers.';
+      hero.textContent = 'Update milestones and hours on your assigned work.';
+    }
+
+    const wrap = tbody?.closest('.data-table-wrap');
+    let banner = document.getElementById('dev-invite-banner');
+    if (!banner && wrap) {
+      banner = document.createElement('div');
+      banner.id = 'dev-invite-banner';
+      banner.style.margin = '0 0 14px';
+      wrap.before(banner);
+    }
+    if (banner) {
+      const pending = inviteRes.data || [];
+      banner.innerHTML = pending.length
+        ? `<div class="settings-section" style="margin:0;max-width:none;"><h3>Pending invitations</h3>${renderInvitations(pending)}</div>`
+        : '';
+      if (pending.length) bindInvitationActions(banner);
     }
 
     if (!res.data.length) {
@@ -340,7 +357,7 @@ const CresDeveloper = (() => {
       ? updatesRes.data
           .map(
             (u) => `<li>
-              <div class="meta">${esc(u.author_name)} · ${new Date(u.created_at).toLocaleString()}${
+              <div class="meta">${esc(u.author_name)} · ${CresFormat.datetime(u.created_at)}${
                 u.milestone_status ? ` · ${esc(u.milestone_status)}` : ''
               }</div>
               <div>${esc(u.note || u.change_summary || '')}</div>
@@ -506,10 +523,10 @@ const CresDeveloper = (() => {
                 const remarksHtml = r.remarks
                   ? `<div class="rejection-banner" style="margin:0 0 6px;">${esc(r.remarks)}</div>
                      <div class="meta">${esc(r.remarks_by_name || 'Director')} · ${
-                      r.remarks_at ? new Date(r.remarks_at).toLocaleString() : ''
+                      r.remarks_at ? CresFormat.datetime(r.remarks_at) : ''
                     }</div>
                      ${r.remarks_reply
-                       ? `<div style="margin-top:6px;padding:8px;border-left:3px solid var(--accent);background:rgba(31,167,160,0.06);border-radius:0 6px 6px 0;">
+                       ? `<div style="margin-top:6px;padding:8px;border-left:3px solid var(--accent);background:rgba(0,168,197,0.06);border-radius:0 6px 6px 0;">
                             <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:2px;">Your reply</div>
                             <div>${esc(r.remarks_reply)}</div>
                           </div>`
@@ -520,7 +537,7 @@ const CresDeveloper = (() => {
                      }`
                   : '<span class="meta">No remarks yet</span>';
                 return `<tr>
-                  <td>${new Date(r.created_at).toLocaleString()}</td>
+                  <td>${CresFormat.datetime(r.created_at)}</td>
                   <td>${statusPill(r.routing_status || 'pending_pm')}</td>
                   <td>${esc(reviewed)}${r.reviewed_by_name ? ` · ${esc(r.reviewed_by_name)}` : ''}</td>
                   <td>${esc(r.content)}${
@@ -625,8 +642,7 @@ const CresDeveloper = (() => {
 
     if (faceId === 'home' && user.role === 'developer') await mountHome();
     else if (faceId === 'projects' && user.role === 'developer') await mountProjects();
-    else if (faceId === 'tasks' && user.role === 'developer') await mountTasks();
-    else if (faceId === 'reports' && user.role === 'developer') await mountReports();
+    else if (faceId === 'work' && user.role === 'developer') await mountTasks();
   }
 
   return { bind, mount, openProject };

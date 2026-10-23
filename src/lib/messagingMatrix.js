@@ -1,18 +1,17 @@
 /**
  * Community messaging matrix - enforced server-side on /api/messages.
- * Finance has NO chat (notifications feed only).
  * Clients are NEVER in internal Community.
  * Admin can message everyone (except clients - clients aren't in Community).
  */
 const MESSAGING_MATRIX = {
-  sales: ['developer', 'director', 'pm', 'admin'],
+  sales: ['developer', 'director', 'pm', 'admin', 'finance'],
   developer: ['sales', 'director', 'pm', 'admin'],
-  director: ['sales', 'developer', 'pm', 'admin'],
-  pm: ['sales', 'developer', 'director', 'admin'],
+  director: ['sales', 'developer', 'pm', 'admin', 'finance'],
+  pm: ['sales', 'developer', 'director', 'admin', 'finance'],
   admin: ['sales', 'developer', 'director', 'pm', 'finance', 'hr', 'admin'],
-  finance: [], // system notification feed only
-  hr: ['admin'], // HR can reach admin; no peer chat matrix beyond that
-  client: [], // not in Community at all
+  finance: ['admin', 'director', 'sales', 'pm', 'hr'],
+  hr: ['admin', 'finance'],
+  client: [],
 };
 
 function canMessage(senderRole, recipientRole) {

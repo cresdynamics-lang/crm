@@ -40,6 +40,14 @@ async function boot() {
     } catch (e) {
       console.warn('[boot] ops scheduler skipped:', e.message);
     }
+
+    try {
+      const { startSampler } = require('./services/healthSampler');
+      startSampler(60000);
+      console.log('[boot] health sampler started (60s)');
+    } catch (e) {
+      console.warn('[boot] health sampler skipped:', e.message);
+    }
   });
 
   const shutdown = async (signal) => {

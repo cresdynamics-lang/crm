@@ -95,7 +95,32 @@ router.get(
   asyncHandler(async (req, res) => {
     const { rows } = await query(`SELECT * FROM clients WHERE id = $1`, [req.params.id]);
     if (!rows[0]) throw new AppError('Client not found', 404, 'NOT_FOUND');
-    res.json({ ok: true, data: rows[0] });
+    const client = rows[0];
+    const { rows: projects } = await query(
+      `SELECT id, name, status, value_amount, created_at, updated_at FROM projects WHERE client_id = $1 ORDER BY created_at DESC`,
+      [client.id]
+    );
+    const { rows: money } = await query(
+      `SELECT COALESCE(SUM(amount),0)::float AS invoiced,
+              COALESCE(SUM(amount_paid),0)::float AS paid
+       FROM invoices WHERE client_id = $1`,
+      [client.id]
+    );
+    const showMoney = ['admin', 'finance', 'director', 'sales'].includes(req.user.role);
+    const data = {
+      ...client,
+      projects: projects.map((p) => {
+        const row = { ...p };
+        if (!showMoney) delete row.value_amount;
+        return row;
+      }),
+    };
+    if (showMoney) {
+      data.invoiced = money[0].invoiced;
+      data.paid = money[0].paid;
+      data.balance = Math.max(0, money[0].invoiced - money[0].paid);
+    }
+    res.json({ ok: true, data });
   })
 );
 

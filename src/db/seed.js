@@ -140,6 +140,7 @@ const ROLE_PERMS = {
     'cash_flow:view',
     'invoice_followups:view', 'invoice_followups:create', 'invoice_followups:edit',
     'clients:view', 'clients:create', 'clients:edit', // attach / add client when recording payments
+    'messages:view', 'messages:create',
     'projects:view',
     'notifications:view',
     'reports:view', 'reports:create',
@@ -151,7 +152,8 @@ const ROLE_PERMS = {
 
   pm: [
     'projects:view', 'projects:edit',
-    // clients:view / leads:view removed - PM sees project ops only
+    'leads:view',
+    'clients:view',
     'messages:view', 'messages:create',
     'notifications:view',
     'reports:view', 'reports:create',

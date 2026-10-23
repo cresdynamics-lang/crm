@@ -233,6 +233,12 @@ const CresCommunity = (() => {
   function updatePollBanner(status) {
     const banner = document.getElementById('chat-poll-banner');
     if (!banner) return;
+    const onCommunity = document.getElementById('face-community')?.classList.contains('active');
+    if (!onCommunity) {
+      banner.classList.remove('visible');
+      stopMessagePoll();
+      return;
+    }
     if (status === 'online') {
       banner.classList.remove('visible');
       stopMessagePoll();

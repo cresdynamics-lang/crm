@@ -15,6 +15,13 @@
   let latestResult = null;
   let currentTarget = null; // 'project' or 'task'
 
+  function withTimeout(promise, ms, msg) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error(msg)), ms)),
+    ]);
+  }
+
   function flash(el, msg, ok) {
     if (!el) return;
     el.textContent = msg;
@@ -26,6 +33,43 @@
     const m = String(Math.floor(s / 60)).padStart(2, '0');
     const sec = String(s % 60).padStart(2, '0');
     return `${m}:${sec}`;
+  }
+
+  function currentEndpoint() {
+    return currentTarget === 'project'
+      ? '/api/projects/voice-capture'
+      : '/api/tasks/voice-capture';
+  }
+
+  function pauseBtn() {
+    return document.getElementById('btn-vf-pause');
+  }
+
+  function setPauseBtn(visible) {
+    const b = pauseBtn();
+    if (!b) return;
+    b.style.display = visible ? '' : 'none';
+    b.textContent = 'Pause';
+  }
+
+  function handlePause() {
+    if (!recorder) return;
+    const b = pauseBtn();
+    if (!b) return;
+    if (recorder.state === 'recording') {
+      recorder.pause();
+      clearInterval(timerInterval);
+      timerInterval = null;
+      b.textContent = 'Resume';
+    } else if (recorder.state === 'paused') {
+      recorder.resume();
+      timerInterval = setInterval(() => {
+        elapsed++;
+        const el = document.getElementById('vf-timer');
+        if (el) el.textContent = formatTime(elapsed);
+      }, 1000);
+      b.textContent = 'Pause';
+    }
   }
 
   async function startRecording() {
@@ -59,16 +103,52 @@
   async function transcribeAndParse(blob) {
     const fd = new FormData();
     fd.append('audio', blob, `voice-form-${Date.now()}.webm`);
-    const endpoint = currentTarget === 'project'
-      ? '/api/projects/voice-capture'
-      : '/api/tasks/voice-capture';
-    const res = await CresAPI.request(endpoint, {
-      method: 'POST',
-      body: fd,
-      idempotencyKey: `vf-${currentTarget}-${Date.now()}`,
-    });
+    const res = await withTimeout(
+      CresAPI.request(currentEndpoint(), {
+        method: 'POST',
+        body: fd,
+        idempotencyKey: `vf-${currentTarget}-${Date.now()}`,
+      }),
+      250000,
+      'AI is taking too long — please retry or shorten the recording'
+    );
     if (!res.ok) throw new Error(res.error?.message || 'Voice capture failed');
     return res.data;
+  }
+
+  async function reparseText() {
+    const ts = document.getElementById('vf-transcript');
+    const flashEl = document.getElementById('vf-flash');
+    const wi = document.getElementById('vf-working');
+    const text = String(ts?.value || '').trim();
+    if (!text) {
+      flash(flashEl, 'Nothing to re-parse — the transcript is empty', false);
+      return;
+    }
+    const reparseBtn = document.getElementById('btn-vf-reparse');
+    if (reparseBtn) { reparseBtn.disabled = true; reparseBtn.textContent = 'Re-parsing...'; }
+    if (wi) wi.style.display = '';
+    try {
+      const res = await withTimeout(
+        CresAPI.request(currentEndpoint(), {
+          method: 'POST',
+          body: { text },
+          idempotencyKey: `vf-${currentTarget}-reparse-${Date.now()}`,
+        }),
+        120000,
+        'AI is taking too long — please retry'
+      );
+      if (!res.ok) throw new Error(res.error?.message || 'Re-parse failed');
+      latestResult = res.data;
+      if (ts) ts.value = res.data.transcript || text;
+      renderPreview(res.data);
+      flash(flashEl, 'Re-parsed from your corrected text — review below', true);
+    } catch (err) {
+      flash(flashEl, err.message || 'Failed to re-parse', false);
+    } finally {
+      if (reparseBtn) { reparseBtn.disabled = false; reparseBtn.textContent = 'Re-parse edited text'; }
+      if (wi) wi.style.display = 'none';
+    }
   }
 
   function showRecorderUI() {
@@ -83,6 +163,7 @@
     const timer = document.getElementById('vf-timer');
     if (timer) timer.textContent = '00:00';
     latestResult = null;
+    setPauseBtn(false);
   }
 
   function renderPreview(data) {
@@ -173,6 +254,7 @@
         btn.textContent = 'Stop recording';
         btn.classList.add('btn-danger');
         await startRecording();
+        setPauseBtn(true);
       } catch {
         flash(flashEl, 'Microphone access denied', false);
         btn.textContent = 'Start recording';
@@ -183,6 +265,7 @@
 
     btn.disabled = true;
     btn.textContent = 'Processing...';
+    setPauseBtn(false);
     const blob = await stopRecording();
     if (!blob || blob.size < 1000) {
       flash(flashEl, 'Recording too short — try again', false);
@@ -198,7 +281,7 @@
     try {
       const data = await transcribeAndParse(blob);
       latestResult = data;
-      document.getElementById('vf-transcript').textContent = data.transcript || '(no transcript)';
+      document.getElementById('vf-transcript').value = data.transcript || '(no transcript)';
       document.getElementById('vf-transcript-section').style.display = '';
       renderPreview(data);
       document.getElementById('vf-preview-section').style.display = '';
@@ -211,6 +294,7 @@
       btn.textContent = 'Start recording';
       btn.classList.remove('btn-danger');
       wi.style.display = 'none';
+      setPauseBtn(false);
     }
   }
 
@@ -258,6 +342,8 @@
     if (btnRecord) btnRecord.addEventListener('click', handleRecord);
     if (btnRetry) btnRetry.addEventListener('click', handleRetry);
     if (btnUse) btnUse.addEventListener('click', handleUse);
+    document.getElementById('btn-vf-pause')?.addEventListener('click', handlePause);
+    document.getElementById('btn-vf-reparse')?.addEventListener('click', reparseText);
 
     // New task button
     const btnNewTask = document.getElementById('btn-new-task');

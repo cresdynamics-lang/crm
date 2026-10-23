@@ -71,14 +71,14 @@ function buildInvoicePrintHtml(receipt, { publicBaseUrl = '' } = {}) {
 <title>${esc(receipt.documentNumber || 'Invoice')} — Cres Dynamics Ltd</title>
 <style>
   @page { size: A4; margin: 10mm; }
-  :root { --ink:#14212b; --muted:#5a6a78; --line:#cfd8e0; --accent:#0d7c76; --soft:#f3f7f8; }
+  :root { --ink:#1b2a4a; --muted:#5a6a78; --line:#cfd8e0; --accent:#00a8c5; --orange:#f5a623; --soft:#f4fbfc; }
   * { box-sizing:border-box; }
   html, body { margin:0; padding:0; background:#fff; color:var(--ink); }
   body { font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; font-size:11px; line-height:1.35; }
   .page { width:100%; max-width:190mm; margin:0 auto; padding:8px 4px; }
   .header { display:flex; gap:14px; align-items:flex-start; border-bottom:2px solid var(--accent); padding-bottom:8px; margin-bottom:10px; }
-  .logo { width:54px; height:54px; object-fit:contain; flex:0 0 auto; background:#111; border-radius:8px; padding:4px; }
-  .co h1 { margin:0; font-size:16px; letter-spacing:.02em; color:var(--accent); }
+  .logo { height:52px; width:auto; max-width:200px; object-fit:contain; flex:0 0 auto; background:transparent; }
+  .co h1 { margin:0; font-size:16px; letter-spacing:.02em; color:var(--ink); }
   .co .tag { color:var(--muted); font-size:10px; margin-top:2px; }
   .co .addr { margin-top:4px; color:var(--muted); font-size:10px; }
   .badge { margin-left:auto; text-align:right; }
@@ -198,13 +198,9 @@ function buildInvoicePrintHtml(receipt, { publicBaseUrl = '' } = {}) {
       <h3>Payment instructions</h3>
       <div>Pay within ${esc(pay.payWithinDays || 5)} days of invoice date.</div>
       <ul>
-        ${
-          pay.mpesaPaybill
-            ? `<li><strong>M-Pesa:</strong> Paybill ${esc(pay.mpesaPaybill)} | Account: ${esc(
-                pay.mpesaAccount || ''
-              )}</li>`
-            : ''
-        }
+        <li><strong>M-Pesa:</strong> Paybill ${esc(pay.mpesaPaybill || c.mpesaPaybill || '542542')} | Account: ${esc(
+          pay.mpesaAccount || c.mpesaAccount || '43869'
+        )}</li>
         <li><strong>Bank Transfer:</strong> ${esc(pay.bankName || c.bankName || '')}
           | Account Name: ${esc(pay.bankAccountName || c.bankAccountName || '')}
           | Account No: <strong>${esc(pay.bankAccountNumber || c.bankAccountNumber || '')}</strong>
@@ -242,7 +238,7 @@ function buildInvoicePrintHtml(receipt, { publicBaseUrl = '' } = {}) {
     </div>
 
     <div class="foot">
-      ${esc(c.footer || 'Thank you for your business. Cres Dynamics Ltd — cresdynamics.com')}<br/>
+      ${esc(c.footer || 'Thank you for your business. Building Intelligent Systems that Run Your Business — cresdynamics.com')}<br/>
       ${esc(c.legalName || 'Cres Dynamics Ltd')} | ${esc(c.tagline || '')}<br/>
       ${(c.addressLines || []).map((l) => esc(l)).join(' · ')}
       ${c.email ? ` | ${esc(c.email)}` : ''}

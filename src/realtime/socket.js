@@ -23,6 +23,10 @@ function conversationRoom(conversationId) {
   return `conversation:${conversationId}`;
 }
 
+function roleRoom(role) {
+  return `role:${role}`;
+}
+
 function initSocket(server) {
   io = new Server(server, {
     cors: { origin: true, credentials: true },
@@ -60,6 +64,7 @@ function initSocket(server) {
 
   io.on('connection', (socket) => {
     socket.join(userRoom(socket.user.id));
+    socket.join(roleRoom(socket.user.role));
     socket.emit('realtime:ready', {
       userId: socket.user.id,
       role: socket.user.role,
@@ -89,7 +94,7 @@ function initSocket(server) {
 
     socket.on('message:send', async (payload, ack) => {
       try {
-        if (socket.user.role === 'finance' || socket.user.role === 'client') {
+        if (socket.user.role === 'client') {
           throw new Error('ROLE_NO_CHAT');
         }
         if (!socket.user.permissions.includes('messages:create')) {
@@ -160,6 +165,11 @@ function emitToUser(userId, event, payload) {
   io.to(userRoom(userId)).emit(event, payload);
 }
 
+function emitToRole(role, event, payload) {
+  if (!io) return;
+  io.to(roleRoom(role)).emit(event, payload);
+}
+
 function emitNotification(userId, notification) {
   emitToUser(userId, 'notification:new', notification);
 }
@@ -168,8 +178,10 @@ module.exports = {
   initSocket,
   getIo,
   emitToUser,
+  emitToRole,
   emitNotification,
   userRoom,
   conversationRoom,
+  roleRoom,
   canMessage,
 };

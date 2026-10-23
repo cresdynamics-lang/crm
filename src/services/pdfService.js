@@ -12,11 +12,12 @@ const { localBrandPath } = require('./brandAssets');
 const BRAND_DIR = path.join(__dirname, '..', '..', 'public', 'brand');
 
 const C = {
-  ink: '#14212b',
+  ink: '#1b2a4a',
   muted: '#5a6a78',
   line: '#cfd8e0',
-  accent: '#0d7c76',
-  soft: '#f3f7f8',
+  accent: '#00a8c5',
+  orange: '#f5a623',
+  soft: '#f4fbfc',
   ok: '#1b7a3d',
   okBg: '#f0faf3',
   white: '#ffffff',
@@ -96,13 +97,12 @@ function companyHeader(doc, company, { badgeKind, badgeTitle }) {
   const m = PAGE.marginX;
   let y = 30;
 
-  // Logo tile (dark rounded square, like HTML)
-  const logoSize = 46;
-  doc.save().fillColor('#111111').roundedRect(m, y, logoSize, logoSize, 6).fill().restore();
+  const logoW = 150;
+  const logoH = 46;
   const logoBuf = brandImageBuffer(company.logoUrl, 'logo.png');
   if (logoBuf) {
     try {
-      doc.image(logoBuf, m + 4, y + 4, { fit: [logoSize - 8, logoSize - 8], align: 'center', valign: 'center' });
+      doc.image(logoBuf, m, y, { fit: [logoW, logoH], align: 'left', valign: 'center' });
     } catch {
       /* skip bad image */
     }
@@ -117,11 +117,11 @@ function companyHeader(doc, company, { badgeKind, badgeTitle }) {
   doc.text(badgeTitle, badgeX, doc.y + 2, { width: badgeW, align: 'right' });
 
   // Company block (center-left)
-  const coX = m + logoSize + 12;
+  const coX = m + logoW + 12;
   const coW = badgeX - coX - 14;
   let coY = y;
   coY = drawText(doc, esc(company.tradingName || company.legalName || 'Cres Dynamics Ltd'), {
-    x: coX, y: coY, width: coW, size: 13, bold: true, color: C.accent,
+    x: coX, y: coY, width: coW, size: 13, bold: true, color: C.ink,
   });
   if (company.tagline) {
     coY = drawText(doc, esc(company.tagline), { x: coX, y: coY + 1, width: coW, size: 7.5, color: C.muted });
@@ -139,7 +139,7 @@ function companyHeader(doc, company, { badgeKind, badgeTitle }) {
     { x: coX, y: coY + 1, width: coW, size: 8, bold: true, color: C.ink }
   );
 
-  const headerBottom = Math.max(doc.y, y + logoSize) + 8;
+  const headerBottom = Math.max(doc.y, y + logoH) + 8;
   hairline(doc, m, headerBottom, PAGE.width - m, C.accent, 2);
   return headerBottom + 10;
 }
@@ -198,6 +198,7 @@ async function paymentReceiptPdf(receipt) {
   const bill = receipt.billTo || {};
   const meta = receipt.meta || {};
   const bal = receipt.balance || {};
+  const pay = receipt.paymentInstructions || {};
   const auth = receipt.authorisedBy || {};
   const invoiced = receipt.invoicedBy || {};
   const outstandingRaw = Number(bal.outstandingRaw || 0);
@@ -305,6 +306,18 @@ async function paymentReceiptPdf(receipt) {
       y = drawText(doc, fullNote, { x: PAGE.marginX, y, width: USABLE, size: 8, color: C.muted, lineGap: 1.5 });
       y += 10;
 
+      const paybill = esc(pay.mpesaPaybill || c.mpesaPaybill || '542542');
+      const account = esc(pay.mpesaAccount || c.mpesaAccount || '43869');
+      const methodH = 38;
+      box(doc, { x: PAGE.marginX, y, w: USABLE, h: methodH, radius: 3, stroke: C.line });
+      drawText(doc, 'Payment method', {
+        x: PAGE.marginX + 10, y: y + 8, width: USABLE - 20, size: 8.5, bold: true, lineGap: 0,
+      });
+      drawText(doc, `M-Pesa: Paybill ${paybill} | Account: ${account}`, {
+        x: PAGE.marginX + 10, y: y + 20, width: USABLE - 20, size: 8, lineGap: 0,
+      });
+      y += methodH + 12;
+
       // Signatures
       y = signaturesBlock(
         doc,
@@ -328,8 +341,9 @@ async function paymentReceiptPdf(receipt) {
       );
 
       pageFooter(doc, [
-        esc(c.footer || 'Thank you for your payment. Cres Dynamics Ltd — cresdynamics.com'),
-        `${esc(c.legalName || 'Cres Dynamics Ltd')} | ${esc(c.taxLabel || 'KRA PIN')}: ${esc(c.taxId || '')}`,
+        esc(c.footer || 'Thank you for your payment. Building Intelligent Systems that Run Your Business — cresdynamics.com'),
+        `${esc(c.legalName || 'Cres Dynamics Ltd')} | ${esc(c.tagline || 'Building Intelligent Systems that Run Your Business')}`,
+        `${esc(c.taxLabel || 'KRA PIN')}: ${esc(c.taxId || '')}`,
       ]);
     },
     { title: `Payment receipt ${receipt.documentNumber || ''}` }
@@ -519,9 +533,11 @@ async function invoicePdf(receipt) {
 
       // Payment instructions
       const bullets = [];
-      if (pay.mpesaPaybill) {
-        bullets.push(`M-Pesa: Paybill ${esc(pay.mpesaPaybill)} | Account: ${esc(pay.mpesaAccount || '')}`);
-      }
+      bullets.push(
+        `M-Pesa: Paybill ${esc(pay.mpesaPaybill || c.mpesaPaybill || '542542')} | Account: ${esc(
+          pay.mpesaAccount || c.mpesaAccount || '43869'
+        )}`
+      );
       bullets.push(
         `Bank Transfer: ${esc(pay.bankName || c.bankName || '')} | Account Name: ${esc(
           pay.bankAccountName || c.bankAccountName || ''
@@ -579,7 +595,7 @@ async function invoicePdf(receipt) {
       );
 
       pageFooter(doc, [
-        esc(c.footer || 'Thank you for your business. Cres Dynamics Ltd — cresdynamics.com'),
+        esc(c.footer || 'Thank you for your business. Building Intelligent Systems that Run Your Business — cresdynamics.com'),
         `${esc(c.legalName || 'Cres Dynamics Ltd')} | ${esc(c.tagline || '')}`,
         `${(c.addressLines || []).join(' · ')}${c.email ? ` | ${c.email}` : ''}${c.website ? ` | ${c.website}` : ''} | ${esc(c.taxLabel || 'KRA PIN')}: ${esc(c.taxId || '')}`,
       ]);

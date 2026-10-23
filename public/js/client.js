@@ -11,14 +11,11 @@ const CresClient = (() => {
   }
 
   function fmtDate(v) {
-    if (!v) return '-';
-    return new Date(v).toLocaleDateString();
+    return CresFormat.date(v);
   }
 
   function fmtMoney(n) {
-    const num = Number(n);
-    if (Number.isNaN(num)) return '-';
-    return num.toLocaleString('en-KE', { style: 'currency', currency: 'KES' });
+    return CresFormat.money(n);
   }
 
   function statusPill(s) {
@@ -74,7 +71,7 @@ const CresClient = (() => {
             </table>
           </div>
           <p style="margin-top:12px;color:var(--text-muted);font-size:0.85rem;">
-            Status only - invoices are under Invoices. Questions go through your Sales contact (email), not Community chat.
+            Open a project to message Sales or the PM, or request a change. Invoices are under Invoices.
           </p>
         </div>`;
 
@@ -140,6 +137,7 @@ const CresClient = (() => {
               ? `<p style="margin:10px 0 0;"><a class="btn btn-primary btn-sm" href="${esc(p.preview_url)}" target="_blank" rel="noopener">Open project preview</a></p>`
               : ''
           }
+          ${p.due_date ? `<p class="meta" style="margin:8px 0 0;">Due ${fmtDate(p.due_date)}</p>` : ''}
         </div>
         <div id="client-signoff-flash" class="flash"></div>
         ${
@@ -175,6 +173,7 @@ const CresClient = (() => {
             }
           </ol>
         </div>
+        <div id="client-project-extras"></div>
         <div class="settings-section" style="max-width:640px;">
           <h3>Shared documents</h3>
           <ul class="engagement-list">
@@ -196,6 +195,23 @@ const CresClient = (() => {
       document.getElementById('client-project-back')?.addEventListener('click', () => {
         location.hash = '#/projects';
       });
+
+      const extras = document.getElementById('client-project-extras');
+      if (extras && typeof CresProjectDetail !== 'undefined') {
+        await CresProjectDetail.mountExtras(extras, {
+          id: projectId,
+          project: p,
+          meta: { canUseThread: true },
+          user: CresAPI.getUser(),
+          onRefresh: () => mountProjects(projectId),
+          showContact: false,
+          showMoney: false,
+          allowMessages: true,
+          allowDecide: false,
+          allowBlocked: false,
+          allowChangeForm: true,
+        });
+      }
 
       detail.querySelectorAll('[data-signoff]').forEach((btn) => {
         btn.addEventListener('click', async () => {
@@ -236,16 +252,42 @@ const CresClient = (() => {
     const invBody = document.getElementById('client-invoices-tbody');
     invBody.innerHTML = invoices.data.length
       ? invoices.data
-          .map(
-            (i) => `<tr>
+          .map((i) => {
+            const unpaid = ['issued', 'partially_paid', 'overdue'].includes(i.status);
+            const due = Math.max(0, Number(i.amount || 0) - Number(i.amount_paid || 0));
+            const payBtn = unpaid
+              ? `<button type="button" class="btn btn-primary btn-sm" data-pay="${esc(i.id)}" data-due="${esc(due)}" data-claimed="${esc(i.mpesa_claim_code || '')}">${
+                  i.mpesa_claim_code ? 'Update M-Pesa code' : 'Pay with M-Pesa'
+                }</button>`
+              : '—';
+            return `<tr>
               <td>${esc(i.project_name || '-')}</td>
               <td>${fmtMoney(i.amount)}</td>
-              <td>${statusPill(i.status)}</td>
+              <td>${statusPill(i.status)}${
+                i.mpesa_claim_code && unpaid
+                  ? `<div class="meta">Code sent ${esc(i.mpesa_claim_code)}</div>`
+                  : ''
+              }</td>
               <td>${fmtDate(i.created_at)}</td>
-            </tr>`
-          )
+              <td>${payBtn}</td>
+            </tr>`;
+          })
           .join('')
-      : '<tr><td colspan="4" class="empty-state">No invoices yet.</td></tr>';
+      : '<tr><td colspan="5" class="empty-state">No invoices yet.</td></tr>';
+
+    const mpesaPanel = document.getElementById('client-mpesa-panel');
+    invBody.querySelectorAll('[data-pay]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (!mpesaPanel) return;
+        mpesaPanel.hidden = false;
+        mpesaPanel.dataset.invoiceId = btn.dataset.pay;
+        const amountEl = document.getElementById('mpesa-amount');
+        if (amountEl) amountEl.textContent = fmtMoney(btn.dataset.due);
+        const codeEl = document.getElementById('mpesa-code');
+        if (codeEl) codeEl.value = btn.dataset.claimed || '';
+        mpesaPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    });
 
     const docsList = document.getElementById('client-docs-list');
     docsList.innerHTML = docs.data.length
@@ -266,7 +308,7 @@ const CresClient = (() => {
     if (formWrap) formWrap.hidden = !isClient;
     const heroP = document.querySelector('#face-changes .face-hero p');
     if (heroP && !isClient) {
-      heroP.textContent = 'Client-submitted scope change requests. Respond offline or via Sales follow-up.';
+      heroP.textContent = 'Open a request to see what the client asked for.';
     }
 
     const list = await CresAPI.request('/api/client/change-requests');
@@ -320,9 +362,26 @@ const CresClient = (() => {
     await mountChanges({ role: 'client' });
   }
 
+  async function submitMpesa(e) {
+    e.preventDefault();
+    const panel = document.getElementById('client-mpesa-panel');
+    const invoiceId = panel?.dataset.invoiceId;
+    if (!invoiceId) throw new Error('Choose an invoice first');
+    const code = document.getElementById('mpesa-code').value.trim();
+    await CresAPI.request(`/api/client/invoices/${invoiceId}/mpesa`, {
+      method: 'POST',
+      body: { code },
+    });
+    flash(document.getElementById('client-mpesa-flash'), 'Code sent to Finance. They will confirm the payment.');
+    await mountInvoices();
+  }
+
   function bind() {
     document.getElementById('change-request-form')?.addEventListener('submit', (e) =>
       submitChangeRequest(e).catch((err) => flash(document.getElementById('changes-flash'), err.message, false))
+    );
+    document.getElementById('client-mpesa-form')?.addEventListener('submit', (e) =>
+      submitMpesa(e).catch((err) => flash(document.getElementById('client-mpesa-flash'), err.message, false))
     );
   }
 

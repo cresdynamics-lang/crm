@@ -16,14 +16,11 @@ const CresFinance = (() => {
   }
 
   function fmtDate(v) {
-    if (!v) return '-';
-    return new Date(v).toLocaleString();
+    return CresFormat.datetime(v);
   }
 
   function fmtMoney(n) {
-    const num = Number(n);
-    if (Number.isNaN(num)) return '-';
-    return num.toLocaleString('en-KE', { style: 'currency', currency: 'KES' });
+    return CresFormat.money(n);
   }
 
   function statusPill(s) {
@@ -89,7 +86,7 @@ const CresFinance = (() => {
         data: {
           labels: d.cashFlowChart.labels,
           datasets: [
-            { label: 'Money in', data: d.cashFlowChart.moneyIn, backgroundColor: 'rgba(31,167,160,0.65)', borderRadius: 6 },
+            { label: 'Money in', data: d.cashFlowChart.moneyIn, backgroundColor: 'rgba(0,168,197,0.65)', borderRadius: 6 },
             { label: 'Money out', data: d.cashFlowChart.moneyOut, backgroundColor: 'rgba(224,90,90,0.55)', borderRadius: 6 },
           ],
         },
@@ -103,7 +100,7 @@ const CresFinance = (() => {
           labels: d.expenseBreakdown.labels.length ? d.expenseBreakdown.labels : ['None'],
           datasets: [{
             data: d.expenseBreakdown.values.length ? d.expenseBreakdown.values : [1],
-            backgroundColor: ['#1fa7a0', '#5a96dc', '#d4a017', '#e05a5a'],
+            backgroundColor: ['#00a8c5', '#5a96dc', '#f5a623', '#e05a5a'],
           }],
         },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#8b9aab' } } } },
@@ -197,8 +194,12 @@ const CresFinance = (() => {
           <td>${fmtMoney(i.amount)}</td>
           <td>${fmtMoney(i.amount_paid || 0)}</td>
           <td>${fmtMoney(invoiceBalance(i))}</td>
-          <td>${i.due_date ? new Date(i.due_date).toLocaleDateString() : '-'}</td>
-          <td>${statusPill(i.status)}</td>
+          <td>${i.due_date ? CresFormat.date(i.due_date) : '-'}</td>
+          <td>${statusPill(i.status)}${
+            i.mpesa_claim_code && i.status !== 'paid'
+              ? `<div class="meta">M-Pesa ${esc(i.mpesa_claim_code)}</div>`
+              : ''
+          }</td>
         </tr>`
       )
       .join('');
@@ -223,6 +224,15 @@ const CresFinance = (() => {
             </div>`
           : ''
       }
+      ${
+        i.mpesa_claim_code && i.status !== 'paid'
+          ? `<div class="flash visible ok" style="margin-bottom:14px;">
+              Client sent M-Pesa code <strong>${esc(i.mpesa_claim_code)}</strong>${
+                i.mpesa_claimed_at ? ` on ${CresFormat.datetime(i.mpesa_claimed_at)}` : ''
+              }. Record the payment when you confirm it in M-Pesa.
+            </div>`
+          : ''
+      }
       <div class="form-grid" style="margin-bottom:14px;">
         <div><strong>Number</strong><div>${esc(i.invoice_number || '-')}</div></div>
         <div><strong>Client</strong><div>${esc(i.client_name || '-')} ${i.client_email ? `&lt;${esc(i.client_email)}&gt;` : ''}</div></div>
@@ -230,8 +240,8 @@ const CresFinance = (() => {
         <div><strong>Amount</strong><div>${fmtMoney(i.amount)}</div></div>
         <div><strong>Paid</strong><div>${fmtMoney(i.amount_paid || 0)}</div></div>
         <div><strong>Balance</strong><div>${fmtMoney(balance)}</div></div>
-        <div><strong>Issue date</strong><div>${i.issue_date ? new Date(i.issue_date).toLocaleDateString() : fmtDate(i.created_at)}</div></div>
-        <div><strong>Due date</strong><div>${i.due_date ? new Date(i.due_date).toLocaleDateString() : '-'}</div></div>
+        <div><strong>Issue date</strong><div>${i.issue_date ? CresFormat.date(i.issue_date) : fmtDate(i.created_at)}</div></div>
+        <div><strong>Due date</strong><div>${i.due_date ? CresFormat.date(i.due_date) : '-'}</div></div>
         <div><strong>Status</strong><div>${statusPill(i.status)}</div></div>
         <div><strong>Auto-sent</strong><div>${i.auto_sent_at ? fmtDate(i.auto_sent_at) : 'Never'}</div></div>
       </div>
@@ -346,8 +356,15 @@ const CresFinance = (() => {
         } else {
           summary.innerHTML = `<strong>${esc(i.client_business || i.client_name || 'Client')}</strong>
             <div class="meta">${esc(i.client_name || '')} · ${esc(i.client_email)} ${i.client_phone ? `· ${esc(i.client_phone)}` : ''}</div>
-            <div style="margin-top:6px;"><span class="status-pill paid">Client found in CRM</span></div>`;
+            <div style="margin-top:6px;"><span class="status-pill paid">Client found in CRM</span>
+              ${i.client_id ? ` <button type="button" class="btn btn-ghost btn-sm" data-open-pay-client="${esc(i.client_id)}">Client card</button>` : ''}
+            </div>`;
           if (addBtn) addBtn.hidden = true;
+          summary.querySelector('[data-open-pay-client]')?.addEventListener('click', () => {
+            if (typeof CresClientCard !== 'undefined') {
+              CresClientCard.open(i.client_id).catch(console.error);
+            }
+          });
         }
       }
     } catch (err) {
@@ -486,7 +503,7 @@ const CresFinance = (() => {
     const paid_at = document.getElementById('pay-date').value || undefined;
     const bank_reference = document.getElementById('pay-bank-ref').value.trim();
     if (!bank_reference) {
-      flash(document.getElementById('payments-flash'), 'Bank reference is required', false);
+      flash(document.getElementById('payments-flash'), 'M-Pesa code / bank ref is required', false);
       return;
     }
 
@@ -510,7 +527,13 @@ const CresFinance = (() => {
 
     const res = await CresAPI.request('/api/payments', {
       method: 'POST',
-      body: { invoice_id, amount, paid_at, bank_reference },
+      body: {
+        invoice_id,
+        amount,
+        paid_at,
+        bank_reference,
+        method: document.getElementById('pay-method')?.value || 'bank',
+      },
       idempotencyKey: `pay-${invoice_id}-${amount}-${bank_reference}-${paid_at || 'now'}`,
     });
     const data = res.data || {};
@@ -522,7 +545,7 @@ const CresFinance = (() => {
       msg += ` WARNING: receipt email failed (${data.receipt_email_error}).`;
     }
     if (data.residualInvoice) {
-      msg += ` New balance invoice ${fmtMoney(data.residualInvoice.amount)} issued and emailed (due ${data.residualInvoice.due_date ? new Date(data.residualInvoice.due_date).toLocaleDateString() : '-'}).`;
+      msg += ` New balance invoice ${fmtMoney(data.residualInvoice.amount)} issued and emailed (due ${data.residualInvoice.due_date ? CresFormat.date(data.residualInvoice.due_date) : '-'}).`;
     } else if (data.receipt_emailed) {
       msg += ' Invoice paid in full.';
     }
@@ -566,7 +589,7 @@ const CresFinance = (() => {
       ? hist.data
           .map(
             (m) => `<li>
-              <div class="meta">${new Date(m.created_at).toLocaleString()} · ${esc(m.status)} · to ${esc(m.to_email)}${m.sender_name ? ` · from ${esc(m.sender_name)}` : ''}</div>
+              <div class="meta">${CresFormat.datetime(m.created_at)} · ${esc(m.status)} · to ${esc(m.to_email)}${m.sender_name ? ` · from ${esc(m.sender_name)}` : ''}</div>
               <strong>${esc(m.subject)}</strong>
               <div style="margin-top:4px;color:var(--text-muted);font-size:0.85rem;">${esc((m.body || '').slice(0, 160))}${(m.body || '').length > 160 ? '…' : ''}</div>
             </li>`
@@ -597,9 +620,11 @@ const CresFinance = (() => {
   async function mountExpenses() {
     const me = CresAPI.getUser();
     const cat = document.getElementById('exp-category')?.value;
+    const klass = document.getElementById('exp-class')?.value;
     const status = document.getElementById('exp-approval-filter')?.value;
     const params = new URLSearchParams();
     if (cat) params.set('category', cat);
+    if (klass) params.set('class', klass);
     if (status) params.set('approval_status', status);
     const qs = params.toString() ? `?${params}` : '';
     const res = await CresAPI.request(`/api/expenses${qs}`);
@@ -608,52 +633,64 @@ const CresFinance = (() => {
     if (copy) {
       if (me?.role === 'director') {
         copy.textContent =
-          'Submit an expense → Finance approves → Admin approves. Only then can the transaction proceed.';
+          'Submit an expense. Finance approves. Admin only reviews amounts above the threshold.';
       } else if (me?.role === 'finance') {
         copy.textContent =
-          'Approve Director expenses to escalate to Admin. Print/send receipts only after Admin approval.';
+          'Approve Director expenses. Admin is only needed above the threshold. Receipts unlock after approval.';
       } else if (me?.role === 'admin') {
         copy.textContent =
-          'Final approval for expenses escalated by Finance. Approval unlocks the transaction and receipts.';
+          'Your expenses are auto-approved. Amounts above the threshold still need your sign-off after Finance.';
       }
     }
 
     const canFinanceApprove = me?.role === 'finance' || me?.role === 'admin';
     const canAdminApprove = me?.role === 'admin';
 
-    tbody.innerHTML = res.data.length
-      ? res.data
-          .map((x) => {
-            const st = x.approval_status || 'approved';
-            let actions = '';
-            if (
-              canFinanceApprove &&
-              me.role === 'finance' &&
-              (st === 'pending_finance' || st === 'pending')
-            ) {
-              actions = `<button type="button" class="btn btn-primary btn-sm" data-fin-exp="${esc(x.id)}">Approve → Admin</button>
-                <button type="button" class="btn btn-ghost btn-sm" data-rej-exp="${esc(x.id)}">Reject</button>`;
-            } else if (canAdminApprove && (st === 'pending_admin' || st === 'pending')) {
-              actions = `<button type="button" class="btn btn-primary btn-sm" data-adm-exp="${esc(x.id)}">Final approve</button>
-                <button type="button" class="btn btn-ghost btn-sm" data-rej-exp="${esc(x.id)}">Reject</button>`;
-            } else if (st === 'approved' && ['finance', 'admin'].includes(me?.role)) {
-              actions = `<button type="button" class="btn btn-ghost btn-sm" data-print-exp="${esc(x.id)}">Download</button>
-                <button type="button" class="btn btn-ghost btn-sm" data-send-exp="${esc(x.id)}">Send</button>`;
-            } else {
-              actions = '<span class="meta">—</span>';
-            }
-            return `<tr>
-              <td>${statusPill(x.category)}</td>
-              <td>${fmtMoney(x.amount)}</td>
-              <td>${esc(x.description || '-')}</td>
-              <td>${statusPill(st)}</td>
-              <td>${esc(x.created_by_name || '-')} <span class="role-tag">(${esc(x.created_by_role || '-')})</span></td>
-              <td>${fmtDate(x.created_at)}</td>
-              <td class="toolbar" style="gap:4px;flex-wrap:wrap;">${actions}</td>
-            </tr>`;
-          })
-          .join('')
-      : `<tr><td colspan="7" class="empty-state">No expenses yet.</td></tr>`;
+    function expenseRow(x) {
+      const st = x.approval_status || 'approved';
+      let actions = '';
+      if (
+        canFinanceApprove &&
+        me.role === 'finance' &&
+        (st === 'pending_finance' || st === 'pending')
+      ) {
+        actions = `<button type="button" class="btn btn-primary btn-sm" data-fin-exp="${esc(x.id)}">Approve</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-rej-exp="${esc(x.id)}">Reject</button>`;
+      } else if (canAdminApprove && (st === 'pending_admin' || st === 'pending')) {
+        actions = `<button type="button" class="btn btn-primary btn-sm" data-adm-exp="${esc(x.id)}">Final approve</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-rej-exp="${esc(x.id)}">Reject</button>`;
+      } else if (st === 'approved' && ['finance', 'admin'].includes(me?.role)) {
+        actions = `<button type="button" class="btn btn-ghost btn-sm" data-print-exp="${esc(x.id)}">Download</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-send-exp="${esc(x.id)}">Send</button>`;
+      } else {
+        actions = '<span class="meta">—</span>';
+      }
+      const kind = x.expense_class === 'internal' ? 'Internal' : 'External';
+      return `<tr>
+        <td><span class="meta">${esc(kind)}</span><div>${statusPill(x.category)}</div></td>
+        <td>${fmtMoney(x.amount)}</td>
+        <td>${esc(x.description || '-')}</td>
+        <td>${statusPill(st)}</td>
+        <td>${esc(x.created_by_name || '-')} <span class="role-tag">(${esc(x.created_by_role || '-')})</span></td>
+        <td>${fmtDate(x.created_at)}</td>
+        <td class="toolbar" style="gap:4px;flex-wrap:wrap;">${actions}</td>
+      </tr>`;
+    }
+
+    const items = res.data || [];
+    if (!items.length) {
+      tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No expenses yet.</td></tr>`;
+    } else if (me?.role === 'admin' && !klass) {
+      const internal = items.filter((x) => x.expense_class === 'internal');
+      const external = items.filter((x) => x.expense_class !== 'internal');
+      const section = (title, rows) =>
+        `<tr><td colspan="7" style="font-weight:600;background:var(--bg-soft);">${esc(title)} · ${rows.length}</td></tr>` +
+        (rows.length ? rows.map(expenseRow).join('') : `<tr><td colspan="7" class="empty-state">None</td></tr>`);
+      tbody.innerHTML =
+        section('Internal (salaries, hosting)', internal) + section('External', external);
+    } else {
+      tbody.innerHTML = items.map(expenseRow).join('');
+    }
 
     tbody.querySelectorAll('[data-fin-exp]').forEach((btn) => {
       btn.addEventListener('click', async () => {
@@ -663,7 +700,7 @@ const CresFinance = (() => {
             body: {},
             idempotencyKey: `exp-fin-${btn.dataset.finExp}-${Date.now()}`,
           });
-          flash(document.getElementById('expenses-flash'), 'Escalated to Admin');
+          flash(document.getElementById('expenses-flash'), 'Expense approved');
           await mountExpenses();
         } catch (err) {
           flash(document.getElementById('expenses-flash'), err.message, false);
@@ -750,7 +787,7 @@ const CresFinance = (() => {
             const actions = isAdmin
               ? `<button type="button" class="btn btn-primary btn-sm" data-money-adm-exp="${esc(x.id)}">Final approve</button>
                  <button type="button" class="btn btn-ghost btn-sm" data-money-rej-exp="${esc(x.id)}">Reject</button>`
-              : `<button type="button" class="btn btn-primary btn-sm" data-money-fin-exp="${esc(x.id)}">Approve → Admin</button>
+              : `<button type="button" class="btn btn-primary btn-sm" data-money-fin-exp="${esc(x.id)}">Approve</button>
                  <button type="button" class="btn btn-ghost btn-sm" data-money-rej-exp="${esc(x.id)}">Reject</button>`;
             return `<tr>
               <td>${esc(x.category)}</td>
@@ -806,7 +843,7 @@ const CresFinance = (() => {
             body: {},
             idempotencyKey: `money-fin-exp-${btn.dataset.moneyFinExp}-${Date.now()}`,
           });
-          flash(flashEl, 'Expense approved — escalated to Admin');
+          flash(flashEl, 'Expense approved');
           await mountMoneyApprovals();
         } catch (err) {
           flash(flashEl, err.message, false);
@@ -1058,7 +1095,7 @@ const CresFinance = (() => {
     const rows = (d.ledger || [])
       .map(
         (r) => `<tr>
-          <td>${esc(new Date(r.occurred_at).toLocaleString())}</td>
+          <td>${esc(CresFormat.datetime(r.occurred_at))}</td>
           <td>${esc(r.direction)}</td>
           <td>${esc(r.kind)}</td>
           <td style="text-align:right;">${esc(money(r.amount))}</td>
@@ -1084,7 +1121,7 @@ const CresFinance = (() => {
   @media print{body{margin:12px;} .kpis{grid-template-columns:repeat(4,1fr);}}
 </style></head><body>
   <h1>Cres Dynamics — Financial cash flow</h1>
-  <div class="sub">Period ${esc(d.period.from)} → ${esc(d.period.to)} · Generated ${esc(new Date(d.generated_at).toLocaleString())}</div>
+  <div class="sub">Period ${esc(d.period.from)} → ${esc(d.period.to)} · Generated ${esc(CresFormat.datetime(d.generated_at))}</div>
   <div class="kpis">
     <div class="kpi"><span>Money in</span><strong>${esc(money(d.summary.money_in))}</strong></div>
     <div class="kpi"><span>Money out</span><strong>${esc(money(d.summary.money_out))}</strong></div>
@@ -1195,7 +1232,7 @@ const CresFinance = (() => {
           <td>${p.invoice_amount != null ? fmtMoney(p.invoice_amount) : '—'}</td>
           <td>${p.invoice_id ? fmtMoney(p.amount_paid) : '—'}</td>
           <td>${p.invoice_id ? fmtMoney(p.balance_due) : '—'}</td>
-          <td>${p.due_date ? new Date(p.due_date).toLocaleDateString() : '—'}</td>
+          <td>${p.due_date ? CresFormat.date(p.due_date) : '—'}</td>
           <td>${p.invoice_status ? statusPill(p.invoice_status) : statusPill(p.status)}</td>
         </tr>`
       )
@@ -1220,6 +1257,73 @@ const CresFinance = (() => {
     if (!btn) return;
 
     let stream = null, recorder = null, chunks = [], timerInterval = null, seconds = 0;
+    const pauseBtn = document.getElementById('btn-vp-pause');
+
+    function resetTimer() {
+      if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+      seconds = 0;
+      timer.textContent = '00:00';
+      if (pauseBtn) { pauseBtn.style.display = 'none'; pauseBtn.textContent = 'Pause'; }
+    }
+    function startTimer() {
+      seconds = 0;
+      timer.textContent = '00:00';
+      if (pauseBtn) {
+        pauseBtn.style.display = '';
+        pauseBtn.textContent = 'Pause';
+        pauseBtn.onclick = () => {
+          if (recorder?.state === 'recording') {
+            timerInterval = null;
+            recorder.pause();
+            pauseBtn.textContent = 'Resume';
+          } else if (recorder?.state === 'paused') {
+            recorder.resume();
+            pauseBtn.textContent = 'Pause';
+            timerInterval = setInterval(() => {
+              seconds++;
+              const m = String(Math.floor(seconds / 60)).padStart(2, '0');
+              const s = String(seconds % 60).padStart(2, '0');
+              timer.textContent = `${m}:${s}`;
+            }, 1000);
+          }
+        };
+      }
+      timerInterval = setInterval(() => {
+        seconds++;
+        const m = String(Math.floor(seconds / 60)).padStart(2, '0');
+        const s = String(seconds % 60).padStart(2, '0');
+        timer.textContent = `${m}:${s}`;
+      }, 1000);
+    }
+
+    async function reparsePayment() {
+      const text = String(transcriptText.value || '').trim();
+      if (!text) return;
+      const reBtn = document.getElementById('btn-vp-reparse');
+      if (reBtn) { reBtn.disabled = true; reBtn.textContent = 'Re-parsing...'; }
+      try {
+        const res = await CresAPI.request('/api/payments/voice-capture', {
+          method: 'POST',
+          body: { text },
+          idempotencyKey: `vp-reparse-${Date.now()}`,
+        });
+        if (!res.ok) throw new Error(res.error?.message || 'Re-parse failed');
+        transcriptText.value = res.data.transcript || text;
+        document.getElementById('vp-amount').value = res.data.amount || '';
+        document.getElementById('vp-client').value = res.data.client_name || '';
+        document.getElementById('vp-project').value = res.data.project_name || '';
+        document.getElementById('vp-bank-ref').value = res.data.bank_reference || '';
+        document.getElementById('vp-description').value = res.data.description || '';
+        previewSection.dataset.clientId = res.data.client_id || '';
+        previewSection.dataset.projectId = res.data.project_id || '';
+        previewSection.dataset.invoiceId = res.data.invoice_id || '';
+        flash(document.getElementById('payments-flash'), 'Re-parsed from your corrected text — review and confirm', true);
+      } catch (err) {
+        flash(document.getElementById('payments-flash'), err.message, false);
+      } finally {
+        if (reBtn) { reBtn.disabled = false; reBtn.textContent = 'Re-parse edited text'; }
+      }
+    }
 
     btn.addEventListener('click', async () => {
       if (recorder && recorder.state === 'recording') {
@@ -1227,6 +1331,7 @@ const CresFinance = (() => {
         btn.textContent = 'Speak payment';
         btn.classList.remove('btn-danger');
         clearInterval(timerInterval);
+        resetTimer();
         const blob = await new Promise((res) => {
           recorder.onstop = () => { stream?.getTracks().forEach((t) => t.stop()); res(new Blob(chunks, { type: 'audio/webm' })); };
           recorder.stop();
@@ -1241,7 +1346,7 @@ const CresFinance = (() => {
           const res = await CresAPI.request('/api/payments/voice-capture', { method: 'POST', body: fd });
 
           transcriptSection.style.display = '';
-          transcriptText.textContent = res.data.transcript || '';
+          transcriptText.value = res.data.transcript || '';
 
           previewSection.style.display = '';
           document.getElementById('vp-amount').value = res.data.amount || '';
@@ -1269,8 +1374,8 @@ const CresFinance = (() => {
         recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
         recorder.start();
         btn.textContent = 'Stop'; btn.classList.add('btn-danger');
-        seconds = 0; timer.style.display = '';
-        timerInterval = setInterval(() => { seconds++; const m = String(Math.floor(seconds / 60)).padStart(2, '0'); const s = String(seconds % 60).padStart(2, '0'); timer.textContent = `${m}:${s}`; }, 1000);
+        timer.style.display = '';
+        startTimer();
         transcriptSection.style.display = 'none';
         previewSection.style.display = 'none';
       } catch { /* mic denied */ }
@@ -1298,6 +1403,8 @@ const CresFinance = (() => {
       previewSection.style.display = 'none';
       transcriptSection.style.display = 'none';
     });
+
+    document.getElementById('btn-vp-reparse')?.addEventListener('click', reparsePayment);
   }
 
   function bind() {
@@ -1593,6 +1700,7 @@ const CresFinance = (() => {
       });
     });
     document.getElementById('exp-category')?.addEventListener('change', () => mountExpenses());
+    document.getElementById('exp-class')?.addEventListener('change', () => mountExpenses());
     document.getElementById('exp-approval-filter')?.addEventListener('change', () => mountExpenses());
   }
 

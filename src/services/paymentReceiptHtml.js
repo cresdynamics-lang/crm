@@ -17,6 +17,7 @@ function buildPaymentReceiptHtml(receipt, { publicBaseUrl = '', embedImages = tr
   const bill = receipt.billTo || {};
   const meta = receipt.meta || {};
   const bal = receipt.balance || {};
+  const pay = receipt.paymentInstructions || {};
   const auth = receipt.authorisedBy || {};
   const invoiced = receipt.invoicedBy || {};
   const embedOpts = { embed: embedImages };
@@ -46,13 +47,13 @@ function buildPaymentReceiptHtml(receipt, { publicBaseUrl = '', embedImages = tr
 <title>${esc(receipt.documentNumber || 'Payment receipt')} — Cres Dynamics Ltd</title>
 <style>
   @page { size: A4; margin: 12mm; }
-  :root { --ink:#14212b; --muted:#5a6a78; --line:#cfd8e0; --accent:#0d7c76; --soft:#f3f7f8; --ok:#1b7a3d; }
+  :root { --ink:#1b2a4a; --muted:#5a6a78; --line:#cfd8e0; --accent:#00a8c5; --orange:#f5a623; --soft:#f4fbfc; --ok:#1b7a3d; }
   * { box-sizing:border-box; }
   body { margin:0; padding:0; font-family:"Segoe UI","Helvetica Neue",Arial,sans-serif; font-size:12px; color:var(--ink); background:#fff; }
   .page { max-width:190mm; margin:0 auto; padding:10px 6px; }
   .header { display:flex; gap:14px; align-items:flex-start; border-bottom:2px solid var(--accent); padding-bottom:8px; margin-bottom:12px; }
-  .logo { width:52px; height:52px; object-fit:contain; background:#111; border-radius:8px; padding:4px; }
-  .co h1 { margin:0; font-size:16px; color:var(--accent); }
+  .logo { height:52px; width:auto; max-width:200px; object-fit:contain; background:transparent; }
+  .co h1 { margin:0; font-size:16px; color:var(--ink); }
   .co .tag { color:var(--muted); font-size:10px; margin-top:2px; }
   .co .addr { margin-top:4px; color:var(--muted); font-size:10px; }
   .badge { margin-left:auto; text-align:right; }
@@ -73,6 +74,9 @@ function buildPaymentReceiptHtml(receipt, { publicBaseUrl = '', embedImages = tr
   .balance .label { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
   .balance .value { font-size:18px; font-weight:700; margin-top:4px; color:${isNil ? 'var(--ok)' : 'var(--accent)'}; }
   .note { color:var(--muted); font-size:11px; margin-bottom:14px; }
+  .pay { border:1px solid var(--line); border-radius:4px; padding:8px 10px; margin-bottom:14px; }
+  .pay h3 { margin:0 0 6px; font-size:11px; }
+  .pay ul { margin:0; padding-left:16px; }
   .auth { display:flex; justify-content:space-between; gap:24px; align-items:flex-end; padding-top:10px; border-top:1px solid var(--line); }
   .sig { flex:1; max-width:48%; }
   .sig .label { font-size:9px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-bottom:4px; }
@@ -113,6 +117,7 @@ function buildPaymentReceiptHtml(receipt, { publicBaseUrl = '', embedImages = tr
         <h3>Payment details</h3>
         <div><strong>Amount received:</strong> ${esc(bal.paymentFormatted || meta.paymentAmount || '-')}</div>
         <div><strong>Date:</strong> ${esc(meta.paidAt || '-')}</div>
+        <div><strong>Payment method:</strong> M-Pesa Paybill ${esc(pay.mpesaPaybill || c.mpesaPaybill || '542542')} · Account ${esc(pay.mpesaAccount || c.mpesaAccount || '43869')}</div>
         <div><strong>Bank reference:</strong> ${esc(meta.bankReference || '-')}</div>
         <div><strong>Invoice:</strong> ${esc(meta.invoiceNumber || meta.invoiceId || '-')}</div>
         <div><strong>Project:</strong> ${esc(meta.project || '-')}</div>
@@ -148,6 +153,15 @@ function buildPaymentReceiptHtml(receipt, { publicBaseUrl = '', embedImages = tr
       ${c.paymentNote ? `<br/>${esc(c.paymentNote)}` : ''}
     </div>
 
+    <div class="pay">
+      <h3>Payment method</h3>
+      <ul>
+        <li><strong>M-Pesa:</strong> Paybill ${esc(pay.mpesaPaybill || c.mpesaPaybill || '542542')} | Account: ${esc(
+          pay.mpesaAccount || c.mpesaAccount || '43869'
+        )}</li>
+      </ul>
+    </div>
+
     <div class="auth">
       <div class="sig">
         <div class="label">Invoiced / recorded by</div>
@@ -172,8 +186,9 @@ function buildPaymentReceiptHtml(receipt, { publicBaseUrl = '', embedImages = tr
     </div>
 
     <div class="foot">
-      ${esc(c.footer || 'Thank you for your payment. Cres Dynamics Ltd — cresdynamics.com')}<br/>
-      ${esc(c.legalName || 'Cres Dynamics Ltd')} | ${esc(c.taxLabel || 'KRA PIN')}: ${esc(c.taxId || '')}
+      ${esc(c.footer || 'Thank you for your payment. Building Intelligent Systems that Run Your Business — cresdynamics.com')}<br/>
+      ${esc(c.legalName || 'Cres Dynamics Ltd')} | ${esc(c.tagline || 'Building Intelligent Systems that Run Your Business')}<br/>
+      ${esc(c.taxLabel || 'KRA PIN')}: ${esc(c.taxId || '')}
     </div>
   </div>
 </body></html>`;

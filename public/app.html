@@ -4,11 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cres Dynamics CRM</title>
+  <link rel="icon" href="/brand/logo-mark.png?v=20261023" type="image/png" />
+  <link rel="apple-touch-icon" href="/brand/logo-mark.png?v=20261023" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/tokens.css" />
-  <link rel="stylesheet" href="/css/shell.css" />
+  <link rel="stylesheet" href="/css/tokens.css?v=20261023" />
+  <link rel="stylesheet" href="/css/shell.css?v=20261023" />
   <link rel="stylesheet" href="/css/community.css" />
   <link rel="stylesheet" href="/css/sales.css" />
 </head>
@@ -16,13 +18,9 @@
   <div class="app-shell" id="app-shell">
     <div class="drawer-overlay" id="drawer-overlay"></div>
     <aside class="sidebar" id="sidebar">
-      <div class="sidebar-brand">
-        <div class="mark">CD</div>
-        <div>
-          <div class="name">Cres Dynamics</div>
-          <span class="sub">Operating System</span>
-        </div>
-      </div>
+      <a class="sidebar-brand" href="#/" aria-label="Cres Dynamics home">
+        <img class="brand-logo" src="/brand/logo.png?v=20261023" alt="CRES Dynamics" />
+      </a>
       <ul class="nav-list" id="nav-list"></ul>
     </aside>
 
@@ -57,16 +55,17 @@
           <div id="notif-list"></div>
         </div>
 
-        <button type="button" class="profile-btn" id="profile-btn" aria-haspopup="true">
-          <span class="avatar" id="profile-avatar">?</span>
-          <span class="profile-meta">
-            <span class="pname" id="profile-name">-</span>
-            <span class="prole" id="profile-role">-</span>
-          </span>
-        </button>
-        <div class="dropdown" id="profile-dropdown">
-          <a href="#/settings">Settings</a>
-          <button type="button" id="logout-btn">Logout</button>
+        <div class="profile-wrap">
+          <button type="button" class="profile-btn" id="profile-btn" aria-haspopup="true">
+            <span class="avatar" id="profile-avatar">?</span>
+            <span class="profile-meta">
+              <span class="pname" id="profile-name">-</span>
+              <span class="prole" id="profile-role">-</span>
+            </span>
+          </button>
+          <div class="dropdown" id="profile-dropdown">
+            <button type="button" id="logout-btn">Logout</button>
+          </div>
         </div>
       </div>
     </header>
@@ -86,15 +85,32 @@
         <div id="admin-dashboard"></div>
         <div id="client-dashboard"></div>
         <div id="generic-home" class="placeholder-card" hidden>
-          Department modules for your role load in later steps. Use Community and Settings from the sidebar.
+          Open a page from the sidebar to get started.
         </div>
       </section>
 
       <section class="face" id="face-approvals" data-title="Approvals">
-        <div id="project-approvals-panel">
+        <div id="approvals-inbox-panel">
+          <div class="face-hero">
+            <h2>Approvals</h2>
+            <p>Everything waiting on you — approve or reject from this list.</p>
+          </div>
+          <div id="approvals-inbox-flash" class="flash"></div>
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Type</th><th>Item</th><th>From</th><th>Amount</th><th>Submitted</th><th></th>
+                </tr>
+              </thead>
+              <tbody id="approvals-inbox-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="project-approvals-panel" hidden>
           <div class="face-hero">
             <h2>Pending project approvals</h2>
-            <p>Projects submitted by Sales. Approve to unlock the developer and trigger Finance invoice creation.</p>
+            <p>Approve or reject projects waiting on you.</p>
           </div>
           <div class="data-table-wrap">
             <table class="data-table">
@@ -111,7 +127,7 @@
         <div id="finance-money-approvals-panel" hidden>
           <div class="face-hero">
             <h2>Money approvals</h2>
-            <p>Approve Director expense requests and HR salary funding. Finance escalates to Admin for final unlock.</p>
+            <p>Approve or reject expenses and salary funding waiting on you.</p>
           </div>
           <div id="money-approvals-flash" class="flash"></div>
           <h3 style="margin:0 0 10px;font-size:0.95rem;" id="money-exp-heading">Director expenses</h3>
@@ -139,10 +155,10 @@
         </div>
       </section>
 
-      <section class="face" id="face-tasks" data-title="Tasks">
+      <section class="face" id="face-work" data-title="My work">
         <div class="face-hero">
-          <h2>Tasks</h2>
-          <p>Create and assign tasks. PM and Director boards stay in sync with whoever is assigned.</p>
+          <h2>My work</h2>
+          <p>Today's tasks, then log what you did.</p>
         </div>
         <div id="tasks-flash" class="flash"></div>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;max-width:640px;">
@@ -162,7 +178,7 @@
             <div class="form-actions"><button type="submit" class="btn btn-primary">Save task</button></div>
           </form>
         </div>
-        <h3 style="margin:24px 0 10px;font-size:0.95rem;">Your tasks</h3>
+        <h3 id="work-tasks-heading" style="margin:24px 0 10px;font-size:0.95rem;">Your tasks</h3>
         <div class="data-table-wrap">
           <table class="data-table">
             <thead>
@@ -171,34 +187,121 @@
             <tbody id="tasks-tbody"></tbody>
           </table>
         </div>
+
+        <div id="work-report-section" class="work-block">
+          <h3 style="margin:0 0 10px;font-size:0.95rem;">Daily report</h3>
+          <div id="reports-flash" class="flash"></div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+            <button type="button" id="btn-new-report" class="btn btn-primary" hidden style="padding:8px 20px;">New report</button>
+            <button type="button" id="btn-voice-report" class="btn btn-ghost" style="padding:7px 16px;font-size:0.85rem;">Voice report</button>
+            <span style="font-size:0.8rem;color:var(--text-muted);">Speak your daily report instead of typing</span>
+          </div>
+          <div class="settings-section" style="max-width:640px;">
+            <form id="report-form" class="form-grid">
+              <div>
+                <label for="report-content">Done today</label>
+                <textarea id="report-content" rows="4" required style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="What you finished today"></textarea>
+              </div>
+              <div>
+                <label for="report-blockers">Blocked by</label>
+                <textarea id="report-blockers" rows="2" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="What is waiting on someone else"></textarea>
+              </div>
+              <div>
+                <label for="report-attention">Tomorrow's top 3</label>
+                <textarea id="report-attention" rows="3" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="Three things to do tomorrow"></textarea>
+              </div>
+              <div id="report-weekly-fields" hidden>
+                <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px;">
+                  <label style="font-size:0.82rem;color:var(--text-muted);margin-bottom:6px;display:block;">Friday check-in (optional)</label>
+                </div>
+                <div>
+                  <label for="report-hard">What was hard this week</label>
+                  <textarea id="report-hard" rows="2" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="Challenging moments"></textarea>
+                </div>
+                <div>
+                  <label for="report-easy">What was easy this week</label>
+                  <textarea id="report-easy" rows="2" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="Smooth, enjoyable work"></textarea>
+                </div>
+                <div>
+                  <label for="report-happiness">What made you feel part of the team</label>
+                  <textarea id="report-happiness" rows="2" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="Wins, recognition, connection"></textarea>
+                </div>
+                <div>
+                  <label for="report-concerns">Anything on your mind</label>
+                  <textarea id="report-concerns" rows="2" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="Optional — only on Fridays"></textarea>
+                </div>
+              </div>
+              <div>
+                <label for="report-project">Project (optional)</label>
+                <select id="report-project"></select>
+              </div>
+              <div>
+                <label for="report-files">Attachments (photos / docs)</label>
+                <input id="report-files" type="file" multiple accept="image/*,.pdf,.doc,.docx,.txt" />
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary">Submit report</button>
+              </div>
+            </form>
+          </div>
+          <h3 style="margin:24px 0 10px;font-size:0.95rem;">Your recent reports</h3>
+          <div class="data-table-wrap">
+            <table class="data-table reports-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Status</th>
+                  <th>Reviewed</th>
+                  <th>Report</th>
+                  <th>Director remarks</th>
+                </tr>
+              </thead>
+              <tbody id="reports-list"></tbody>
+            </table>
+          </div>
+        </div>
       </section>
 
-      <section class="face" id="face-leads" data-title="Leads">
+      <section class="face" id="face-pipeline" data-title="Pipeline">
         <div class="face-hero">
-          <h2>Leads</h2>
-          <p>Track prospects, log engagements, and convert to clients.</p>
+          <h2>Pipeline</h2>
+          <p>Move a lead from first contact to a won project.</p>
+        </div>
+        <div class="page-tabs" id="pipeline-tabs">
+          <button type="button" class="active" data-stage="">All</button>
+          <button type="button" data-stage="new">New</button>
+          <button type="button" data-stage="contacted">Contacted</button>
+          <button type="button" data-stage="meeting">Meeting</button>
+          <button type="button" data-stage="proposal">Proposal</button>
+          <button type="button" data-stage="won">Won</button>
+          <button type="button" data-stage="clients">Clients</button>
+          <button type="button" data-stage="lost">Lost</button>
         </div>
         <div class="toolbar">
           <input id="leads-search" type="search" placeholder="Search name or business" />
-          <select id="leads-status">
+          <select id="leads-status" hidden>
             <option value="">All statuses</option>
-            <option value="contacting">Contacting</option>
-            <option value="follow_up">Follow-up</option>
-            <option value="not_interested">Not interested</option>
-            <option value="converted">Converted</option>
           </select>
           <div class="spacer"></div>
           <button type="button" class="btn btn-primary" id="btn-voice-capture">Voice capture</button>
           <button type="button" class="btn btn-primary" id="btn-new-lead">Add lead</button>
         </div>
-        <div class="data-table-wrap">
+        <div id="pipeline-leads-wrap" class="data-table-wrap">
           <table class="data-table">
             <thead>
               <tr>
-                <th>Name</th><th>Phone</th><th>Email</th><th>Business</th><th>Type</th><th>Status</th><th>Last engagement</th>
+                <th>Name</th><th>Phone</th><th>Business</th><th>Value</th><th>Next follow-up</th><th>Stage</th>
               </tr>
             </thead>
             <tbody id="leads-tbody"></tbody>
+          </table>
+        </div>
+        <div id="pipeline-clients-wrap" class="data-table-wrap" hidden>
+          <table class="data-table">
+            <thead>
+              <tr><th>Name</th><th>Phone</th><th>Email</th><th>Business</th><th>Projects</th></tr>
+            </thead>
+            <tbody id="clients-tbody"></tbody>
           </table>
         </div>
       </section>
@@ -206,15 +309,7 @@
       <section class="face" id="face-clients" data-title="Clients">
         <div class="face-hero">
           <h2>Clients</h2>
-          <p>Converted leads - click a row to view linked projects (read-only).</p>
-        </div>
-        <div class="data-table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr><th>Name</th><th>Business</th><th>Converted</th><th>Projects</th></tr>
-            </thead>
-            <tbody id="clients-tbody"></tbody>
-          </table>
+          <p>Open a client from Pipeline to call, email, or view their projects.</p>
         </div>
       </section>
 
@@ -222,7 +317,7 @@
         <div id="sales-projects-chrome">
           <div class="face-hero">
             <h2>Projects</h2>
-            <p>Create projects for Director approval. Assigned developers see them only after approval.</p>
+            <p>Create a project or check progress for a client.</p>
           </div>
           <div id="projects-flash" class="flash"></div>
           <div class="toolbar">
@@ -243,7 +338,7 @@
         <div id="pm-projects-panel" hidden>
           <div class="face-hero">
             <h2>All projects</h2>
-            <p>Company-wide approved work. Due-soon and overdue rows are flagged automatically from milestone dates.</p>
+            <p>Filter the board and open a project that needs attention.</p>
           </div>
           <div class="toolbar">
             <select id="pm-filter-status">
@@ -283,7 +378,7 @@
         <div id="client-projects-panel" hidden>
           <div class="face-hero">
             <h2>Your projects</h2>
-            <p>Live status and progress. Open a project for the milestone timeline.</p>
+            <p>Open a project to see milestones and request a change.</p>
           </div>
           <div class="data-table-wrap">
             <table class="data-table">
@@ -296,10 +391,18 @@
         </div>
         <div id="client-project-detail" hidden></div>
 
+        <div id="projects-timeline-panel" hidden>
+          <div class="face-hero">
+            <h2>Project timeline</h2>
+            <p>See what is due across active projects.</p>
+          </div>
+          <div id="timeline-body"></div>
+        </div>
+
         <div id="finance-projects-panel" hidden>
           <div class="face-hero">
             <h2>Project finances</h2>
-            <p>Approved projects with invoice value, payments, and outstanding balance. Finance cannot create projects.</p>
+            <p>See value, payments, and outstanding balance per project.</p>
           </div>
           <div class="toolbar">
             <div class="spacer"></div>
@@ -319,18 +422,12 @@
         </div>
       </section>
 
-      <section class="face" id="face-timeline" data-title="Timeline">
-        <div class="face-hero">
-          <h2>Project timeline</h2>
-          <p>Milestone due dates across active projects.</p>
-        </div>
-        <div id="timeline-body"></div>
-      </section>
+      <section class="face" id="face-timeline" data-title="Projects"></section>
 
       <section class="face" id="face-changes" data-title="Change requests">
         <div class="face-hero">
           <h2>Change requests</h2>
-          <p>Request scope changes on your projects. Sales and PM are notified.</p>
+          <p>Request a change on one of your projects.</p>
         </div>
         <div id="changes-flash" class="flash"></div>
         <div class="settings-section" style="max-width:560px;">
@@ -355,7 +452,7 @@
       <section class="face" id="face-followups" data-title="My Follow-ups">
         <div class="face-hero">
           <h2>My Follow-ups</h2>
-          <p>Invoices Finance flagged to you. Client and invoice status only — log that you followed up.</p>
+          <p>Log the follow-up you made on each flagged invoice.</p>
         </div>
         <div class="data-table-wrap">
           <table class="data-table">
@@ -370,7 +467,7 @@
       <section class="face" id="face-email" data-title="Email client">
         <div class="face-hero">
           <h2 id="email-heading">Email composer</h2>
-          <p id="email-blurb">Only Sales contacts clients here - never through Community chat. Messages are logged.</p>
+          <p id="email-blurb">Send a logged email to a client.</p>
         </div>
         <div id="email-flash" class="flash"></div>
         <div class="settings-section" style="max-width:640px;">
@@ -398,6 +495,7 @@
         </div>
         <h3 style="margin:24px 0 10px;font-size:0.95rem;">Sent history</h3>
         <ul class="engagement-list" id="email-history"></ul>
+        <div id="admin-email-automations" hidden></div>
       </section>
 
       <section class="face" id="face-reports" data-title="Reports">
@@ -422,77 +520,10 @@
           <div id="fin-report-body"></div>
         </div>
 
-        <div id="sales-reports-panel">
-          <div id="reports-flash" class="flash"></div>
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-            <button type="button" id="btn-new-report" class="btn btn-primary" style="padding:8px 20px;">New report</button>
-            <button type="button" id="btn-voice-report" class="btn btn-ghost" style="padding:7px 16px;font-size:0.85rem;">Voice report</button>
-            <span style="font-size:0.8rem;color:var(--text-muted);">Speak your daily report instead of typing</span>
-          </div>
-          <div class="settings-section" style="max-width:640px;">
-            <form id="report-form" class="form-grid" style="display:none;">
-              <div>
-                <label for="report-content">What was done today</label>
-                <textarea id="report-content" rows="4" required style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="Overall work completed today (not just one project)"></textarea>
-              </div>
-              <div>
-                <label for="report-blockers">Blockers encountered</label>
-                <textarea id="report-blockers" rows="2" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="Issues, delays, or blockers"></textarea>
-              </div>
-              <div>
-                <label for="report-attention">What needs attention</label>
-                <textarea id="report-attention" rows="2" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="Anything that needs follow-up or decision"></textarea>
-              </div>
-              <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px;">
-                <label style="font-size:0.82rem;color:var(--text-muted);margin-bottom:6px;display:block;">How are you feeling? (optional)</label>
-              </div>
-              <div>
-                <label for="report-hard">What was hard today</label>
-                <textarea id="report-hard" rows="2" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="Challenging moments"></textarea>
-              </div>
-              <div>
-                <label for="report-easy">What was easy today</label>
-                <textarea id="report-easy" rows="2" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="Smooth, enjoyable work"></textarea>
-              </div>
-              <div>
-                <label for="report-happiness">What made you happy / feel part of the team</label>
-                <textarea id="report-happiness" rows="2" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="Moments of connection, wins, recognition"></textarea>
-              </div>
-              <div>
-                <label for="report-concerns">What made you think twice</label>
-                <textarea id="report-concerns" rows="2" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="Moments of doubt, frustration, or considering leaving"></textarea>
-              </div>
-              <div>
-                <label for="report-project">Project (optional)</label>
-                <select id="report-project"></select>
-              </div>
-              <div>
-                <label for="report-files">Attachments (photos / docs)</label>
-                <input id="report-files" type="file" multiple accept="image/*,.pdf,.doc,.docx,.txt" />
-              </div>
-              <div class="form-actions">
-                <button type="submit" class="btn btn-primary">Submit report</button>
-              </div>
-            </form>
-          </div>
-          <h3 style="margin:24px 0 10px;font-size:0.95rem;">Your recent reports</h3>
-          <div class="data-table-wrap">
-            <table class="data-table reports-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Status</th>
-                  <th>Reviewed</th>
-                  <th>Report</th>
-                  <th>Director remarks</th>
-                </tr>
-              </thead>
-              <tbody id="reports-list"></tbody>
-            </table>
-          </div>
-        </div>
         <div id="director-reports-panel" hidden>
           <div id="director-analytics" class="settings-section" style="max-width:none;margin-bottom:20px;"></div>
+          <div id="director-action-audit" class="settings-section" style="max-width:none;margin-bottom:20px;"></div>
+          <div id="director-reports-daily">
           <h3 style="margin:0 0 10px;font-size:0.95rem;">Daily reports</h3>
           <div class="toolbar">
             <select id="reports-role">
@@ -503,8 +534,8 @@
             </select>
             <select id="reports-person"><option value="">All people</option></select>
             <select id="reports-routing">
-              <option value="">Forwarded (default)</option>
               <option value="all">All reports</option>
+              <option value="forwarded_director">Forwarded</option>
               <option value="pending_pm">Pending PM</option>
               <option value="pm_reviewed">PM reviewed</option>
               <option value="forwarded_director">Forwarded to Director</option>
@@ -526,6 +557,7 @@
               </thead>
               <tbody id="director-reports-list"></tbody>
             </table>
+          </div>
           </div>
         </div>
 
@@ -549,7 +581,7 @@
         <div id="pm-reports-panel" hidden>
           <div id="pm-reports-flash" class="flash"></div>
           <p style="margin:0 0 12px;color:var(--text-muted);font-size:0.9rem;">
-            Review Sales and Developer daily reports, then forward to the Director hub. No financial data.
+            Review today’s reports, then approve or forward to the Director.
           </p>
           <div class="toolbar">
             <select id="pm-reports-role">
@@ -570,11 +602,12 @@
         </div>
         <div id="admin-reports-panel" hidden>
           <div id="admin-reports-flash" class="flash"></div>
+          <div id="admin-today-digest" class="settings-section" style="max-width:none;margin-bottom:20px;"></div>
           <div id="admin-analytics" class="settings-section" style="max-width:none;margin-bottom:20px;"></div>
           <div id="admin-action-audit" class="settings-section" style="max-width:none;margin-bottom:20px;"></div>
+          <div id="admin-reports-daily">
           <p style="margin:0 0 12px;color:var(--text-muted);font-size:0.9rem;">
-            Every department report. You can respond to Director, PM, and Finance reports. Sales and Developer reports are read-only.
-            <a href="#/login-audit" style="margin-left:8px;">Login audit →</a>
+            Review daily reports and leave a response where you can.
           </p>
           <h3 style="margin:0 0 10px;font-size:0.95rem;">Daily reports</h3>
           <div class="toolbar">
@@ -592,19 +625,151 @@
             <input id="admin-reports-to" type="date" />
           </div>
           <ul class="engagement-list" id="admin-reports-list"></ul>
+          </div>
         </div>
+      </section>
+
+      <section class="face" id="face-traffic" data-title="Website traffic">
+        <div id="traffic-flash" class="flash"></div>
+        <div id="traffic-disconnected" class="not-connected" hidden>
+          <strong>Not connected yet</strong>
+          <p>Website traffic will appear here once the website database is connected.</p>
+        </div>
+        <div id="traffic-connected">
+        <div class="settings-section" style="max-width:none;margin-bottom:16px;">
+          <div class="toolbar" style="flex-wrap:wrap;">
+            <strong style="margin-right:auto;">Live website traffic</strong>
+            <button type="button" class="btn btn-ghost traffic-period" data-period="d3">3 days</button>
+            <button type="button" class="btn btn-ghost traffic-period" data-period="w1">7 days</button>
+            <button type="button" class="btn btn-primary traffic-period" data-period="m1">1 month</button>
+            <button type="button" class="btn btn-ghost traffic-period" data-period="m3">3 months</button>
+            <button type="button" class="btn btn-ghost traffic-period" data-period="m6">6 months</button>
+          </div>
+          <p class="meta" id="traffic-last-updated" style="margin:8px 0 0;"></p>
+        </div>
+        <div class="settings-section" id="traffic-summary" style="max-width:none;margin-bottom:16px;"></div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:16px;">
+          <div class="settings-section" style="max-width:none;"><h3 style="margin:0 0 10px;font-size:0.95rem;">Visits over time</h3><canvas id="traffic-series" style="max-height:240px;"></canvas></div>
+          <div class="settings-section" style="max-width:none;"><h3 style="margin:0 0 10px;font-size:0.95rem;">Views by page</h3><ul class="engagement-list" id="traffic-pages"></ul></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:16px;">
+          <div class="settings-section" style="max-width:none;"><h3 style="margin:0 0 10px;font-size:0.95rem;">Devices</h3><ul class="engagement-list" id="traffic-devices"></ul></div>
+          <div class="settings-section" style="max-width:none;"><h3 style="margin:0 0 10px;font-size:0.95rem;">Top locations</h3><ul class="engagement-list" id="traffic-geo"></ul></div>
+        </div>
+        <div class="settings-section" style="max-width:none;">
+          <h3 style="margin:0 0 10px;font-size:0.95rem;">Recent visitors <span class="meta">(last 15 minutes · <span id="traffic-live-n">0</span> · EAT)</span></h3>
+          <div class="data-table-wrap" style="max-height:320px;overflow:auto;">
+            <table class="data-table">
+              <thead>
+                <tr><th>Time (EAT)</th><th>Page</th><th>City</th><th>Country</th><th>Device</th></tr>
+              </thead>
+              <tbody id="traffic-live"></tbody>
+            </table>
+          </div>
+        </div>
+        </div>
+      </section>
+
+      <section class="face" id="face-website-payments" data-title="Event registrations">
+        <div class="face-hero">
+          <h2>Event registrations</h2>
+          <p>Paid event-ticket registrations from the website.</p>
+        </div>
+        <div id="wp-flash" class="flash"></div>
+        <div id="wp-disconnected" class="not-connected" hidden>
+          <strong>Not connected yet</strong>
+          <p>Event registrations will appear here once the website database is connected.</p>
+        </div>
+        <div id="wp-connected">
+        <div class="settings-section" id="wp-summary" style="max-width:none;margin-bottom:16px;"></div>
+        <div class="settings-section" style="max-width:none;">
+          <div class="toolbar">
+            <select id="wp-status">
+              <option value="">All statuses</option>
+              <option value="paid">Paid</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+            <select id="wp-event"><option value="">All events</option></select>
+            <input id="wp-from" type="date" title="From" />
+            <input id="wp-to" type="date" title="To" />
+            <button type="button" class="btn btn-primary" id="wp-refresh">Refresh</button>
+          </div>
+          <p class="meta" id="wp-count" style="margin:8px 0;"></p>
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>Payer</th><th>Contact</th><th>Event</th><th>Ticket</th><th>Paid (EAT)</th><th>Emailed</th><th></th></tr>
+              </thead>
+              <tbody id="wp-list"></tbody>
+            </table>
+          </div>
+        </div>
+        </div>
+        <div id="wp-email-modal" class="modal-overlay" hidden>
+          <div class="modal" style="max-width:520px;">
+            <div class="modal-header">
+              <h3>Contact attendee</h3>
+              <button type="button" class="btn btn-ghost" data-close-modal="wp-email-modal">&times;</button>
+            </div>
+            <div id="wp-email-to" style="margin:8px 0;color:var(--text-muted);font-size:0.9rem;"></div>
+            <textarea id="wp-email-message" rows="5" style="width:100%;" placeholder="Message for the attendee..."></textarea>
+            <div id="wp-email-flash" class="flash"></div>
+            <div class="modal-actions">
+              <button type="button" class="btn btn-ghost" data-close-modal="wp-email-modal">Cancel</button>
+              <button type="button" class="btn btn-primary" id="wp-email-send">Send email</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="face" id="face-organization" data-title="Organization">
+        <div class="face-hero">
+          <h2>Company</h2>
+          <p>Notification rules, email templates, integrations, and expense approval.</p>
+        </div>
+        <div id="org-settings-flash" class="flash"></div>
+        <div id="org-company-settings"></div>
+      </section>
+
+      <section class="face" id="face-health" data-title="Health">
+        <div id="health-flash" class="flash"></div>
+        <p class="meta" id="health-last-updated" style="margin:0 0 12px;"></p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px;" id="health-cards"></div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:16px;">
+          <div class="settings-section" style="max-width:none;"><h3 style="margin:0 0 10px;font-size:0.95rem;">CPU &amp; memory (history)</h3><canvas id="health-cpu-chart" style="max-height:240px;"></canvas></div>
+          <div class="settings-section" style="max-width:none;"><h3 style="margin:0 0 10px;font-size:0.95rem;">Services &amp; features</h3><ul class="engagement-list" id="health-entities"></ul></div>
+        </div>
+        <div class="settings-section" style="max-width:none;">
+          <h3 style="margin:0 0 10px;font-size:0.95rem;">Processes</h3>
+          <div class="data-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>Process</th><th>Status</th><th>Restarts</th><th>CPU</th><th>Memory</th><th>Uptime</th></tr>
+              </thead>
+              <tbody id="health-processes"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="face" id="face-finance" data-title="Finance">
+        <div class="face-hero">
+          <h2>Finance</h2>
+          <p>Project figures, financial health, and this month’s revenue and expenses.</p>
+        </div>
+        <div id="admin-finance-overview"></div>
       </section>
 
       <section class="face" id="face-invoices" data-title="Invoices">
         <div id="director-invoices-panel">
           <div class="face-hero">
             <h2>Invoices overview</h2>
-            <p>In/out status only. No balances, expenses, or payment reconciliation.</p>
+            <p>See invoice amounts and payment status.</p>
           </div>
           <div class="data-table-wrap">
             <table class="data-table">
               <thead>
-                <tr><th>Client</th><th>Amount</th><th>Status</th><th>Project</th></tr>
+                <tr><th>Client</th><th>Amount</th><th>Paid</th><th>Balance</th><th>Status</th><th>Project</th></tr>
               </thead>
               <tbody id="director-invoices-tbody"></tbody>
             </table>
@@ -613,7 +778,7 @@
         <div id="finance-invoices-panel" hidden>
           <div class="face-hero">
             <h2>Invoices</h2>
-            <p>Create invoices for clients, email the tax invoice, print/download, and track payments.</p>
+            <p>Issue an invoice, email it, and track what is still outstanding.</p>
           </div>
           <div id="fin-inv-list-flash" class="flash"></div>
           <div class="toolbar">
@@ -645,15 +810,25 @@
         <div id="client-invoices-panel" hidden>
           <div class="face-hero">
             <h2>Invoices &amp; documents</h2>
-            <p>Your invoices and files shared on your projects. Payments are recorded by Finance - this view is read-only.</p>
+            <p>Download your invoices and project files.</p>
           </div>
           <div class="data-table-wrap">
             <table class="data-table">
               <thead>
-                <tr><th>Project</th><th>Amount</th><th>Status</th><th>Issued</th></tr>
+                <tr><th>Project</th><th>Amount</th><th>Status</th><th>Issued</th><th></th></tr>
               </thead>
               <tbody id="client-invoices-tbody"></tbody>
             </table>
+          </div>
+          <div id="client-mpesa-panel" class="settings-section" style="margin-top:20px;max-width:560px;" hidden>
+            <h3>Pay with M-Pesa</h3>
+            <p class="meta" style="margin:0 0 10px;">Paybill <strong>542542</strong> · Account <strong>43869</strong>. After you pay, send the M-Pesa code so Finance can confirm.</p>
+            <p style="margin:0 0 12px;">Amount due: <strong id="mpesa-amount">—</strong></p>
+            <div id="client-mpesa-flash" class="flash"></div>
+            <form id="client-mpesa-form" class="form-grid">
+              <div><label for="mpesa-code">M-Pesa code</label><input id="mpesa-code" required placeholder="e.g. QH7X2K9M1L" /></div>
+              <div class="form-actions"><button type="submit" class="btn btn-primary">I've paid</button></div>
+            </form>
           </div>
           <div class="settings-section" style="margin-top:20px;max-width:640px;">
             <h3>Shared documents</h3>
@@ -665,7 +840,7 @@
       <section class="face" id="face-payments" data-title="Payments">
         <div class="face-hero">
           <h2>Record payment</h2>
-          <p>Match the client, add a bank reference, and record full or partial payment. Partial payments close the paid amount and issue a new balance invoice emailed to the client.</p>
+          <p>Record a payment against an invoice. Partial amounts issue a new balance invoice.</p>
         </div>
         <div id="payments-flash" class="flash"></div>
         <div class="settings-section" style="max-width:640px;margin-bottom:16px;">
@@ -673,11 +848,15 @@
           <p class="meta" style="margin:0 0 10px;">Speak: "Received 50000 from John for Cres website, ref MPESA123"</p>
           <div style="display:flex;align-items:center;gap:8px;">
             <button type="button" class="btn btn-ghost" id="btn-voice-payment" style="white-space:nowrap;">Speak payment</button>
+            <button type="button" class="btn btn-ghost" id="btn-vp-pause" style="white-space:nowrap;display:none;">Pause</button>
             <span id="vp-timer" class="meta" style="display:none;">00:00</span>
           </div>
           <div id="vp-transcript" style="margin-top:10px;display:none;">
-            <div class="meta" style="margin-bottom:4px;">Transcript</div>
-            <div id="vp-transcript-text" style="padding:8px;background:var(--bg-soft);border-radius:6px;font-size:0.85rem;"></div>
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:4px;">
+              <div class="meta">Transcript <span style="font-weight:400;">— editable, then re-parse</span></div>
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-vp-reparse" style="padding:3px 10px;font-size:0.78rem;">Re-parse edited text</button>
+            </div>
+            <textarea id="vp-transcript-text" spellcheck="false" style="width:100%;box-sizing:border-box;padding:8px;background:var(--bg-soft);border-radius:6px;font-size:0.85rem;resize:vertical;font-family:inherit;line-height:1.5;border:1px solid var(--border,#2a3441);color:var(--text,#e8eef4);"></textarea>
           </div>
           <div id="vp-preview" style="margin-top:10px;display:none;">
             <div class="meta" style="margin-bottom:6px;">Parsed payment — review and confirm</div>
@@ -711,7 +890,7 @@
                 <div><label>Client name</label><input id="pay-new-client-name" required placeholder="Contact name" /></div>
                 <div><label>Business</label><input id="pay-new-client-business" placeholder="Company" /></div>
                 <div><label>Email</label><input id="pay-new-client-email" type="email" required placeholder="billing@client.com" /></div>
-                <div><label>Phone</label><input id="pay-new-client-phone" placeholder="+1…" /></div>
+                <div><label>Phone</label><input id="pay-new-client-phone" placeholder="+254 7xx xxx xxx" /></div>
                 <div class="form-actions" style="grid-column:1/-1;">
                   <button type="button" class="btn btn-primary btn-sm" id="btn-save-pay-client">Save client to invoice</button>
                 </div>
@@ -726,9 +905,17 @@
               <label for="pay-date">Date</label>
               <input id="pay-date" type="date" />
             </div>
+            <div>
+              <label for="pay-method">Method</label>
+              <select id="pay-method">
+                <option value="mpesa">M-Pesa</option>
+                <option value="bank">Bank</option>
+                <option value="cash">Cash</option>
+              </select>
+            </div>
             <div style="grid-column:1/-1;">
-              <label for="pay-bank-ref">Bank reference</label>
-              <input id="pay-bank-ref" required placeholder="Bank / remittance reference for this payment" />
+              <label for="pay-bank-ref">M-Pesa code / bank ref</label>
+              <input id="pay-bank-ref" required placeholder="e.g. RGT7K8X2Y1" />
               <div id="pay-bank-card" class="placeholder-card" style="margin-top:10px;" hidden>
                 <div class="meta">Bank reference card</div>
                 <div id="pay-bank-card-body" style="margin-top:6px;font-weight:600;"></div>
@@ -753,14 +940,30 @@
       <section class="face" id="face-expenses" data-title="Expenses">
         <div class="face-hero">
           <h2>Expenses</h2>
-          <p id="expenses-hero-copy">Operational expenses. Director submissions need Finance then Admin approval before the transaction unlocks.</p>
+          <p id="expenses-hero-copy">Add an expense or approve ones waiting on you.</p>
         </div>
         <div id="expenses-flash" class="flash"></div>
         <div class="toolbar">
+          <select id="exp-class">
+            <option value="">All types</option>
+            <option value="internal">Internal (salaries, hosting)</option>
+            <option value="external">External</option>
+          </select>
           <select id="exp-category">
             <option value="">All categories</option>
-            <option value="operational">Operational</option>
-            <option value="other">Other</option>
+            <optgroup label="Internal">
+              <option value="salaries">Salaries</option>
+              <option value="salary">Salary settlement</option>
+              <option value="hosting">Hosting</option>
+            </optgroup>
+            <optgroup label="External">
+              <option value="operational">Operational</option>
+              <option value="domains">Domains</option>
+              <option value="transport">Transport</option>
+              <option value="ads">Ads</option>
+              <option value="drawings">Owner's drawings</option>
+              <option value="other">Other</option>
+            </optgroup>
           </select>
           <select id="exp-approval-filter">
             <option value="">All statuses</option>
@@ -785,7 +988,7 @@
       <section class="face" id="face-flag" data-title="Flag follow-up">
         <div class="face-hero">
           <h2>Flag invoice for sales</h2>
-          <p>Assign an overdue or due invoice to a salesperson. Feeds their My Follow-ups list.</p>
+          <p>Flag an overdue invoice for a salesperson to chase.</p>
         </div>
         <div id="flag-flash" class="flash"></div>
         <div class="settings-section" style="max-width:560px;">
@@ -821,7 +1024,7 @@
       <section class="face" id="face-employees" data-title="Employees">
         <div class="face-hero">
           <h2>Employees</h2>
-          <p>Directory and payroll status for the current month. Salary data only - no invoices or cash-flow.</p>
+          <p>Open a person to update their record or this month’s pay.</p>
         </div>
         <div id="employees-flash" class="flash"></div>
         <div class="toolbar">
@@ -857,6 +1060,46 @@
             <tbody id="leave-tbody"></tbody>
           </table>
         </div>
+      </section>
+
+      <section class="face" id="face-applicants" data-title="People">
+        <div class="face-hero">
+          <h2>Applicants</h2>
+          <p>Track who applied, interview dates, and hiring stage.</p>
+        </div>
+        <div id="applicants-flash" class="flash"></div>
+        <div class="toolbar">
+          <select id="applicants-filter-stage">
+            <option value="">All stages</option>
+            <option value="applied">Applied</option>
+            <option value="interview">Interview</option>
+            <option value="offer">Offer</option>
+            <option value="hired">Hired</option>
+            <option value="rejected">Rejected</option>
+          </select>
+          <div class="spacer"></div>
+          <button type="button" class="btn btn-primary" id="btn-add-applicant">Add applicant</button>
+        </div>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Name</th><th>Email</th><th>Phone</th><th>Role applied for</th>
+                <th>Stage</th><th>Interview</th><th>Notes</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="applicants-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="face" id="face-onboarding" data-title="People">
+        <div class="face-hero">
+          <h2>Onboarding</h2>
+          <p>Checklist and 30/60/90-day goals for each new hire.</p>
+        </div>
+        <div id="onboarding-flash" class="flash"></div>
+        <div id="onboarding-list"></div>
       </section>
 
       <section class="face" id="face-salaries" data-title="Payroll">
@@ -950,49 +1193,10 @@
         </div>
       </section>
 
-      <section class="face" id="face-inbox-ai" data-title="Inbox AI">
-        <div class="face-hero">
-          <h2>Inbox AI</h2>
-          <p>Pulls Admin mailbox mail, extracts PDF context, and drafts replies with AI. Approve to send, regenerate with instructions, or ignore.</p>
-        </div>
-        <div id="inbox-ai-flash" class="flash"></div>
-        <div class="toolbar" style="margin-bottom:14px;">
-          <button type="button" class="btn btn-primary" id="btn-inbox-sync">Sync inbox</button>
-          <select id="inbox-ai-filter">
-            <option value="active">Needs action</option>
-            <option value="all">All</option>
-            <option value="drafted">Drafted</option>
-            <option value="sent">Sent</option>
-            <option value="ignored">Ignored</option>
-          </select>
-          <div class="spacer"></div>
-          <span class="meta" id="inbox-ai-meta"></span>
-        </div>
-        <div style="display:grid;grid-template-columns:1.1fr 1.2fr;gap:16px;">
-          <div class="data-table-wrap">
-            <table class="data-table">
-              <thead><tr><th>From</th><th>Subject</th><th>Status</th></tr></thead>
-              <tbody id="inbox-ai-list"></tbody>
-            </table>
-          </div>
-          <div class="settings-section" style="max-width:none;" id="inbox-ai-detail">
-            <div class="empty-state">Select a message.</div>
-          </div>
-        </div>
-        <div id="inbox-regen-panel" class="settings-section" style="max-width:none;margin-top:16px;" hidden>
-          <h3 style="margin:0 0 8px;font-size:0.95rem;">Regenerate instructions</h3>
-          <textarea id="inbox-regen-instructions" rows="3" placeholder="Tell the AI how to rewrite this reply…" style="width:100%;"></textarea>
-          <div class="form-actions" style="margin-top:10px;">
-            <button type="button" class="btn btn-primary" id="btn-inbox-regen-run">Regenerate draft</button>
-            <button type="button" class="btn btn-ghost" id="btn-inbox-regen-cancel">Cancel</button>
-          </div>
-        </div>
-      </section>
-
       <section class="face" id="face-users" data-title="Users">
         <div class="face-hero">
           <h2>Users &amp; roles</h2>
-          <p>Create accounts, change roles, activate or deactivate. Role changes take effect on the user's next request.</p>
+          <p>Invite someone, change a role, or deactivate an account.</p>
         </div>
         <div id="users-flash" class="flash"></div>
         <div class="toolbar">
@@ -1019,7 +1223,7 @@
       <section class="face" id="face-login-audit" data-title="Login audit">
         <div class="face-hero">
           <h2>Login audit</h2>
-          <p>Recent sign-in attempts across the company.</p>
+          <p>Check who signed in, and from where.</p>
         </div>
         <div class="toolbar">
           <div class="spacer"></div>
@@ -1038,7 +1242,7 @@
       <section class="face" id="face-ops" data-title="Cres Ops">
         <div class="face-hero">
           <h2>Cres Ops</h2>
-          <p>Your company knowledge assistant. Ask how things work, what's expected of you, and get answers from the company data pool.</p>
+          <p>Ask how a process works, or add a note to the company knowledge pool.</p>
         </div>
         <div id="ops-flash" class="flash"></div>
 
@@ -1119,7 +1323,7 @@
       <section class="face" id="face-settings" data-title="Settings">
         <div class="face-hero">
           <h2>Settings</h2>
-          <p>Personal profile and notification preferences. Role changes are Admin-only.</p>
+          <p>Update your profile, photo, and notification preferences.</p>
         </div>
         <div id="settings-flash" class="flash"></div>
         <div class="settings-section">
@@ -1141,7 +1345,7 @@
             </div>
             <div><label for="set-name">Name</label><input id="set-name" name="name" required /></div>
             <div><label for="set-email">Email</label><input id="set-email" name="email" disabled /></div>
-            <div><label for="set-phone">Phone</label><input id="set-phone" name="phone" /></div>
+            <div><label for="set-phone">Phone</label><input id="set-phone" name="phone" placeholder="+254 7xx xxx xxx" /></div>
             <div class="form-actions"><button type="submit" class="btn btn-primary">Save profile</button></div>
           </form>
         </div>
@@ -1157,7 +1361,6 @@
           <h3>Notification preferences</h3>
           <div id="settings-prefs"></div>
         </div>
-        <div id="admin-system-settings" hidden></div>
       </section>
 
       <section class="face community-face" id="face-community" data-title="Community">
@@ -1209,6 +1412,7 @@
             Narrate your leads: business name, what they sell, their phone number. Say "next" or "and another" between contacts.
           </p>
           <button type="button" id="btn-voice-record" class="btn" style="padding:10px 28px;font-size:0.92rem;">Start recording</button>
+          <button type="button" id="btn-voice-pause" class="btn btn-ghost" style="padding:10px 20px;font-size:0.92rem;display:none;">Pause</button>
         </div>
 
         <div id="voice-transcript-section" style="display:none;">
@@ -1249,22 +1453,27 @@
             Describe what you worked on today, any blockers, and your next steps.
           </p>
           <button type="button" id="btn-vr-record" class="btn" style="padding:10px 28px;font-size:0.92rem;">Start recording</button>
+          <button type="button" id="btn-vr-pause" class="btn btn-ghost" style="padding:10px 20px;font-size:0.92rem;display:none;">Pause</button>
+          <p style="color:var(--text-muted);margin:10px 0 0;font-size:0.78rem;">You can pause and continue the recording anytime.</p>
         </div>
 
         <div id="vr-transcript-section" style="display:none;">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-            <strong style="font-size:0.85rem;">Transcript</strong>
-            <button type="button" class="btn btn-ghost btn-sm" id="btn-vr-retry" style="padding:4px 10px;font-size:0.78rem;">Re-record</button>
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:6px;">
+            <strong style="font-size:0.85rem;">Transcript <span style="font-weight:400;color:var(--text-muted);">— editable, then re-parse</span></strong>
+            <span style="display:flex;gap:6px;">
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-vr-reparse" style="padding:4px 10px;font-size:0.78rem;">Re-parse edited text</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-vr-retry" style="padding:4px 10px;font-size:0.78rem;">Re-record</button>
+            </span>
           </div>
-          <div id="vr-transcript" style="white-space:pre-wrap;background:var(--bg-secondary,#1a2230);padding:10px 12px;border-radius:6px;max-height:120px;overflow-y:auto;font-size:0.82rem;margin-bottom:14px;border:1px solid var(--border,#2a3441);color:var(--text,#e8eef4);"></div>
+          <textarea id="vr-transcript" spellcheck="false" style="width:100%;box-sizing:border-box;background:var(--bg-secondary,#1a2230);padding:10px 12px;border-radius:6px;max-height:120px;min-height:70px;overflow-y:auto;font-size:0.82rem;margin-bottom:14px;border:1px solid var(--border,#2a3441);color:var(--text,#e8eef4);resize:vertical;font-family:inherit;line-height:1.5;"></textarea>
         </div>
 
         <div id="vr-report-section" style="display:none;">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-            <strong style="font-size:0.85rem;">Structured report</strong>
+            <strong style="font-size:0.85rem;">Structured report <span style="font-weight:400;color:var(--text-muted);">— editable</span></strong>
             <button type="button" class="btn btn-primary btn-sm" id="btn-vr-use" style="padding:5px 14px;font-size:0.82rem;">Use this report</button>
           </div>
-          <div id="vr-report-preview" style="background:var(--bg-secondary,#1a2230);padding:12px;border-radius:6px;font-size:0.82rem;line-height:1.6;border:1px solid var(--border,#2a3441);white-space:pre-wrap;max-height:220px;overflow-y:auto;margin-bottom:10px;color:var(--text,#e8eef4);"></div>
+          <textarea id="vr-report-preview" spellcheck="false" style="width:100%;box-sizing:border-box;background:var(--bg-secondary,#1a2230);padding:12px;border-radius:6px;font-size:0.82rem;line-height:1.6;border:1px solid var(--border,#2a3441);color:var(--text,#e8eef4);white-space:pre-wrap;max-height:220px;min-height:110px;overflow-y:auto;resize:vertical;font-family:inherit;margin-bottom:10px;"></textarea>
           <div id="vr-project-match" style="display:none;font-size:0.8rem;color:var(--text-muted);margin-bottom:10px;"></div>
         </div>
 
@@ -1288,14 +1497,19 @@
           <div id="vf-timer" style="font-size:1.6rem;font-weight:700;margin-bottom:8px;font-variant-numeric:tabular-nums;">00:00</div>
           <p id="vf-hint" style="color:var(--text-muted);margin:0 0 12px;font-size:0.82rem;"></p>
           <button type="button" id="btn-vf-record" class="btn" style="padding:10px 28px;font-size:0.92rem;">Start recording</button>
+          <button type="button" id="btn-vf-pause" class="btn btn-ghost" style="padding:10px 20px;font-size:0.92rem;display:none;">Pause</button>
+          <p style="color:var(--text-muted);margin:10px 0 0;font-size:0.78rem;">You can pause and continue the recording anytime.</p>
         </div>
 
         <div id="vf-transcript-section" style="display:none;">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-            <strong style="font-size:0.85rem;">Transcript</strong>
-            <button type="button" class="btn btn-ghost btn-sm" id="btn-vf-retry" style="padding:4px 10px;font-size:0.78rem;">Re-record</button>
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:6px;">
+            <strong style="font-size:0.85rem;">Transcript <span style="font-weight:400;color:var(--text-muted);">— editable, then re-parse</span></strong>
+            <span style="display:flex;gap:6px;">
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-vf-reparse" style="padding:4px 10px;font-size:0.78rem;">Re-parse edited text</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-vf-retry" style="padding:4px 10px;font-size:0.78rem;">Re-record</button>
+            </span>
           </div>
-          <div id="vf-transcript" style="white-space:pre-wrap;background:var(--bg-secondary,#1a2230);padding:10px 12px;border-radius:6px;max-height:120px;overflow-y:auto;font-size:0.82rem;margin-bottom:14px;border:1px solid var(--border,#2a3441);color:var(--text,#e8eef4);"></div>
+          <textarea id="vf-transcript" spellcheck="false" style="width:100%;box-sizing:border-box;background:var(--bg-secondary,#1a2230);padding:10px 12px;border-radius:6px;max-height:120px;min-height:70px;overflow-y:auto;font-size:0.82rem;margin-bottom:14px;border:1px solid var(--border,#2a3441);color:var(--text,#e8eef4);resize:vertical;font-family:inherit;line-height:1.5;"></textarea>
         </div>
 
         <div id="vf-preview-section" style="display:none;">
@@ -1322,13 +1536,14 @@
       <div class="modal-body">
         <form id="new-lead-form" class="form-grid">
           <div><label>Lead name</label><input id="new-lead-name" required /></div>
-          <div><label>Phone number</label><input id="new-lead-phone" type="tel" /></div>
+          <div><label>Phone number</label><input id="new-lead-phone" type="tel" placeholder="+254 7xx xxx xxx" /></div>
           <div><label>Email</label><input id="new-lead-email" type="email" /></div>
           <div><label>Business name <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label><input id="new-lead-business" /></div>
           <div style="grid-column:1/-1;">
             <label>Business type</label>
             <input id="new-lead-business-type" placeholder="e.g. sells lighting, sells shoes, catering…" />
           </div>
+          <div><label>Deal value (KES)</label><input id="new-lead-value" type="number" min="0" step="0.01" placeholder="0.00" /></div>
           <div class="form-actions"><button type="submit" class="btn btn-primary">Save lead</button></div>
         </form>
       </div>
@@ -1346,7 +1561,7 @@
         <h4 style="margin:0 0 10px;font-size:0.9rem;">Edit lead</h4>
         <form id="lead-edit-form" class="form-grid" style="margin-bottom:20px;">
           <div><label>Lead name</label><input id="lead-edit-name" required /></div>
-          <div><label>Phone number</label><input id="lead-edit-phone" type="tel" /></div>
+          <div><label>Phone number</label><input id="lead-edit-phone" type="tel" placeholder="+254 7xx xxx xxx" /></div>
           <div><label>Email</label><input id="lead-edit-email" type="email" /></div>
           <div><label>Business name</label><input id="lead-edit-business" /></div>
           <div style="grid-column:1/-1;">
@@ -1356,14 +1571,33 @@
           <div>
             <label>Status</label>
             <select id="lead-edit-status">
-              <option value="contacting">Contacting</option>
-              <option value="follow_up">Follow-up</option>
-              <option value="not_interested">Not interested</option>
-              <option value="converted">Converted</option>
+              <option value="new">New</option>
+              <option value="contacted">Contacted</option>
+              <option value="meeting">Meeting</option>
+              <option value="proposal">Proposal</option>
+              <option value="won">Won</option>
+              <option value="lost">Lost</option>
             </select>
+          </div>
+          <div>
+            <label>Deal value (KES)</label>
+            <input id="lead-edit-value" type="number" min="0" step="0.01" placeholder="0.00" />
           </div>
           <div class="form-actions"><button type="submit" class="btn btn-ghost">Save changes</button></div>
         </form>
+        <div id="lead-win-box" class="settings-section" style="max-width:none;margin-bottom:20px;">
+          <h4 style="margin:0 0 8px;font-size:0.9rem;">Mark as won</h4>
+          <p class="meta" style="margin:0 0 10px;">Creates the client, a project for Director approval, and a deposit invoice.</p>
+          <form id="lead-win-form" class="form-grid">
+            <div><label>Project name</label><input id="win-project-name" required placeholder="Website rebuild" /></div>
+            <div><label>Project value (KES)</label><input id="win-value" type="number" min="0" step="0.01" placeholder="0.00" /></div>
+            <div><label>Deposit (KES)</label><input id="win-deposit" type="number" min="0" step="0.01" placeholder="0.00" /></div>
+            <div><label>Deadline</label><input id="win-due" type="date" /></div>
+            <div class="form-actions" style="grid-column:1/-1;">
+              <button type="submit" class="btn btn-primary">Mark as won</button>
+            </div>
+          </form>
+        </div>
         <h4 style="margin:0 0 10px;font-size:0.9rem;">Engagement log</h4>
         <ul class="engagement-list" id="engagement-list"></ul>
         <form id="engagement-form" class="form-grid">
@@ -1375,10 +1609,11 @@
           <div>
             <label>Status update (optional)</label>
             <select id="eng-status">
-              <option value="">- Keep current -</option>
-              <option value="follow_up">Follow-up</option>
-              <option value="not_interested">Not interested</option>
-              <option value="converted">Converted → Client</option>
+              <option value="">Keep current stage</option>
+              <option value="contacted">Contacted</option>
+              <option value="meeting">Meeting</option>
+              <option value="proposal">Proposal</option>
+              <option value="lost">Lost</option>
             </select>
           </div>
           <div class="form-actions"><button type="submit" class="btn btn-primary">Add note</button></div>
@@ -1432,12 +1667,13 @@
             <label>Description / overview</label>
             <textarea id="proj-description" rows="3" placeholder="What the project covers for the client"></textarea>
           </div>
-          <div><label>Project value (amount)</label><input id="proj-value" type="number" min="0" step="0.01" placeholder="0.00" /></div>
+          <div><label>Project value (KES)</label><input id="proj-value" type="number" min="0" step="0.01" placeholder="0.00" /></div>
+          <div><label>Deadline</label><input id="proj-due" type="date" /></div>
           <div><label>Link existing client</label><select id="proj-client"></select></div>
           <div><label>Or manual client name</label><input id="proj-manual-client" placeholder="Creates client if no link" /></div>
           <div><label>Manual business</label><input id="proj-manual-business" /></div>
           <div><label>Manual email</label><input id="proj-manual-email" type="email" /></div>
-          <div><label>Manual phone</label><input id="proj-manual-phone" /></div>
+          <div><label>Manual phone</label><input id="proj-manual-phone" placeholder="+254 7xx xxx xxx" /></div>
           <div><label>Assign developer</label><select id="proj-developer"></select></div>
           <div>
             <label>Milestones</label>
@@ -1552,8 +1788,18 @@
           <div>
             <label>Category</label>
             <select id="new-exp-category" required>
-              <option value="operational">Operational</option>
-              <option value="other">Other</option>
+              <optgroup label="Internal">
+                <option value="salaries">Salaries</option>
+                <option value="hosting">Hosting</option>
+              </optgroup>
+              <optgroup label="External">
+                <option value="operational">Operational</option>
+                <option value="domains">Domains</option>
+                <option value="transport">Transport</option>
+                <option value="ads">Ads</option>
+                <option value="drawings">Owner's drawings</option>
+                <option value="other">Other</option>
+              </optgroup>
             </select>
           </div>
           <div><label>Amount</label><input id="new-exp-amount" type="number" min="0.01" step="0.01" required /></div>
@@ -1597,7 +1843,7 @@
         <form id="employee-form" class="form-grid">
           <div><label>Name</label><input name="name" required /></div>
           <div><label>Email</label><input name="email" type="email" required /></div>
-          <div><label>Phone</label><input name="phone" type="tel" /></div>
+          <div><label>Phone</label><input name="phone" type="tel" placeholder="+254 7xx xxx xxx" /></div>
           <div style="grid-column:1/-1;"><label>Home address</label><input name="home_address" autocomplete="street-address" /></div>
           <div style="grid-column:1/-1;"><label>Next of kin</label><input name="next_of_kin" placeholder="Name and phone" /></div>
           <div><label>KRA PIN</label><input name="kra_pin" /></div>
@@ -1641,7 +1887,7 @@
         <form id="user-form" class="form-grid">
           <div><label>Name</label><input name="name" required /></div>
           <div><label>Email</label><input name="email" type="email" required /></div>
-          <div><label>Phone</label><input name="phone" type="tel" /></div>
+          <div><label>Phone</label><input name="phone" type="tel" placeholder="+254 7xx xxx xxx" /></div>
           <div><label>Role</label><select name="role" id="user-form-role" required><option value="">Select role</option></select></div>
           <div><label>Status</label>
             <select name="status">
@@ -1655,6 +1901,16 @@
           <div class="form-actions"><button type="submit" class="btn btn-primary">Save</button></div>
         </form>
       </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="client-card-modal">
+    <div class="modal-card wide">
+      <header>
+        <h3>Client</h3>
+        <button type="button" class="btn btn-ghost" data-close-client-card style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body" id="client-card-body"></div>
     </div>
   </div>
 
@@ -1707,9 +1963,41 @@
         <form id="invite-form" class="form-grid">
           <div><label>Name</label><input name="name" required /></div>
           <div><label>Email</label><input name="email" type="email" required /></div>
-          <div><label>Phone</label><input name="phone" type="tel" /></div>
+          <div><label>Phone</label><input name="phone" type="tel" placeholder="+254 7xx xxx xxx" /></div>
           <div><label>Role</label><select name="role" id="invite-role" required></select></div>
           <div class="form-actions"><button type="submit" class="btn btn-primary">Send invite</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="applicant-modal">
+    <div class="modal-card" style="max-width:480px;">
+      <header>
+        <h3 id="applicant-modal-title">Add applicant</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body">
+        <div id="applicant-form-flash" class="flash"></div>
+        <form id="applicant-form" class="form-grid">
+          <div><label>Name</label><input name="name" required /></div>
+          <div><label>Email</label><input name="email" type="email" /></div>
+          <div><label>Phone</label><input name="phone" type="tel" placeholder="+254 7xx xxx xxx" /></div>
+          <div><label>Role applied for</label><input name="role_applied" required placeholder="Developer" /></div>
+          <div><label>Stage</label>
+            <select name="stage">
+              <option value="applied">Applied</option>
+              <option value="interview">Interview</option>
+              <option value="offer">Offer</option>
+              <option value="hired">Hired</option>
+              <option value="rejected">Rejected</option>
+            </select>
+          </div>
+          <div><label>Interview date</label><input name="interview_date" type="date" /></div>
+          <div style="grid-column:1/-1;"><label>Notes</label>
+            <textarea name="notes" rows="3" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);"></textarea>
+          </div>
+          <div class="form-actions"><button type="submit" class="btn btn-primary">Save</button></div>
         </form>
       </div>
     </div>
@@ -1759,28 +2047,34 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="/vendor/chart.umd.min.js"></script>
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/js/api.js?v=20260815g"></script>
+  <script src="/js/api.js?v=20261021e"></script>
+  <script src="/js/format.js?v=20261021e"></script>
   <script src="/js/receipts.js?v=20260815g"></script>
-  <script src="/js/nav.js?v=20260815g"></script>
-  <script src="/js/socket.js?v=20260815g"></script>
+  <script src="/js/nav.js?v=20261023e"></script>
+  <script src="/js/socket.js?v=20261021e"></script>
   <script src="/js/settings.js?v=20260815g"></script>
-  <script src="/js/tasks.js?v=20260815g"></script>
-  <script src="/js/projectDetail.js?v=20260815g"></script>
-  <script src="/js/community.js?v=20260815g"></script>
-  <script src="/js/voiceReport.js?v=20260826a"></script>
-  <script src="/js/voiceForms.js?v=20260826a"></script>
+  <script src="/js/tasks.js?v=20261021b"></script>
+  <script src="/js/myWork.js?v=20261021b"></script>
+  <script src="/js/approvals.js?v=20261021e"></script>
+  <script src="/js/projectDetail.js?v=20261021d"></script>
+  <script src="/js/clientCard.js?v=20261021d"></script>
+  <script src="/js/community.js?v=20261021e"></script>
+  <script src="/js/voiceReport.js?v=20260827b"></script>
+  <script src="/js/voiceForms.js?v=20260827b"></script>
   <script src="/js/ops.js?v=20260826a"></script>
-  <script src="/js/sales.js?v=20260815g"></script>
-  <script src="/js/director.js?v=20260815g"></script>
-  <script src="/js/developer.js?v=20260815g"></script>
-  <script src="/js/finance.js?v=20260815h"></script>
-  <script src="/js/hr.js?v=20260815g"></script>
-  <script src="/js/pm.js?v=20260815g"></script>
-  <script src="/js/adminInbox.js?v=20260815g"></script>
-  <script src="/js/admin.js?v=20260815g"></script>
-  <script src="/js/client.js?v=20260815g"></script>
-  <script src="/js/shell.js?v=20260815g"></script>
+  <script src="/js/sales.js?v=20261023b"></script>
+  <script src="/js/director.js?v=20261021e"></script>
+  <script src="/js/developer.js?v=20261021d"></script>
+  <script src="/js/finance.js?v=20261023c"></script>
+  <script src="/js/hr.js?v=20261021e"></script>
+  <script src="/js/pm.js?v=20261021e"></script>
+  <script src="/js/admin.js?v=20261023e"></script>
+  <script src="/js/client.js?v=20261021d"></script>
+  <script src="/js/traffic.js?v=20261021e"></script>
+  <script src="/js/websitePayments.js?v=20261021e"></script>
+  <script src="/js/adminHealth.js?v=20261021e"></script>
+  <script src="/js/shell.js?v=20261023e"></script>
 </body>
 </html>

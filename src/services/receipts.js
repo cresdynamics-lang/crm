@@ -11,7 +11,7 @@ function publicBaseUrl() {
   return (
     process.env.PUBLIC_WEB_URL ||
     process.env.APP_URL ||
-    'https://crm.cresdynamics.com'
+    'https://cresos.cresdynamics.com'
   ).replace(/\/$/, '');
 }
 
@@ -51,8 +51,8 @@ function companyBlock(company) {
     bankAccountNumber: company.bankAccountNumber,
     bankBranch: company.bankBranch || null,
     bankSwift: company.bankSwift || null,
-    mpesaPaybill: company.mpesaPaybill || null,
-    mpesaAccount: company.mpesaAccount || null,
+    mpesaPaybill: company.mpesaPaybill || '542542',
+    mpesaAccount: company.mpesaAccount || '43869',
     paymentNote: company.paymentNote,
     lateFeeNote: company.lateFeeNote || null,
     footer: company.footer,
@@ -206,8 +206,8 @@ async function invoiceReceipt(id) {
     },
     paymentInstructions: {
       payWithinDays: 5,
-      mpesaPaybill: company.mpesaPaybill,
-      mpesaAccount: company.mpesaAccount,
+      mpesaPaybill: company.mpesaPaybill || '542542',
+      mpesaAccount: company.mpesaAccount || '43869',
       bankName: company.bankName,
       bankAccountName: company.bankAccountName,
       bankAccountNumber: company.bankAccountNumber,
@@ -227,7 +227,7 @@ async function invoiceReceipt(id) {
       date: fmtDay(issueDate),
     },
     lines,
-    text: `${company.legalName} - Invoice ${invNo}\nKRA PIN: ${company.taxId}\n\n${linesToText(lines)}\n\nBank: ${company.bankName} · ${company.bankAccountNumber}\n\n${company.footer || ''}`,
+    text: `${company.legalName} - Invoice ${invNo}\nKRA PIN: ${company.taxId}\n\n${linesToText(lines)}\n\nM-Pesa: Paybill ${company.mpesaPaybill || '542542'} · Account ${company.mpesaAccount || '43869'}\nBank: ${company.bankName} · ${company.bankAccountNumber}\n\n${company.footer || ''}`,
     subject: `Invoice ${invNo} - ${company.legalName}`,
   };
 
@@ -352,6 +352,10 @@ async function paymentReceipt(id, { embedImages = true } = {}) {
           ? money(linkedOutstanding, currency)
           : null,
     },
+    paymentInstructions: {
+      mpesaPaybill: company.mpesaPaybill || '542542',
+      mpesaAccount: company.mpesaAccount || '43869',
+    },
     totals: {
       amount: paymentAmt,
       invoiceTotal: money(p.invoice_amount, currency),
@@ -372,7 +376,9 @@ async function paymentReceipt(id, { embedImages = true } = {}) {
     lines,
     text: `${company.legalName} - Payment receipt ${payNo}\n\n${linesToText(
       lines
-    )}\n\nOutstanding balance: ${outstandingLabel}\n\n${
+    )}\n\nOutstanding balance: ${outstandingLabel}\nM-Pesa: Paybill ${
+      company.mpesaPaybill || '542542'
+    } · Account ${company.mpesaAccount || '43869'}\n\n${
       company.footer || 'Thank you for your payment.'
     }`,
     subject: `Payment receipt ${payNo} - ${company.legalName}`,

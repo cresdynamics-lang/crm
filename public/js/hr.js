@@ -14,9 +14,7 @@ const CresHR = (() => {
   }
 
   function fmtMoney(n) {
-    const num = Number(n);
-    if (Number.isNaN(num)) return '-';
-    return num.toLocaleString('en-KE', { style: 'currency', currency: 'KES' });
+    return CresFormat.money(n);
   }
 
   function statusPill(s) {
@@ -130,7 +128,7 @@ const CresHR = (() => {
         data: {
           labels: d.chart.labels,
           datasets: [
-            { label: 'Settled', data: d.chart.settled, backgroundColor: 'rgba(31,167,160,0.65)', borderRadius: 6 },
+            { label: 'Settled', data: d.chart.settled, backgroundColor: 'rgba(0,168,197,0.65)', borderRadius: 6 },
             { label: 'Owed', data: d.chart.owed, backgroundColor: 'rgba(224,90,90,0.55)', borderRadius: 6 },
             { label: 'Expected', data: d.chart.expected, backgroundColor: 'rgba(59,130,246,0.7)', borderRadius: 6 },
           ],
@@ -227,13 +225,18 @@ const CresHR = (() => {
     return ['hr', 'admin'].includes(user?.role);
   }
 
+  function hashWantsMine() {
+    const q = (location.hash.split('?')[1] || '');
+    return new URLSearchParams(q).get('mine') === '1';
+  }
+
   async function mountPayroll(employeeId, user) {
     selectedEmployeeId = employeeId || null;
     const listPanel = document.getElementById('payroll-list-panel');
     const detailPanel = document.getElementById('payroll-detail-panel');
     if (!listPanel || !detailPanel) return;
 
-    const manage = isPayrollManager(user);
+    const manage = isPayrollManager(user) && !hashWantsMine();
     const title = document.getElementById('payroll-hero-title');
     const copy = document.getElementById('payroll-hero-copy');
     const exportBtn = document.getElementById('btn-export-payroll');
@@ -254,13 +257,22 @@ const CresHR = (() => {
         const res = await CresAPI.request('/api/salaries/me');
         const { employee, payroll, currentMonth } = res.data;
         if (!employee) {
-          detailPanel.innerHTML =
-            '<div class="placeholder-card">No employee record yet. Ask HR to onboard you so payroll can appear here.</div>';
+          const nameEl = document.getElementById('payroll-detail-name');
+          const metaEl = document.getElementById('payroll-detail-meta');
+          const currentBox = document.getElementById('payroll-current');
+          const hist = document.getElementById('payroll-history-tbody');
+          if (nameEl) nameEl.textContent = 'My pay';
+          if (metaEl) metaEl.textContent = '';
+          if (currentBox) {
+            currentBox.innerHTML =
+              '<div class="placeholder-card">No employee record yet. Ask HR to onboard you so payroll can appear here.</div>';
+          }
+          if (hist) hist.innerHTML = '';
           return;
         }
         document.getElementById('payroll-detail-name').textContent = employee.name;
         document.getElementById('payroll-detail-meta').textContent =
-          `${employee.position || 'No position'} · ${employee.pay_cycle || 'monthly'} · ${fmtMoney(employee.salary_amount)} · onboarded ${new Date(employee.created_at).toLocaleDateString()}`;
+          `${employee.position || 'No position'} · ${employee.pay_cycle || 'monthly'} · ${fmtMoney(employee.salary_amount)} · onboarded ${CresFormat.date(employee.created_at)}`;
 
         const current = (payroll || []).find((p) => p.month === currentMonth);
         const currentBox = document.getElementById('payroll-current');
@@ -285,7 +297,7 @@ const CresHR = (() => {
             <td>${fmtMoney(p.amount_expected)}</td>
             <td>${fmtMoney(p.amount_paid)}</td>
             <td>${statusPill(p.status)}</td>
-            <td>${p.settled_at ? new Date(p.settled_at).toLocaleDateString() : '-'}</td>
+            <td>${p.settled_at ? CresFormat.date(p.settled_at) : '-'}</td>
           </tr>`
           )
           .join('') || '<tr><td colspan="5" class="muted">No history</td></tr>';
@@ -395,7 +407,7 @@ const CresHR = (() => {
             settleAllowed
               ? `<button type="button" class="btn btn-primary" id="btn-settle" data-id="${esc(current.id)}" style="margin-top:12px;">Mark settled</button>`
               : current.status === 'settled'
-                ? `<p style="margin-top:12px;color:var(--text-muted);font-size:0.85rem;">Settled ${current.settled_at ? new Date(current.settled_at).toLocaleString() : ''}.</p>`
+                ? `<p style="margin-top:12px;color:var(--text-muted);font-size:0.85rem;">Settled ${current.settled_at ? CresFormat.datetime(current.settled_at) : ''}.</p>`
                 : `<p style="margin-top:12px;color:var(--text-muted);font-size:0.85rem;">Settling locked until Admin approves salary funding for ${esc(currentMonth)} (HR request → Finance → Admin).</p>`
           }`;
         document.getElementById('btn-settle')?.addEventListener('click', async () => {
@@ -427,7 +439,7 @@ const CresHR = (() => {
           <td>${fmtMoney(p.amount_expected)}</td>
           <td>${fmtMoney(p.amount_paid)}</td>
           <td>${statusPill(p.status)}</td>
-          <td>${p.settled_at ? new Date(p.settled_at).toLocaleDateString() : '-'}</td>
+          <td>${p.settled_at ? CresFormat.date(p.settled_at) : '-'}</td>
         </tr>`
         )
         .join('') || '<tr><td colspan="5" class="muted">No history</td></tr>';
@@ -481,6 +493,45 @@ const CresHR = (() => {
 
     document.querySelectorAll('#employee-modal [data-close-modal]').forEach((btn) => {
       btn.addEventListener('click', () => document.getElementById('employee-modal').classList.remove('open'));
+    });
+
+    document.getElementById('btn-add-applicant')?.addEventListener('click', () => openApplicantForm(null));
+    document.getElementById('applicants-filter-stage')?.addEventListener('change', () => {
+      mountApplicants().catch(console.error);
+    });
+    document.getElementById('applicant-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.target;
+      const id = form.dataset.id;
+      const payload = {
+        name: form.name.value.trim(),
+        email: form.email.value.trim() || null,
+        phone: form.phone.value.trim() || null,
+        role_applied: form.role_applied.value.trim(),
+        stage: form.stage.value,
+        interview_date: form.interview_date.value || null,
+        notes: form.notes.value.trim() || null,
+      };
+      try {
+        if (id) {
+          await CresAPI.request(`/api/hr/applicants/${id}`, { method: 'PATCH', body: payload });
+          flash(document.getElementById('applicants-flash'), 'Applicant updated');
+        } else {
+          await CresAPI.request('/api/hr/applicants', {
+            method: 'POST',
+            body: payload,
+            idempotencyKey: `app-${payload.email || payload.name}-${Date.now()}`,
+          });
+          flash(document.getElementById('applicants-flash'), 'Applicant added');
+        }
+        document.getElementById('applicant-modal')?.classList.remove('open');
+        await mountApplicants();
+      } catch (err) {
+        flash(document.getElementById('applicant-form-flash'), err.message, false);
+      }
+    });
+    document.querySelectorAll('#applicant-modal [data-close-modal]').forEach((btn) => {
+      btn.addEventListener('click', () => document.getElementById('applicant-modal')?.classList.remove('open'));
     });
 
     document.getElementById('btn-payroll-back')?.addEventListener('click', () => {
@@ -546,12 +597,14 @@ const CresHR = (() => {
   }
 
   async function mountLeave(user) {
-    const manage = canDecideLeave(user);
+    const manage = canDecideLeave(user) && !hashWantsMine();
     const copy = document.getElementById('leave-hero-copy');
+    const heroH = document.querySelector('#face-leave .face-hero h2');
+    if (heroH) heroH.textContent = manage ? 'Leave requests' : 'My leave';
     if (copy) {
       copy.textContent = manage
-        ? 'All staff leave requests. Approve or reject pending items. New requests notify HR.'
-        : 'Request time off. Your requests go to HR for approval.';
+        ? 'Approve or reject pending leave. New requests notify HR.'
+        : 'Request time off. HR reviews every request.';
     }
 
     const empWrap = document.getElementById('leave-employee-wrap');
@@ -559,7 +612,7 @@ const CresHR = (() => {
     if (empWrap) empWrap.hidden = !manage;
     if (empSel) empSel.required = manage;
 
-    const leaveRes = await CresAPI.request('/api/leave');
+    const leaveRes = await CresAPI.request(manage ? '/api/leave' : '/api/leave/mine');
     if (manage) {
       const empRes = await CresAPI.request('/api/salaries/employees').catch(() => ({ data: [] }));
       if (empSel) {
@@ -713,12 +766,150 @@ const CresHR = (() => {
     }
   }
 
+  const APPLICANT_STAGES = [
+    { id: 'applied', label: 'Applied' },
+    { id: 'interview', label: 'Interview' },
+    { id: 'offer', label: 'Offer' },
+    { id: 'hired', label: 'Hired' },
+    { id: 'rejected', label: 'Rejected' },
+  ];
+
+  function stageLabel(s) {
+    return APPLICANT_STAGES.find((x) => x.id === s)?.label || s || 'Applied';
+  }
+
+  async function mountApplicants() {
+    const tbody = document.getElementById('applicants-tbody');
+    if (!tbody) return;
+    const stage = document.getElementById('applicants-filter-stage')?.value || '';
+    const qs = stage ? `?stage=${encodeURIComponent(stage)}` : '';
+    try {
+      const res = await CresAPI.request(`/api/hr/applicants${qs}`);
+      const rows = res.data || [];
+      tbody.innerHTML = rows.length
+        ? rows
+            .map(
+              (a) => `<tr data-id="${esc(a.id)}">
+                <td>${esc(a.name)}</td>
+                <td>${esc(a.email || '—')}</td>
+                <td>${esc(a.phone || '—')}</td>
+                <td>${esc(a.role_applied)}</td>
+                <td>${statusPill(a.stage)}</td>
+                <td>${a.interview_date ? CresFormat.date(a.interview_date) : '—'}</td>
+                <td>${esc(a.notes || '—')}</td>
+                <td><button type="button" class="btn btn-ghost btn-sm" data-edit-applicant="${esc(a.id)}">Edit</button></td>
+              </tr>`
+            )
+            .join('')
+        : `<tr><td colspan="8" class="empty-state">No applicants yet.</td></tr>`;
+      tbody.querySelectorAll('[data-edit-applicant]').forEach((btn) => {
+        btn.addEventListener('click', () => openApplicantForm(rows.find((r) => r.id === btn.dataset.editApplicant)));
+      });
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan="8">${esc(err.message)}</td></tr>`;
+    }
+  }
+
+  function openApplicantForm(row) {
+    const modal = document.getElementById('applicant-modal');
+    const form = document.getElementById('applicant-form');
+    const title = document.getElementById('applicant-modal-title');
+    if (!modal || !form) return;
+    form.reset();
+    form.dataset.id = row?.id || '';
+    if (title) title.textContent = row ? 'Edit applicant' : 'Add applicant';
+    if (row) {
+      form.name.value = row.name || '';
+      form.email.value = row.email || '';
+      form.phone.value = row.phone || '';
+      form.role_applied.value = row.role_applied || '';
+      form.stage.value = row.stage || 'applied';
+      form.interview_date.value = row.interview_date ? String(row.interview_date).slice(0, 10) : '';
+      form.notes.value = row.notes || '';
+    }
+    modal.classList.add('open');
+  }
+
+  async function mountOnboarding() {
+    const host = document.getElementById('onboarding-list');
+    if (!host) return;
+    try {
+      const res = await CresAPI.request('/api/hr/onboarding');
+      const rows = res.data || [];
+      const defaults = res.meta?.defaultItems || [];
+      if (!rows.length) {
+        host.innerHTML = `<div class="placeholder-card">Add employees first, then set their onboarding checklist and 30/60/90-day goals.</div>`;
+        return;
+      }
+      host.innerHTML = rows
+        .map((r) => {
+          const items = r.items?.length ? r.items : defaults;
+          const done = items.filter((i) => i.done).length;
+          return `<div class="settings-section" style="max-width:none;margin-bottom:14px;" data-onboard="${esc(r.employee_id)}">
+            <div class="toolbar" style="margin-bottom:8px;">
+              <div>
+                <strong>${esc(r.name)}</strong>
+                <div class="meta">${esc(r.position || '—')} · ${done}/${items.length} complete</div>
+              </div>
+              <button type="button" class="btn btn-primary btn-sm" data-save-onboard="${esc(r.employee_id)}">Save</button>
+            </div>
+            <div class="onboard-items">
+              ${items
+                .map(
+                  (i) => `<label class="onboard-item">
+                    <input type="checkbox" data-item="${esc(i.id)}" ${i.done ? 'checked' : ''} />
+                    <span>${esc(i.label)}</span>
+                  </label>`
+                )
+                .join('')}
+            </div>
+            <div class="form-grid" style="margin-top:12px;">
+              <div><label>30-day goal</label><textarea data-g30 rows="2" placeholder="What good looks like at 30 days">${esc(r.goal_30 || '')}</textarea></div>
+              <div><label>60-day goal</label><textarea data-g60 rows="2" placeholder="What good looks like at 60 days">${esc(r.goal_60 || '')}</textarea></div>
+              <div style="grid-column:1/-1;"><label>90-day goal</label><textarea data-g90 rows="2" placeholder="What good looks like at 90 days">${esc(r.goal_90 || '')}</textarea></div>
+            </div>
+          </div>`;
+        })
+        .join('');
+      host.querySelectorAll('[data-save-onboard]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const card = host.querySelector(`[data-onboard="${btn.dataset.saveOnboard}"]`);
+          if (!card) return;
+          const items = [...card.querySelectorAll('.onboard-item')].map((lab) => ({
+            id: lab.querySelector('input')?.dataset.item,
+            label: lab.querySelector('span')?.textContent,
+            done: lab.querySelector('input')?.checked,
+          }));
+          try {
+            await CresAPI.request(`/api/hr/onboarding/${btn.dataset.saveOnboard}`, {
+              method: 'PUT',
+              body: {
+                items,
+                goal_30: card.querySelector('[data-g30]')?.value,
+                goal_60: card.querySelector('[data-g60]')?.value,
+                goal_90: card.querySelector('[data-g90]')?.value,
+              },
+            });
+            flash(document.getElementById('onboarding-flash'), 'Onboarding saved');
+            await mountOnboarding();
+          } catch (err) {
+            flash(document.getElementById('onboarding-flash'), err.message, false);
+          }
+        });
+      });
+    } catch (err) {
+      host.innerHTML = `<div class="placeholder-card">${esc(err.message)}</div>`;
+    }
+  }
+
   async function mount(faceId, user, faceParam) {
     if (faceId === 'home' && user.role === 'hr') await mountHome();
     else if (faceId === 'employees' && ['hr', 'admin'].includes(user.role)) await mountEmployees();
     else if (faceId === 'salaries') await mountPayroll(faceParam || null, user);
     else if (faceId === 'leave') await mountLeave(user);
     else if (faceId === 'salary-funding') await mountSalaryFunding(user);
+    else if (faceId === 'applicants' && ['hr', 'admin'].includes(user.role)) await mountApplicants();
+    else if (faceId === 'onboarding' && ['hr', 'admin'].includes(user.role)) await mountOnboarding();
   }
 
   return { bind, mount, openEmployeeForm, mountSalaryFunding };

@@ -239,7 +239,7 @@ router.post(
           userId: t.id,
           type: 'task_assigned',
           content: `New task from ${req.user.name} (${req.user.role}): ${titleTrim}`,
-        meta: { taskId: row.id, assignedByRole: req.user.role, href: '#/tasks' },
+        meta: { taskId: row.id, assignedByRole: req.user.role, href: '#/work' },
         });
       }
     }
@@ -255,7 +255,7 @@ router.post(
         meta: {
           taskIds: created.map((c) => c.id),
           assignedBy: req.user.id,
-          href: '#/tasks',
+          href: '#/work',
         },
       });
     }
@@ -367,13 +367,18 @@ router.post(
   requirePermission('tasks', 'create'),
   memUpload.single('audio'),
   asyncHandler(async (req, res) => {
-    if (!req.file) throw new AppError('No audio file', 400, 'VALIDATION');
-
-    const { text: transcript } = await transcribeAudio({
-      buffer: req.file.buffer,
-      filename: req.file.originalname || 'recording.webm',
-      mimetype: req.file.mimetype || 'audio/webm',
-    });
+    let transcript;
+    if (req.file) {
+      const result = await transcribeAudio({
+        buffer: req.file.buffer,
+        filename: req.file.originalname || 'recording.webm',
+        mimetype: req.file.mimetype || 'audio/webm',
+      });
+      transcript = result.text;
+    } else {
+      transcript = String(req.body?.text || '').trim();
+    }
+    if (!transcript) throw new AppError('No audio or text to process', 400, 'VALIDATION');
 
     let projects = [];
     try {

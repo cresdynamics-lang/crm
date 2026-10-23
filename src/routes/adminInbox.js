@@ -140,9 +140,17 @@ router.post(
     if (!body) throw new AppError('No draft body to send', 400, 'VALIDATION');
 
     const subject = req.body?.subject || `Re: ${msg.subject || ''}`.trim();
-    const cc = [...new Set([...(msg.cc_emails || []), ...(msg.to_emails || [])])].filter(
+
+    // Original recipients (CC + To) are CC'd back, minus the sender.
+    const originalCc = [...new Set([...(msg.cc_emails || []), ...(msg.to_emails || [])])].filter(
       (e) => e && e.toLowerCase() !== msg.from_email.toLowerCase()
     );
+    // Optional extra CC supplied by the admin at send time.
+    const extraCc = String(req.body?.cc || '')
+      .split(/[,;\s]+/)
+      .map((e) => e.trim())
+      .filter(Boolean);
+    const cc = [...new Set([...originalCc, ...extraCc])].filter(Boolean);
 
     const sent = await sendWithFailover({
       to: msg.from_email,

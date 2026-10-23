@@ -12,8 +12,7 @@ const CresTasks = (() => {
   }
 
   function fmtDate(v) {
-    if (!v) return '-';
-    return new Date(v).toLocaleDateString();
+    return CresFormat.date(v);
   }
 
   function statusPill(s) {
@@ -95,13 +94,13 @@ const CresTasks = (() => {
     const formWrap = document.getElementById('task-form')?.closest('.settings-section');
     if (formWrap) formWrap.hidden = false;
 
-    const hero = document.querySelector('#face-tasks .face-hero');
-    if (hero) {
+    const hero = document.querySelector('#face-work .face-hero');
+    if (hero && location.hash.replace(/^#/, '').split('?')[0] === '/tasks') {
       hero.querySelector('h2').textContent = 'Tasks';
       hero.querySelector('p').textContent = heroCopy(me);
     }
 
-    const listTitle = document.querySelector('#face-tasks h3');
+    const listTitle = document.getElementById('work-tasks-heading') || document.querySelector('#face-work h3');
     if (listTitle) {
       listTitle.textContent = ['director', 'admin', 'pm'].includes(me.role)
         ? 'Task board'

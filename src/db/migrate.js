@@ -2,13 +2,31 @@ const fs = require('fs');
 const path = require('path');
 const { pool } = require('../config/database');
 
+async function applySql(client, label, sql) {
+  await client.query(sql);
+  console.log(`[migrate] applied ${label}`);
+}
+
 async function migrate() {
   const schemaPath = path.join(__dirname, 'schema.sql');
+  const migrationsDir = path.join(__dirname, 'migrations');
   const sql = fs.readFileSync(schemaPath, 'utf8');
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query(sql);
+    await applySql(client, 'schema.sql', sql);
+
+    if (fs.existsSync(migrationsDir)) {
+      const files = fs
+        .readdirSync(migrationsDir)
+        .filter((f) => f.endsWith('.sql'))
+        .sort();
+      for (const file of files) {
+        const migrationSql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
+        await applySql(client, `migrations/${file}`, migrationSql);
+      }
+    }
+
     await client.query('COMMIT');
     console.log('[migrate] schema applied successfully');
   } catch (err) {
