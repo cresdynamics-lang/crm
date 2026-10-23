@@ -281,12 +281,16 @@ CREATE TABLE IF NOT EXISTS salary_payments (
 
 CREATE INDEX IF NOT EXISTS idx_salary_payments_status ON salary_payments(status);
 
--- FK from expenses.linked_salary_id → salary_payments (added after both exist)
-ALTER TABLE expenses
-  DROP CONSTRAINT IF EXISTS expenses_linked_salary_id_fkey;
-ALTER TABLE expenses
-  ADD CONSTRAINT expenses_linked_salary_id_fkey
-  FOREIGN KEY (linked_salary_id) REFERENCES salary_payments(id) ON DELETE SET NULL;
+-- FK from expenses.linked_salary_id → salary_payments (added after both exist).
+-- Skip on databases where salary_payments.id is not unique (no PK).
+DO $$ BEGIN
+  ALTER TABLE expenses DROP CONSTRAINT IF EXISTS expenses_linked_salary_id_fkey;
+  ALTER TABLE expenses
+    ADD CONSTRAINT expenses_linked_salary_id_fkey
+    FOREIGN KEY (linked_salary_id) REFERENCES salary_payments(id) ON DELETE SET NULL;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'skip expenses_linked_salary_id_fkey: %', SQLERRM;
+END $$;
 
 -- ---------------------------------------------------------------------------
 -- Community / Notifications
@@ -564,15 +568,50 @@ CREATE TABLE IF NOT EXISTS followup_alert_log (
 );
 
 -- System setting for expense approval threshold
-INSERT INTO system_settings (key, value)
-VALUES ('expense_approval', '{"threshold": 500, "requireAboveThreshold": true}'::jsonb)
-ON CONFLICT (key) DO NOTHING;
+DO $$ BEGIN
+  INSERT INTO system_settings (key, value)
+  VALUES ('expense_approval', '{"threshold": 500, "requireAboveThreshold": true}'::jsonb)
+  ON CONFLICT (key) DO NOTHING;
+EXCEPTION WHEN OTHERS THEN
+  INSERT INTO system_settings (key, value)
+  SELECT 'expense_approval', '{"threshold": 500, "requireAboveThreshold": true}'::jsonb
+  WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE key = 'expense_approval');
+END $$;
 
 -- Cres Dynamics invoice / receipt letterhead (Kenya)
+UPDATE system_settings SET
+  value = '{
+    "legalName": "Cres Dynamics Ltd",
+    "tradingName": "Cres Dynamics Ltd",
+    "tagline": "Building Intelligent Systems that Run Your Business",
+    "addressLines": ["P.O. BOX 1112 – 00100, NAIROBI, KENYA", "Kivuli Towers, 3rd floor, Westlands, Nairobi"],
+    "phone": "+254 743 869 564 / +254 708 805 496",
+    "email": "info@cresdynamics.com",
+    "financeEmail": "finance@cresdynamics.com",
+    "emailFromName": "Cres Dynamics Finance",
+    "website": "www.cresdynamics.com",
+    "taxLabel": "KRA PIN",
+    "taxId": "P052570833B",
+    "currency": "KES",
+    "bankName": "I & M Bank",
+    "bankAccountName": "Cres Dynamics Ltd",
+    "bankAccountNumber": "01209982836350",
+    "bankBranch": "Ongata Rongai",
+    "mpesaPaybill": "542542",
+    "mpesaAccount": "43869",
+    "paymentNote": "Please use the invoice number as your payment reference.",
+    "lateFeeNote": "Late payments attract 2% monthly interest after the due date. For payment queries contact info@cresdynamics.com or +254 708 805 496.",
+    "footer": "Thank you for your business. Building Intelligent Systems that Run Your Business — cresdynamics.com",
+    "logoUrl": "/brand/logo.png?v=20261023",
+    "signatureUrl": "/brand/signature.png?v=20260815e",
+    "financeSignatureUrl": "/brand/signature-scholastica.png?v=20260815f",
+    "invoicedBy": {"name": "Scholastica Omoro", "title": "Finance, Cres Dynamics Ltd"},
+    "authorisedBy": {"name": "Nelson Were", "title": "Chief Executive Officer, Cres Dynamics Ltd"}
+  }'::jsonb,
+  updated_at = NOW()
+WHERE key = 'company_profile';
 INSERT INTO system_settings (key, value)
-VALUES (
-  'company_profile',
-  '{
+SELECT 'company_profile', '{
     "legalName": "Cres Dynamics Ltd",
     "tradingName": "Cres Dynamics Ltd",
     "tagline": "Building Intelligent Systems that Run Your Business",
@@ -600,8 +639,7 @@ VALUES (
     "invoicedBy": {"name": "Scholastica Omoro", "title": "Finance, Cres Dynamics Ltd"},
     "authorisedBy": {"name": "Nelson Were", "title": "Chief Executive Officer, Cres Dynamics Ltd"}
   }'::jsonb
-)
-ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();
+WHERE NOT EXISTS (SELECT 1 FROM system_settings WHERE key = 'company_profile');
 
 -- ---------------------------------------------------------------------------
 -- Role lock-down: developer assignment Accept/Swap/Reject + action audit
@@ -724,9 +762,13 @@ CREATE TABLE IF NOT EXISTS salary_funding_requests (
 CREATE INDEX IF NOT EXISTS idx_salary_funding_month ON salary_funding_requests(month);
 CREATE INDEX IF NOT EXISTS idx_salary_funding_status ON salary_funding_requests(status);
 -- One active (non-rejected) request per month
-CREATE UNIQUE INDEX IF NOT EXISTS idx_salary_funding_active_month
-  ON salary_funding_requests(month)
-  WHERE status IN ('pending_finance', 'finance_approved', 'admin_approved');
+DO $$ BEGIN
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_salary_funding_active_month
+    ON salary_funding_requests(month)
+    WHERE status IN ('pending_finance', 'finance_approved', 'admin_approved');
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'skip idx_salary_funding_active_month: %', SQLERRM;
+END $$;
 
 -- Payments: bank / remittance reference per payment
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS bank_reference VARCHAR(120);
@@ -768,8 +810,12 @@ CREATE TABLE IF NOT EXISTS admin_inbox_messages (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_inbox_message_id
-  ON admin_inbox_messages(message_id) WHERE message_id IS NOT NULL;
+DO $$ BEGIN
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_inbox_message_id
+    ON admin_inbox_messages(message_id) WHERE message_id IS NOT NULL;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'skip idx_admin_inbox_message_id: %', SQLERRM;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_admin_inbox_status ON admin_inbox_messages(status);
 CREATE INDEX IF NOT EXISTS idx_admin_inbox_received ON admin_inbox_messages(received_at DESC);
 
@@ -779,7 +825,11 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS finance_seq INTEGER;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS invoice_number VARCHAR(40);
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS line_items JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS issue_date DATE;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_number ON invoices(invoice_number) WHERE invoice_number IS NOT NULL;
+DO $$ BEGIN
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_number ON invoices(invoice_number) WHERE invoice_number IS NOT NULL;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'skip idx_invoices_number: %', SQLERRM;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_projects_finance_seq ON projects(finance_seq);
 
 -- Assigned director: users report to a specific director (set by Admin/HR)
@@ -916,20 +966,42 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS due_date DATE;
 
 CREATE TABLE IF NOT EXISTS project_messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  project_id UUID NOT NULL,
+  sender_id UUID NOT NULL,
   body TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_project_messages_project ON project_messages(project_id, created_at);
+DO $$ BEGIN
+  ALTER TABLE project_messages
+    ADD CONSTRAINT project_messages_project_id_fkey
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE;
+  ALTER TABLE project_messages
+    ADD CONSTRAINT project_messages_sender_id_fkey
+    FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+WHEN OTHERS THEN
+  RAISE NOTICE 'skip project_messages FKs: %', SQLERRM;
+END $$;
 
 ALTER TABLE client_change_requests DROP CONSTRAINT IF EXISTS client_change_requests_status_check;
 ALTER TABLE client_change_requests ADD CONSTRAINT client_change_requests_status_check
   CHECK (status IN ('open', 'acknowledged', 'closed', 'accepted', 'quoted', 'declined'));
 ALTER TABLE client_change_requests ADD COLUMN IF NOT EXISTS quote_amount NUMERIC(14, 2);
 ALTER TABLE client_change_requests ADD COLUMN IF NOT EXISTS staff_note TEXT;
-ALTER TABLE client_change_requests ADD COLUMN IF NOT EXISTS decided_by UUID REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE client_change_requests ADD COLUMN IF NOT EXISTS decided_by UUID;
 ALTER TABLE client_change_requests ADD COLUMN IF NOT EXISTS decided_at TIMESTAMPTZ;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS mpesa_claim_code VARCHAR(40);
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS mpesa_claimed_at TIMESTAMPTZ;
-ALTER TABLE invoices ADD COLUMN IF NOT EXISTS mpesa_claimed_by UUID REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS mpesa_claimed_by UUID;
+DO $$ BEGIN
+  ALTER TABLE client_change_requests
+    ADD CONSTRAINT client_change_requests_decided_by_fkey
+    FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL;
+  ALTER TABLE invoices
+    ADD CONSTRAINT invoices_mpesa_claimed_by_fkey
+    FOREIGN KEY (mpesa_claimed_by) REFERENCES users(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_object THEN NULL;
+WHEN OTHERS THEN
+  RAISE NOTICE 'skip decided_by/mpesa_claimed_by FKs: %', SQLERRM;
+END $$;

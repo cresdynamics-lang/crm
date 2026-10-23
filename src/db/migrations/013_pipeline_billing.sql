@@ -30,4 +30,7 @@ SELECT r.id, p.id
 FROM roles r
 JOIN permissions p ON p.resource = 'messages' AND p.action IN ('view', 'create')
 WHERE r.name = 'finance'
-ON CONFLICT DO NOTHING;
+  AND NOT EXISTS (
+    SELECT 1 FROM role_permissions rp
+    WHERE rp.role_id = r.id AND rp.permission_id = p.id
+  );
