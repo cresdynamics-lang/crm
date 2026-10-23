@@ -48,3 +48,8 @@ coverage/
 
 # Package manager noise
 package-lock.json.bak
+
+# Jarvis: personal memory and local caches stay on this machine
+jarvis/memory/
+jarvis/.vite/
+jarvis/public/mediapipe/
