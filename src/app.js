@@ -43,6 +43,7 @@ const salaryFundingRoutes = require('./routes/salaryFunding');
 const adminInboxRoutes = require('./routes/adminInbox');
 const attendanceRoutes = require('./routes/attendance');
 const approvalsRoutes = require('./routes/approvals');
+const jarvisRoutes = require('./routes/jarvis');
 
 function createApp() {
   const app = express();
@@ -105,6 +106,7 @@ function createApp() {
   app.use('/api/ops', opsRoutes);
   app.use('/api/attendance', attendanceRoutes);
   app.use('/api/approvals', approvalsRoutes);
+  app.use('/api/jarvis', jarvisRoutes);
 
   app.use('/uploads', express.static(uploadsDir));
 
