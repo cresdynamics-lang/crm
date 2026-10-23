@@ -1,0 +1,63 @@
+# CRES OS continuous integration: every push and pull request gets a fresh
+# database, the schema + seed data, the full test suite and a security audit.
+# A red build means: do not deploy.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: cres
+          POSTGRES_PASSWORD: cres
+          POSTGRES_DB: cres_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U cres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgres://cres:cres@localhost:5432/cres_test
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci-only-secret-not-used-anywhere-else-0123456789
+      JWT_EXPIRES_IN: 1h
+      MAIL_MAILER: stub
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Syntax check (server)
+        run: find src -name '*.js' -print0 | xargs -0 -n1 node --check
+
+      - name: Database schema + seed
+        run: npm run db:setup
+
+      - name: Tests
+        run: npm test
+
+      - name: Security audit (production dependencies)
+        run: npm audit --omit=dev --audit-level=high

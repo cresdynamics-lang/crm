@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Inbox - Cres Dynamics</title>
+  <link rel="icon" href="/brand/logo-mark.png?v=20261023" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/tokens.css?v=20261023" />
+  <link rel="stylesheet" href="/css/meeting.css?v=20261024m4" />
+  <link rel="stylesheet" href="/css/inbox.css?v=20261024i2" />
+</head>
+<body class="mt-page ib-page">
+  <header class="mt-top">
+    <a class="mt-brand" href="/dashboard"><img src="/brand/logo-mark.png?v=20261023" alt="" /> <span>CRES OS · Inbox</span></a>
+    <div class="mt-top-right">
+      <span class="mt-muted small" id="ib-mailbox"></span>
+      <a class="mt-link" href="/dashboard">Dashboard</a>
+    </div>
+  </header>
+
+  <main class="ib-main" id="ib-main" hidden>
+    <section class="ib-list-pane">
+      <div class="ib-toolbar">
+        <div class="ib-tabs" id="ib-tabs">
+          <button type="button" class="on" data-status="active">Active</button>
+          <button type="button" data-status="sent">Sent</button>
+          <button type="button" data-status="ignored">Ignored</button>
+          <button type="button" data-status="all">All</button>
+        </div>
+        <button type="button" class="mt-btn sm primary" id="ib-sync">⟳ Sync now</button>
+      </div>
+      <ul class="ib-list" id="ib-list"><li class="mt-muted small ib-empty">Loading…</li></ul>
+    </section>
+
+    <section class="ib-detail" id="ib-detail">
+      <div class="ib-placeholder mt-muted" id="ib-placeholder">Select an email to read it and reply.</div>
+      <article id="ib-message" hidden>
+        <header class="ib-head">
+          <h2 id="ib-subject"></h2>
+          <div class="ib-meta" id="ib-meta"></div>
+          <div class="ib-summary" id="ib-summary" hidden></div>
+        </header>
+        <div class="ib-body" id="ib-body"></div>
+        <div class="ib-attach" id="ib-attach" hidden></div>
+
+        <div class="ib-reply" id="ib-reply">
+          <div class="ib-reply-head">
+            <strong>Reply</strong>
+            <span class="mt-muted small" id="ib-drafted-by"></span>
+          </div>
+          <div class="ib-jarvis">
+            <input type="text" id="ib-instructions" placeholder="Tell Jarvis how to reply (optional), e.g. “accept the meeting on Tuesday, ask for the API docs”" />
+            <button type="button" class="mt-btn primary" id="ib-draft">✦ Draft with Jarvis</button>
+          </div>
+          <textarea id="ib-draft-body" rows="12" placeholder="Write a reply, or let Jarvis draft one for you to review."></textarea>
+          <div class="ib-send-row">
+            <input type="text" id="ib-cc" placeholder="Extra CC (optional, comma separated)" />
+            <button type="button" class="mt-btn" id="ib-ignore">Ignore</button>
+            <button type="button" class="mt-btn primary" id="ib-send">Send reply</button>
+          </div>
+          <p class="mt-muted small ib-note">Replies go from info@cresdynamics.com and thread under the original email. Nothing is sent until you press Send.</p>
+        </div>
+        <div class="ib-closed" id="ib-closed" hidden></div>
+      </article>
+    </section>
+  </main>
+
+  <main class="mt-lobby" id="ib-denied" hidden>
+    <section class="mt-card"><h2>Inbox</h2><p class="mt-muted">The company inbox is for admins only.</p></section>
+  </main>
+
+  <div class="mt-toasts" id="toasts"></div>
+
+  <script src="/js/api.js?v=20261024s1"></script>
+  <script src="/js/inbox.js?v=20261024i1"></script>
+</body>
+</html>

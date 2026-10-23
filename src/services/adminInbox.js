@@ -56,64 +56,25 @@ async function syncAdminInbox({ limit = 20 } = {}) {
     logger: false,
   });
 
+  // Download first, process after: the slow part (PDF summaries) happens with
+  // the mailbox connection already closed, so the server cannot time it out.
   await client.connect();
-  let synced = 0;
+  const fresh = [];
   try {
     const lock = await client.getMailboxLock('INBOX');
     try {
       const total = client.mailbox.exists || 0;
       if (!total) return { synced: 0, total: 0 };
       const start = Math.max(1, total - limit + 1);
-      for await (const msg of client.fetch(`${start}:*`, { uid: true, source: true, envelope: true })) {
-        try {
-          const parsed = await simpleParser(msg.source);
-          const messageId = parsed.messageId || msg.envelope?.messageId || `uid-${msg.uid}`;
-          const existing = await query(
-            `SELECT id, status FROM admin_inbox_messages WHERE message_id = $1`,
-            [messageId]
-          );
-          if (existing.rows[0]) continue;
-
-          const fromEmail = parsed.from?.value?.[0]?.address || 'unknown@unknown';
-          const fromName = parsed.from?.value?.[0]?.name || null;
-          const toEmails = addresses(parsed.to);
-          const ccEmails = addresses(parsed.cc);
-          const attachmentSummaries = await summarizeAttachments(parsed);
-          const bodyText = parsed.text || parsed.html?.replace(/<[^>]+>/g, ' ') || '';
-
-          let aiDraft = null;
-          let aiSummary = null;
-          let status = 'pending';
-          // Skip AI draft during bulk sync — generate on-demand via regenerate button
-          // to avoid TPM rate limits on free tier
-
-          await query(
-            `INSERT INTO admin_inbox_messages
-               (imap_uid, message_id, from_email, from_name, to_emails, cc_emails,
-                subject, body_text, body_html, received_at, has_attachments,
-                attachment_summaries, status, ai_draft, ai_summary)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15)`,
-            [
-              msg.uid,
-              messageId,
-              fromEmail,
-              fromName,
-              toEmails,
-              ccEmails,
-              parsed.subject || '(no subject)',
-              bodyText.slice(0, 50000),
-              parsed.html ? String(parsed.html).slice(0, 100000) : null,
-              parsed.date || new Date(),
-              attachmentSummaries.length > 0,
-              JSON.stringify(attachmentSummaries),
-              status,
-              aiDraft,
-              aiSummary,
-            ]
-          );
-          synced += 1;
-        } catch (err) {
-          console.warn('[inbox] message sync failed', err.message);
+      const wanted = [];
+      for await (const msg of client.fetch(`${start}:*`, { uid: true, envelope: true })) {
+        const id = msg.envelope?.messageId || `uid-${msg.uid}`;
+        const existing = await query(`SELECT 1 FROM admin_inbox_messages WHERE message_id = $1`, [id]);
+        if (!existing.rows[0]) wanted.push(msg.uid);
+      }
+      if (wanted.length) {
+        for await (const msg of client.fetch(wanted.join(','), { uid: true, source: true, envelope: true }, { uid: true })) {
+          fresh.push({ uid: msg.uid, source: msg.source, envelope: msg.envelope });
         }
       }
     } finally {
@@ -121,6 +82,53 @@ async function syncAdminInbox({ limit = 20 } = {}) {
     }
   } finally {
     await client.logout().catch(() => {});
+  }
+
+  let synced = 0;
+  for (const msg of fresh) {
+    try {
+      const parsed = await simpleParser(msg.source);
+      const messageId = parsed.messageId || msg.envelope?.messageId || `uid-${msg.uid}`;
+      const existing = await query(`SELECT id FROM admin_inbox_messages WHERE message_id = $1`, [messageId]);
+      if (existing.rows[0]) continue;
+
+      const fromEmail = parsed.from?.value?.[0]?.address || 'unknown@unknown';
+      const fromName = parsed.from?.value?.[0]?.name || null;
+      const toEmails = addresses(parsed.to);
+      const ccEmails = addresses(parsed.cc);
+      const attachmentSummaries = await summarizeAttachments(parsed);
+      const bodyText = parsed.text || parsed.html?.replace(/<[^>]+>/g, ' ') || '';
+
+      // Drafts are written on demand (Draft with Jarvis), not during sync.
+      await query(
+        `INSERT INTO admin_inbox_messages
+           (imap_uid, message_id, from_email, from_name, to_emails, cc_emails,
+            subject, body_text, body_html, received_at, has_attachments,
+            attachment_summaries, status, ai_draft, ai_summary)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15)
+         ON CONFLICT DO NOTHING`,
+        [
+          msg.uid,
+          messageId,
+          fromEmail,
+          fromName,
+          toEmails,
+          ccEmails,
+          parsed.subject || '(no subject)',
+          bodyText.slice(0, 50000),
+          parsed.html ? String(parsed.html).slice(0, 100000) : null,
+          parsed.date || new Date(),
+          attachmentSummaries.length > 0,
+          JSON.stringify(attachmentSummaries),
+          'pending',
+          null,
+          null,
+        ]
+      );
+      synced += 1;
+    } catch (err) {
+      console.warn('[inbox] message sync failed', err.message);
+    }
   }
 
   return { synced, mailbox: user };

@@ -9,7 +9,10 @@ const { expenseClass } = require('../lib/expenseClasses');
 const { openRouterJson } = require('./openRouter');
 
 const TZ = 'Africa/Nairobi';
-const CACHE_TTL_MS = 5 * 60 * 1000;
+// Fresh for 30 minutes; after that the old copy is served instantly while a
+// new one is written in the background (nobody waits for the AI).
+const CACHE_TTL_MS = 30 * 60 * 1000;
+const inFlight = new Map();
 const cache = new Map();
 
 function eatToday() {
@@ -495,7 +498,25 @@ async function buildDailyDigest({ date, refresh = false } = {}) {
   if (!refresh) {
     const hit = cache.get(cacheKey);
     if (hit && Date.now() - hit.at < CACHE_TTL_MS) return { ...hit.payload, cached: true };
+    if (hit) {
+      // Stale: answer now, refresh behind the scenes (once at a time).
+      if (!inFlight.has(cacheKey)) {
+        inFlight.set(cacheKey, writeDigest(day).catch(() => {}).finally(() => inFlight.delete(cacheKey)));
+      }
+      return { ...hit.payload, cached: true, stale: true };
+    }
   }
+  if (inFlight.has(cacheKey) && !refresh) {
+    await inFlight.get(cacheKey);
+    const fresh = cache.get(cacheKey);
+    if (fresh) return { ...fresh.payload, cached: true };
+  }
+  return writeDigest(day);
+}
+
+/** Gather facts, ask the model, cache. */
+async function writeDigest(day) {
+  const cacheKey = day;
 
   const facts = await gatherFacts(day);
   const configured = Boolean(config.openRouter.apiKey);
@@ -533,4 +554,18 @@ async function buildDailyDigest({ date, refresh = false } = {}) {
   return { ...payload, cached: false };
 }
 
-module.exports = { buildDailyDigest, eatToday, parseDay };
+/**
+ * Scheduler: keep today's digest ready during working hours (06:00-20:00
+ * Nairobi), so opening it is instant. About 28 AI calls a day.
+ */
+function prewarmDigest() {
+  if (!config.openRouter.apiKey) return Promise.resolve(null);
+  const hour = Number(new Date().toLocaleString('en-GB', { hour: '2-digit', hour12: false, timeZone: TZ }));
+  if (hour < 6 || hour >= 20) return Promise.resolve(null);
+  const day = parseDay();
+  const hit = cache.get(day);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS - 60 * 1000) return Promise.resolve(null);
+  return writeDigest(day).catch((e) => console.warn(`[daily-digest] prewarm failed: ${e.message}`));
+}
+
+module.exports = { buildDailyDigest, prewarmDigest, eatToday, parseDay };

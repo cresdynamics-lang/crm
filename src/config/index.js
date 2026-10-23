@@ -12,7 +12,7 @@ const config = {
   redisUrl: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
   jwt: {
     secret: process.env.JWT_SECRET || 'dev-insecure-secret',
-    expiresIn: process.env.JWT_EXPIRES_IN || '8h',
+    expiresIn: process.env.JWT_EXPIRES_IN || '1h',
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
   },
   email: {

@@ -1015,6 +1015,9 @@ const CresSales = (() => {
   let voicePauseStartedAt = null;
   let voicePauseElapsed = 0;
   let voiceParsedLeads = [];
+  // true when the recording is being thrown away (Close / Re-record), so the
+  // recorder's onstop must not upload it.
+  let voiceDiscard = false;
 
   function voiceFlash(msg, ok = true) {
     const el = document.getElementById('voice-flash');
@@ -1025,7 +1028,8 @@ const CresSales = (() => {
   }
 
   function resetVoiceUI() {
-    stopVoiceRecorder();
+    stopVoiceRecorder(true);
+    resetRecorderBtn();
     document.getElementById('voice-recorder-ui').style.display = '';
     document.getElementById('voice-transcript-section').style.display = 'none';
     document.getElementById('voice-leads-section').style.display = 'none';
@@ -1036,7 +1040,12 @@ const CresSales = (() => {
     voiceParsedLeads = [];
   }
 
-  function stopVoiceRecorder() {
+  /**
+   * End recording: stop the timer and turn the microphone off. With discard
+   * (Close / Re-record) the audio is thrown away instead of being processed.
+   */
+  function stopVoiceRecorder(discard = true) {
+    voiceDiscard = discard;
     if (voiceMediaRecorder && voiceMediaRecorder.state !== 'inactive') {
       try { voiceMediaRecorder.stop(); } catch {}
     }
@@ -1108,6 +1117,10 @@ const CresSales = (() => {
     const chunks = [];
     voiceMediaRecorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
     voiceMediaRecorder.onstop = async () => {
+      // The mic goes off as soon as recording ends, whichever way it ended.
+      voiceStream?.getTracks().forEach((t) => t.stop());
+      voiceStream = null;
+      if (voiceDiscard) return;
       const blob = new Blob(chunks, { type: voiceMediaRecorder.mimeType || 'audio/webm' });
       if (blob.size < 1024) {
         voiceFlash('Recording too short. Try again and narrate more contacts.', false);
@@ -1118,10 +1131,17 @@ const CresSales = (() => {
     };
 
     voiceStartTime = Date.now();
+    voiceDiscard = false;
     btn.textContent = 'Stop recording';
     btn.style.background = '#c53030';
     btn.classList.remove('btn-primary');
-    btn.onclick = () => voiceMediaRecorder.stop();
+    btn.disabled = false;
+    // Stop = finish: timer stops, mic goes off, then the audio is processed.
+    btn.onclick = () => {
+      stopVoiceRecorder(false);
+      btn.textContent = 'Processing…';
+      btn.disabled = true;
+    };
 
     const pbtn = document.getElementById('btn-voice-pause');
     if (pbtn) {
@@ -1194,6 +1214,7 @@ const CresSales = (() => {
     btn.textContent = 'Start recording';
     btn.style.background = '';
     btn.classList.add('btn-primary');
+    btn.disabled = false;
     btn.onclick = startVoiceRecording;
     const pbtn = document.getElementById('btn-voice-pause');
     if (pbtn) { pbtn.style.display = 'none'; pbtn.textContent = 'Pause'; }
@@ -1292,7 +1313,8 @@ const CresSales = (() => {
     });
 
     document.querySelector('#voice-capture-modal [data-close-modal]')?.addEventListener('click', () => {
-      stopVoiceRecorder();
+      stopVoiceRecorder(true);
+      resetRecorderBtn();
       document.getElementById('voice-capture-modal').classList.remove('open');
     });
   }

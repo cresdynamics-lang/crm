@@ -8,10 +8,14 @@ const {
 const { authenticate } = require('../middleware/auth');
 const { asyncHandler, AppError } = require('../lib/errors');
 
+const { setFileCookie, clearFileCookie } = require('../middleware/fileAccess');
+const { guardAuth, recordFailure, recordSuccess } = require('../middleware/authLimiter');
+
 const router = express.Router();
 
 router.post(
   '/login',
+  guardAuth('login', { limit: 5, ipLimit: 30 }),
   asyncHandler(async (req, res) => {
     const { email, password } = req.body || {};
     if (!email || !password) {
@@ -27,8 +31,10 @@ router.post(
          VALUES ($1, $2, TRUE, $3, $4)`,
         [result.user.id, email, ip, userAgent]
       ).catch(() => {});
+      await recordSuccess(req);
       res.json({ ok: true, data: result });
     } catch (err) {
+      if (err.status === 401 || err.statusCode === 401 || /invalid/i.test(err.message || '')) await recordFailure(req);
       const { query } = require('../config/database');
       await query(
         `INSERT INTO login_audit (user_id, email, success, ip, user_agent)
@@ -45,6 +51,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { refreshToken } = req.body || {};
     const result = await refresh(refreshToken);
+    if (result?.user?.id) setFileCookie(res, result.user.id);
     res.json({ ok: true, data: result });
   })
 );
@@ -54,13 +61,17 @@ router.post(
   asyncHandler(async (req, res) => {
     const { refreshToken } = req.body || {};
     await logout(refreshToken);
+    clearFileCookie(res);
     res.json({ ok: true, data: { loggedOut: true } });
   })
 );
 
 router.post(
   '/forgot-password',
+  guardAuth('forgot', { limit: 5, ipLimit: 20 }),
   asyncHandler(async (req, res) => {
+    // Every request counts: this sends email, so it must not be spammable.
+    await recordFailure(req);
     const result = await requestPasswordReset(req.body?.email);
     res.json({ ok: true, data: result });
   })
@@ -68,9 +79,17 @@ router.post(
 
 router.post(
   '/verify-reset-code',
+  guardAuth('resetcode', { limit: 5, ipLimit: 20 }),
   asyncHandler(async (req, res) => {
     const { email, code } = req.body || {};
-    const result = await verifyResetCode(email, code);
+    let result;
+    try {
+      result = await verifyResetCode(email, code);
+    } catch (err) {
+      await recordFailure(req);
+      throw err;
+    }
+    await recordSuccess(req);
     res.json({ ok: true, data: result });
   })
 );
@@ -88,6 +107,8 @@ router.get(
   '/verify',
   authenticate,
   asyncHandler(async (req, res) => {
+    // Every page checks the session on load; renew the /uploads file cookie here.
+    setFileCookie(res, req.user.id);
     res.json({
       ok: true,
       data: {

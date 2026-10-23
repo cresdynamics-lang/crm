@@ -38,6 +38,12 @@
     showError('');
   }
 
+  /** Where to go after signing in: a same-site path from ?next=, else the dashboard. */
+  function nextPath() {
+    const next = new URLSearchParams(location.search).get('next') || '';
+    return /^\/(?!\/)[\w\-./#?=&%]*$/.test(next) ? next : '/dashboard';
+  }
+
   async function boot() {
     const params = new URLSearchParams(location.search);
     const inviteToken = params.get('invite');
@@ -45,7 +51,7 @@
     if (CresAPI.getAccess() && !inviteToken) {
       try {
         await CresAPI.verify();
-        location.replace('/dashboard');
+        location.replace(nextPath());
         return;
       } catch {
         CresAPI.clearSession();
@@ -107,7 +113,7 @@
           document.getElementById('email').value.trim(),
           document.getElementById('password').value
         );
-        location.href = '/dashboard';
+        location.href = nextPath();
       } catch (err) {
         showError(err.message || 'Invalid email or password');
         btn.disabled = false;

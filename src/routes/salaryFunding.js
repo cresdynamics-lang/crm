@@ -13,9 +13,10 @@ const { queueNotification } = require('../queues/jobs');
 const router = express.Router();
 router.use(authenticate);
 
-function currentMonth() {
-  return new Date().toISOString().slice(0, 7);
-}
+const { currentMonth, ensureMonthRows } = require('../services/payrollRows');
+
+/** Funding figures are for the people who run payroll. */
+const PAYROLL_ROLES = ['hr', 'finance', 'admin', 'director'];
 
 async function notifyRoles(roles, payload) {
   const { rows } = await query(
@@ -29,26 +30,6 @@ async function notifyRoles(roles, payload) {
   }
 }
 
-async function ensureMonthRows(month) {
-  await withTransaction(async (tx) => {
-    const { rows: missing } = await tx.query(
-      `SELECT e.id, e.salary_amount
-       FROM employees e
-       JOIN users u ON u.id = e.user_id
-       LEFT JOIN salary_payments sp ON sp.employee_id = e.id AND sp.month = $1
-       WHERE sp.id IS NULL AND u.status = 'active'`,
-      [month]
-    );
-    for (const m of missing) {
-      await tx.query(
-        `INSERT INTO salary_payments (employee_id, month, amount_expected, amount_paid, status)
-         VALUES ($1, $2, $3, 0, 'owed')
-         ON CONFLICT (employee_id, month) DO NOTHING`,
-        [m.id, month, Number(m.salary_amount || 0)]
-      );
-    }
-  });
-}
 
 /** People HR can include in a funding request for a month (all staff with payroll rows). */
 router.get(
@@ -159,8 +140,12 @@ router.get(
   '/summary',
   requirePermission('salaries', 'view'),
   asyncHandler(async (req, res) => {
+    // Company-wide payroll totals: payroll roles only (was open to every role with salaries:view).
+    if (!PAYROLL_ROLES.includes(req.user.role)) throw new AppError('Forbidden', 403, 'FORBIDDEN');
     const month = req.query.month || currentMonth();
-    await ensureMonthRows(month);
+    if (!/^\d{4}-\d{2}$/.test(month)) throw new AppError('month must be YYYY-MM', 400, 'VALIDATION');
+    // Planning a future month prepares its rows; the current month is kept by the scheduler.
+    if (month !== currentMonth()) await ensureMonthRows(month);
     const { rows: expected } = await query(
       `SELECT COALESCE(SUM(amount_expected), 0)::float AS total, COUNT(*)::int AS rows
        FROM salary_payments WHERE month = $1`,

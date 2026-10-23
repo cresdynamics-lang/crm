@@ -39,7 +39,6 @@ const MAC = process.platform === 'darwin'
 const HELPER_SRC = join(dirname(fileURLToPath(import.meta.url)), 'native', 'input.swift')
 const HELPER = join(homedir(), '.jarvis', 'bin', 'jarvis-input')
 
-const ok = (text) => ({ content: [{ type: 'text', text }] })
 const fail = (text) => ({ isError: true, content: [{ type: 'text', text }] })
 
 function exec(cmd, args, timeout = 20_000) {

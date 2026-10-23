@@ -15,7 +15,7 @@
 
 .community-layout {
   display: grid;
-  grid-template-columns: 300px 1fr;
+  grid-template-columns: 260px 1fr;
   height: 100%;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -53,8 +53,9 @@
 
 .conv-item {
   display: flex;
+  align-items: center;
   gap: 10px;
-  padding: 10px;
+  padding: 7px 8px;
   border-radius: 8px;
   cursor: pointer;
   user-select: none;
@@ -70,8 +71,8 @@
 }
 
 .conv-item .cavatar {
-  width: 40px;
-  height: 40px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   background: var(--accent-soft);
   color: var(--accent);
@@ -131,7 +132,7 @@
 }
 
 .conv-item .cname {
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -139,7 +140,7 @@
 }
 
 .conv-item .cpreview {
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -168,78 +169,152 @@
   align-items: center;
   gap: 12px;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elevated);
 }
 
 .chat-call-actions {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   margin-left: auto;
+}
+
+.chat-call-actions .btn {
+  padding: 4px 10px;
+  font-size: 0.72rem;
+  border-radius: 999px;
+  min-height: 0;
+}
+
+/* The open chat fills the pane, so the composer sits at the bottom. */
+.chat-pane { min-height: 0; }
+#chat-active:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 .chat-header .peer-name {
   font-weight: 600;
+  font-size: 0.86rem;
 }
 
 .chat-header .peer-role {
-  font-size: 0.75rem;
+  font-size: 0.68rem;
   color: var(--text-muted);
   text-transform: capitalize;
 }
 
+/* Telegram-style chat: lean, small type, tight bubbles with a tail on the
+   last message of each run, time + tick tucked inside the bubble. */
 .chat-messages {
   flex: 1;
   overflow: auto;
-  padding: 16px;
+  padding: 10px 14px 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 2px;
+  font-size: 0.82rem;
+  background:
+    radial-gradient(circle at 20% 10%, rgba(0, 168, 197, 0.06), transparent 40%),
+    radial-gradient(circle at 80% 90%, rgba(232, 130, 40, 0.05), transparent 40%),
+    var(--bg);
+}
+
+.chat-day {
+  align-self: center;
+  margin: 10px 0 6px;
+}
+
+.chat-day span {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--bg-elevated) 85%, transparent);
+  border: 1px solid var(--border);
 }
 
 .bubble {
-  max-width: min(70%, 480px);
-  padding: 10px 12px;
+  position: relative;
+  max-width: min(72%, 440px);
+  padding: 5px 9px 4px;
   border-radius: 12px;
-  font-size: 0.9rem;
-  line-height: 1.4;
+  font-size: 0.82rem;
+  line-height: 1.35;
   white-space: pre-wrap;
   word-break: break-word;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.18);
 }
+
+.bubble + .bubble.mine,
+.bubble + .bubble.theirs { margin-top: 0; }
+.bubble.mine + .bubble.theirs,
+.bubble.theirs + .bubble.mine { margin-top: 6px; }
 
 .bubble.mine {
   align-self: flex-end;
-  background: var(--accent);
+  background: color-mix(in srgb, var(--accent) 82%, #0b3d4a);
   color: var(--accent-contrast);
-  border-bottom-right-radius: 4px;
 }
 
 .bubble.theirs {
   align-self: flex-start;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-bottom-left-radius: 4px;
 }
 
-.bubble .btime {
-  display: block;
-  margin-top: 4px;
-  font-size: 0.68rem;
-  opacity: 0.7;
+/* The tail: only on the last bubble of a run, Telegram-style. */
+.bubble.mine.tail { border-bottom-right-radius: 3px; }
+.bubble.theirs.tail { border-bottom-left-radius: 3px; }
+.bubble.tail::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  width: 8px;
+  height: 10px;
+  background: inherit;
 }
+.bubble.mine.tail::after {
+  right: -5px;
+  clip-path: polygon(0 0, 0 100%, 100% 100%);
+}
+.bubble.theirs.tail::after {
+  left: -5px;
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+}
+.bubble.theirs.tail::after { border-bottom: 1px solid var(--border); }
+
+/* Time floats bottom-right inside the bubble, after the text. */
+.bubble .btime {
+  float: right;
+  margin: 6px 0 -2px 10px;
+  font-size: 0.62rem;
+  line-height: 1;
+  opacity: 0.65;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.bubble .btick { font-size: 0.66rem; letter-spacing: -2px; }
 
 .chat-composer {
   display: flex;
-  gap: 8px;
-  padding: 12px 14px;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
   border-top: 1px solid var(--border);
   background: var(--bg-elevated);
 }
 
 .chat-composer input {
   flex: 1;
-  padding: 11px 12px;
+  padding: 8px 12px;
+  font-size: 0.82rem;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: var(--bg);
@@ -251,8 +326,10 @@
 }
 
 .chat-composer .send-btn {
-  padding: 0 18px;
+  height: 32px;
+  padding: 0 14px;
   border-radius: 999px;
+  font-size: 0.78rem;
   background: var(--accent);
   color: var(--accent-contrast);
   font-weight: 600;
@@ -446,3 +523,52 @@
     display: none;
   }
 }
+
+/* Leave room for the floating Jarvis button so it never covers Send. */
+.community-face .chat-composer { padding-right: 72px; }
+
+/* Ticks: grey ✓ sent, grey ✓✓ delivered, blue ✓✓ seen. */
+.bubble .btick { opacity: 0.85; }
+.bubble .btick.read { color: #4fc3f7; opacity: 1; }
+.bubble.mine .btick.read { color: #0b4fd6; font-weight: 700; opacity: 1; }
+.bubble .bedited { font-style: italic; opacity: 0.85; }
+.bubble .bdeleted { font-style: italic; opacity: 0.75; }
+.bubble.deleted { box-shadow: none; }
+.bubble[data-id] { cursor: default; }
+
+.chat-header .peer-role.is-online { color: var(--success, #2ecc71); text-transform: none; }
+
+.chat-edit-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 14px;
+  font-size: 0.72rem;
+  color: var(--accent);
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+.chat-edit-bar[hidden] { display: none; }
+.chat-edit-bar button { font-size: 0.8rem; color: var(--text-muted); padding: 0 4px; }
+
+.msg-menu { min-width: 170px; }
+.msg-menu button { font-size: 0.78rem; }
+
+/* Everyone in Community: sections, search, online dots */
+.conv-search-wrap { padding: 8px 10px 0; }
+.conv-search-wrap input {
+  width: 100%; padding: 7px 10px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font: inherit; font-size: 0.78rem; outline: none;
+}
+.conv-search-wrap input:focus { border-color: var(--accent); }
+.conv-section {
+  padding: 10px 8px 4px; font-size: 0.66rem; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--text-muted); list-style: none;
+}
+.conv-item .avatar-wrap { position: relative; flex-shrink: 0; display: inline-flex; }
+.online-dot {
+  position: absolute; right: -1px; bottom: -1px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--success, #2ecc71); border: 2px solid var(--bg-elevated);
+}
+.conv-item.person .cname { font-weight: 500; }

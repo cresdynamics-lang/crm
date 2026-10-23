@@ -630,7 +630,10 @@ export default function App() {
     return () => {
       gone = true
     }
-  }, [phase])
+    // Runs when the phase changes, not on every render: powerOn is recreated
+    // each render, and re-running this would re-query permissions constantly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, store])
 
   // -- one tab at a time ----------------------------------------------------
 
@@ -657,7 +660,7 @@ export default function App() {
         .getState()
         .setError('Jarvis is now listening in another tab or window. Close this one, or click INITIALISE to bring him back here.')
     })
-  }, [])
+  }, [store]) // store never changes, so this still runs once
 
   // -- clap to start --------------------------------------------------------
 

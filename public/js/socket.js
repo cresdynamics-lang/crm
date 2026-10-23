@@ -9,6 +9,9 @@ const CresRealtime = (() => {
     status: [],
     notification: [],
     message: [],
+    messageStatus: [],
+    messageUpdate: [],
+    presence: [],
     call: [],
   };
 
@@ -43,7 +46,8 @@ const CresRealtime = (() => {
 
     socket = io({
       path: '/socket.io',
-      auth: { token },
+      // A function, so every reconnect uses the latest (refreshed) token.
+      auth: (cb) => cb({ token: CresAPI.getAccess() }),
       transports: ['websocket'],
       timeout: 4000,
       reconnection: true,
@@ -62,13 +66,22 @@ const CresRealtime = (() => {
       startPollFallback(2000);
     });
 
-    socket.on('connect_error', () => {
+    socket.on('connect_error', async (err) => {
       setStatus('degraded');
       startPollFallback(2000);
+      // Expired token (access tokens last 1 hour): refresh it and reconnect.
+      if (/AUTH_TOKEN_INVALID|AUTH_REQUIRED/.test(err?.message || '')) {
+        const ok = await CresAPI.refresh().catch(() => false);
+        if (ok && socket && !socket.connected) setTimeout(() => socket?.connect(), 500);
+      }
     });
 
     socket.on('notification:new', (n) => emitLocal('notification', n));
     socket.on('message:new', (m) => emitLocal('message', m));
+    socket.on('message:status', (p) => emitLocal('messageStatus', p));
+    socket.on('message:update', (m) => emitLocal('messageUpdate', m));
+    socket.on('presence:list', (ids) => emitLocal('presence', { list: ids || [] }));
+    socket.on('presence:update', (p) => emitLocal('presence', p));
     ['call:invite', 'call:accept', 'call:reject', 'call:offer', 'call:answer', 'call:ice', 'call:hangup'].forEach(
       (event) => {
         socket.on(event, (payload) => emitLocal('call', { event, ...payload }));

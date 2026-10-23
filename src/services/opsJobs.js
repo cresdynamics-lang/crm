@@ -429,8 +429,16 @@ async function runOpsJobs() {
 }
 
 function startOpsScheduler(intervalMs = 5 * 60 * 1000) {
+  const { backfillPayroll } = require('./payrollRows');
+  const payroll = () => backfillPayroll().catch((e) => console.error('[ops] payroll backfill failed', e.message));
+  const { prewarmDigest } = require('./dailyOpsDigest');
+  const digest = () => prewarmDigest();
+  payroll();
+  digest();
   runOpsJobs().catch(() => {});
   const timer = setInterval(() => {
+    payroll();
+    digest();
     runOpsJobs().catch(() => {});
   }, intervalMs);
   if (timer.unref) timer.unref();

@@ -6,8 +6,10 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/index.js",
+    "test": "node --test --test-concurrency=1 --test-force-exit test/*.test.js",
     "dev": "node --watch src/index.js",
     "db:migrate": "node src/db/migrate.js",
+    "db:status": "node src/db/migrate.js --status",
     "db:seed": "node src/db/seed.js",
     "db:setup": "node src/db/migrate.js && node src/db/seed.js",
     "worker": "node src/queues/workers.js",
@@ -29,12 +31,13 @@
     "mailparser": "^3.9.15",
     "morgan": "^1.10.0",
     "multer": "^2.2.0",
+    "nodemailer": "^10.2.1",
     "pdf-parse": "^2.4.5",
     "pdfkit": "^0.20.1",
     "pg": "^8.13.1",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
     "uuid": "^11.0.5",
-    "zod": "^3.24.1"
+    "zod": "^4.6.7"
   }
 }

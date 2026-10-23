@@ -1,5 +1,6 @@
 /**
- * Admin AI inbox: sync IMAP, draft with Groq, approve/regenerate/ignore/send via Resend.
+ * Admin AI inbox: sync IMAP (info@), Jarvis drafts replies as Cres Dynamics
+ * (Groq as backup), admin edits and approves; sent via Resend or the mailbox.
  */
 const express = require('express');
 const { query } = require('../config/database');
@@ -9,6 +10,7 @@ const { asyncHandler, AppError } = require('../lib/errors');
 const { idempotency } = require('../middleware/idempotency');
 const { syncAdminInbox } = require('../services/adminInbox');
 const { draftInboxReply } = require('../services/groq');
+const { jarvisDraftReply } = require('../services/jarvisMailDraft');
 const { sendWithFailover } = require('../services/emailService');
 const config = require('../config');
 
@@ -97,14 +99,21 @@ router.post(
     }
 
     const instructions = String(req.body?.instructions || '').trim();
-    const drafted = await draftInboxReply({
+    const source = {
       fromName: msg.from_name,
       fromEmail: msg.from_email,
       subject: msg.subject,
       bodyText: msg.body_text,
       attachmentSummaries: msg.attachment_summaries,
       instructions,
-    });
+    };
+    let drafted;
+    try {
+      drafted = await jarvisDraftReply(source);
+    } catch (err) {
+      console.warn(`[inbox] Jarvis draft failed (${err.message}); using Groq`);
+      drafted = { ...(await draftInboxReply(source)), by: 'groq' };
+    }
 
     const { rows: updated } = await query(
       `UPDATE admin_inbox_messages
@@ -117,7 +126,7 @@ router.post(
        RETURNING *`,
       [drafted.draft, drafted.summary, instructions || null, msg.id]
     );
-    res.json({ ok: true, data: updated[0] });
+    res.json({ ok: true, data: updated[0], meta: { draftedBy: drafted.by || 'groq' } });
   })
 );
 
@@ -157,6 +166,10 @@ router.post(
       cc: cc.length ? cc : undefined,
       subject,
       body,
+      // Thread the reply under the original email in the customer's mail app.
+      headers: msg.message_id && !String(msg.message_id).startsWith('uid-')
+        ? { 'In-Reply-To': msg.message_id, References: msg.message_id }
+        : undefined,
       meta: { fromRole: 'default', type: 'admin_inbox_reply', inboxId: msg.id },
     });
 

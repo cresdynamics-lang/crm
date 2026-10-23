@@ -82,8 +82,10 @@ router.get(
        LEFT JOIN users f ON f.id = e.finance_approved_by
        LEFT JOIN users a ON a.id = e.approved_by
        ${where}
-       ORDER BY e.created_at DESC`,
-      params
+       ORDER BY e.created_at DESC
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      // Paged: default 1000 rows (all of today's data), ?limit= up to 2000, ?offset= for more.
+      [...params, Math.min(Math.max(parseInt(req.query.limit, 10) || 1000, 1), 2000), Math.max(parseInt(req.query.offset, 10) || 0, 0)]
     );
     res.json({
       ok: true,

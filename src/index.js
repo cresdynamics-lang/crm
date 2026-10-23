@@ -1,4 +1,5 @@
 require('dotenv').config();
+require('./lib/errorLog').installProcessHandlers();
 const http = require('http');
 const config = require('./config');
 const { createApp } = require('./app');

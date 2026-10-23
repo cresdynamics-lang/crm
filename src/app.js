@@ -44,14 +44,54 @@ const adminInboxRoutes = require('./routes/adminInbox');
 const attendanceRoutes = require('./routes/attendance');
 const approvalsRoutes = require('./routes/approvals');
 const jarvisRoutes = require('./routes/jarvis');
+const { fileAccess } = require('./middleware/fileAccess');
+const meetingsRoutes = require('./routes/meetings');
+
+/** Allowed browser origins: CORS_ORIGINS (comma separated), else the public URL; localhost in development. */
+const allowedOrigins = (process.env.CORS_ORIGINS || process.env.PUBLIC_APP_URL || 'https://cresos.cresdynamics.com')
+  .split(',')
+  .map((o) => o.trim().replace(/\/+$/, ''))
+  .filter(Boolean);
+function corsOrigin(origin, cb) {
+  if (!origin) return cb(null, true); // same-origin requests and server-to-server calls
+  const ok =
+    allowedOrigins.includes(origin.replace(/\/+$/, '')) ||
+    (process.env.NODE_ENV !== 'production' && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin));
+  return cb(null, ok);
+}
 
 function createApp() {
   const app = express();
   const publicDir = path.join(__dirname, '..', 'public');
   const uploadsDir = path.join(__dirname, '..', 'uploads');
 
-  app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-  app.use(cors());
+  // Content-Security-Policy: scripts only from this site (no inline, no eval),
+  // so injected markup cannot run code even if a bug lets it through.
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        useDefaults: false,
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+          fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
+          imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+          mediaSrc: ["'self'", 'blob:'],
+          connectSrc: ["'self'", 'ws:', 'wss:'],
+          objectSrc: ["'none'"],
+          baseUri: ["'self'"],
+          formAction: ["'self'"],
+          frameAncestors: ["'self'"],
+          upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null,
+        },
+      },
+      crossOriginResourcePolicy: { policy: 'same-site' },
+      crossOriginEmbedderPolicy: false,
+    })
+  );
+  // CORS: only our own site(s) may call the API from a browser.
+  app.use(cors({ origin: corsOrigin, credentials: true }));
   app.use(express.json({ limit: '2mb' }));
   app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
@@ -107,13 +147,17 @@ function createApp() {
   app.use('/api/attendance', attendanceRoutes);
   app.use('/api/approvals', approvalsRoutes);
   app.use('/api/jarvis', jarvisRoutes);
+  app.use('/api/meetings', meetingsRoutes);
 
-  app.use('/uploads', express.static(uploadsDir));
+  // Uploaded files need a signed-in user (file cookie set at sign-in; see fileAccess).
+  app.use('/uploads', fileAccess, express.static(uploadsDir, { fallthrough: false }));
 
   // Shared shell faces (Step 2)
   app.get('/', (_req, res) => res.redirect('/login'));
   app.get('/login', (_req, res) => res.sendFile(path.join(publicDir, 'login.html')));
   app.get('/dashboard', (_req, res) => res.sendFile(path.join(publicDir, 'app.html')));
+  app.get(['/meetings', '/meeting/:id'], (_req, res) => res.sendFile(path.join(publicDir, 'meeting.html')));
+  app.get('/inbox', (_req, res) => res.sendFile(path.join(publicDir, 'inbox.html')));
   app.get('/app', (_req, res) => res.redirect('/dashboard'));
 
   app.use(

@@ -110,8 +110,12 @@ router.get(
     if (!conv[0]) throw new AppError('Conversation not found', 404, 'NOT_FOUND');
 
     const { rows } = await query(
-      `SELECT * FROM messages WHERE conversation_id = $1 ORDER BY sent_at ASC`,
-      [req.params.id]
+      `SELECT id, conversation_id, sender_id, sent_at, read_at, delivered_at, edited_at, deleted_at,
+              CASE WHEN deleted_at IS NULL THEN content ELSE '' END AS content
+       FROM messages
+       WHERE conversation_id = $1 AND NOT ($2 = ANY(deleted_for))
+       ORDER BY sent_at ASC`,
+      [req.params.id, req.user.id]
     );
     res.json({ ok: true, data: rows });
   })
@@ -139,7 +143,13 @@ router.post(
     );
     await query(`UPDATE conversations SET updated_at = NOW() WHERE id = $1`, [req.params.id]);
 
-    const message = rows[0];
+    let message = rows[0];
+    try {
+      const { deliverIfOnline } = require('../realtime/socket');
+      message = await deliverIfOnline(message, conv[0].participant_ids);
+    } catch {
+      // realtime optional
+    }
     try {
       const { getIo, conversationRoom, userRoom, emitNotification } = require('../realtime/socket');
       const io = getIo();
@@ -217,8 +227,145 @@ router.post(
     );
     if (!conv[0]) throw new AppError('Conversation not found', 404, 'NOT_FOUND');
 
-    await query(`DELETE FROM messages WHERE conversation_id = $1`, [req.params.id]);
-    res.json({ ok: true, data: { cleared: true } });
+    // Clears the chat for this user only: the other person keeps their history
+    // (it used to permanently delete the messages for both people).
+    const { rowCount } = await query(
+      `UPDATE messages SET deleted_for = array_append(deleted_for, $2::uuid)
+       WHERE conversation_id = $1 AND NOT ($2 = ANY(deleted_for))`,
+      [req.params.id, req.user.id]
+    );
+    res.json({ ok: true, data: { cleared: true, hidden: rowCount } });
+  })
+);
+
+const EDIT_WINDOW_MS = 30 * 60 * 1000;
+
+/** The message plus its conversation, if this user is a participant. */
+async function messageForParticipant(messageId, userId) {
+  const { rows } = await query(
+    `SELECT m.*, c.participant_ids
+     FROM messages m JOIN conversations c ON c.id = m.conversation_id
+     WHERE m.id = $1 AND $2 = ANY(c.participant_ids)`,
+    [messageId, userId]
+  );
+  if (!rows[0]) throw new AppError('Message not found', 404, 'NOT_FOUND');
+  return rows[0];
+}
+
+function emitToConversation(conversationId, participantIds, event, payload) {
+  try {
+    const { getIo, conversationRoom, userRoom } = require('../realtime/socket');
+    const io = getIo();
+    if (!io) return;
+    io.to(conversationRoom(conversationId)).emit(event, payload);
+    for (const p of participantIds) io.to(userRoom(p)).emit(event, payload);
+  } catch {
+    // realtime optional
+  }
+}
+
+/**
+ * GET /api/messages/presence - which staff are online now (fallback when the
+ * socket is down; normally presence arrives over the socket).
+ */
+router.get(
+  '/presence',
+  requirePermission('messages', 'view'),
+  asyncHandler(async (req, res) => {
+    if (req.user.role === 'client') return res.json({ ok: true, data: [] });
+    const { onlineUserIds } = require('../realtime/socket');
+    res.json({ ok: true, data: onlineUserIds() });
+  })
+);
+
+/**
+ * POST /api/messages/conversations/:id/read - the user has seen this chat:
+ * everything the others sent becomes read (blue ticks for them).
+ */
+router.post(
+  '/conversations/:id/read',
+  requirePermission('messages', 'view'),
+  asyncHandler(async (req, res) => {
+    const { rows: conv } = await query(
+      `SELECT id FROM conversations WHERE id = $1 AND $2 = ANY(participant_ids)`,
+      [req.params.id, req.user.id]
+    );
+    if (!conv[0]) throw new AppError('Conversation not found', 404, 'NOT_FOUND');
+    const { rows } = await query(
+      `UPDATE messages
+       SET read_at = NOW(), delivered_at = COALESCE(delivered_at, NOW())
+       WHERE conversation_id = $1 AND sender_id <> $2 AND read_at IS NULL AND deleted_at IS NULL
+       RETURNING id, conversation_id, sender_id, read_at, delivered_at`,
+      [req.params.id, req.user.id]
+    );
+    if (rows.length) {
+      try {
+        const { emitMessageStatus } = require('../realtime/socket');
+        emitMessageStatus(rows, { read_at: rows[0].read_at, delivered_at: rows[0].delivered_at });
+      } catch {
+        // realtime optional
+      }
+    }
+    res.json({ ok: true, data: { read: rows.length } });
+  })
+);
+
+/**
+ * PATCH /api/messages/:id - edit your own message, within 30 minutes of sending.
+ */
+router.patch(
+  '/:id',
+  requirePermission('messages', 'create'),
+  asyncHandler(async (req, res) => {
+    const content = String(req.body?.content || '').trim();
+    if (!content) throw new AppError('content required', 400, 'VALIDATION');
+    const msg = await messageForParticipant(req.params.id, req.user.id);
+    if (msg.sender_id !== req.user.id) throw new AppError('You can only edit your own messages', 403, 'FORBIDDEN');
+    if (msg.deleted_at) throw new AppError('This message was deleted', 409, 'DELETED');
+    if (Date.now() - new Date(msg.sent_at).getTime() > EDIT_WINDOW_MS) {
+      throw new AppError('Messages can only be edited for 30 minutes after sending', 409, 'EDIT_WINDOW_PASSED');
+    }
+    const { rows } = await query(
+      `UPDATE messages SET content = $2, edited_at = NOW() WHERE id = $1
+       RETURNING id, conversation_id, sender_id, content, sent_at, read_at, delivered_at, edited_at, deleted_at`,
+      [msg.id, content]
+    );
+    emitToConversation(msg.conversation_id, msg.participant_ids, 'message:update', rows[0]);
+    res.json({ ok: true, data: rows[0] });
+  })
+);
+
+/**
+ * DELETE /api/messages/:id?scope=me|everyone
+ *   me       - hide it for this user only (any message in their chat)
+ *   everyone - sender only: the text is removed for all participants
+ */
+router.delete(
+  '/:id',
+  requirePermission('messages', 'view'),
+  asyncHandler(async (req, res) => {
+    const scope = req.query.scope === 'everyone' ? 'everyone' : 'me';
+    const msg = await messageForParticipant(req.params.id, req.user.id);
+
+    if (scope === 'me') {
+      await query(
+        `UPDATE messages SET deleted_for = array_append(deleted_for, $2::uuid)
+         WHERE id = $1 AND NOT ($2 = ANY(deleted_for))`,
+        [msg.id, req.user.id]
+      );
+      return res.json({ ok: true, data: { id: msg.id, scope } });
+    }
+
+    if (msg.sender_id !== req.user.id) {
+      throw new AppError('Only the sender can delete a message for everyone', 403, 'FORBIDDEN');
+    }
+    const { rows } = await query(
+      `UPDATE messages SET content = '', deleted_at = COALESCE(deleted_at, NOW()) WHERE id = $1
+       RETURNING id, conversation_id, sender_id, content, sent_at, read_at, delivered_at, edited_at, deleted_at`,
+      [msg.id]
+    );
+    emitToConversation(msg.conversation_id, msg.participant_ids, 'message:update', rows[0]);
+    res.json({ ok: true, data: { ...rows[0], scope } });
   })
 );
 

@@ -1,5 +1,7 @@
 /**
- * Outbound email: Resend when MAIL_MAILER=resend, otherwise stub providers.
+ * Outbound email: Resend when MAIL_MAILER=resend, with the company mailbox
+ * (SMTP, MAIL_HOST / MAIL_USERNAME / MAIL_PASSWORD) as the real fallback when
+ * it is configured. Otherwise stub providers.
  */
 const config = require('../config');
 const { loadCompanyProfile } = require('../config/company');
@@ -52,7 +54,7 @@ function normalizeAttachments(attachments) {
   return out.length ? out : undefined;
 }
 
-async function sendViaResend({ to, subject, body, html, from, replyTo, cc, meta, attachments }) {
+async function sendViaResend({ to, subject, body, html, from, replyTo, cc, meta, attachments, headers }) {
   const key = config.email.resendApiKey;
   if (!key) throw new Error('RESEND_API_KEY is not configured');
 
@@ -65,6 +67,7 @@ async function sendViaResend({ to, subject, body, html, from, replyTo, cc, meta,
   if (html) payload.html = html;
   if (replyTo) payload.reply_to = replyTo;
   if (cc?.length) payload.cc = cc;
+  if (headers) payload.headers = headers;
 
   const files = normalizeAttachments(attachments);
   if (files) {
@@ -99,9 +102,51 @@ async function sendViaResend({ to, subject, body, html, from, replyTo, cc, meta,
   };
 }
 
-async function sendViaProvider(provider, { to, subject, body, html, from, replyTo, cc, meta, attachments }) {
-  if (config.email.mailer === 'resend' || provider === 'resend') {
-    return sendViaResend({ to, subject, body, html, from, replyTo, cc, meta, attachments });
+/** SMTP settings from MAIL_* (e.g. Namecheap Private Email), or null when not set. */
+function smtpSettings() {
+  const host = process.env.MAIL_HOST;
+  const user = process.env.MAIL_USERNAME;
+  const pass = process.env.MAIL_PASSWORD;
+  if (!host || !user || !pass) return null;
+  const port = Number(process.env.MAIL_PORT || 465);
+  const enc = String(process.env.MAIL_ENCRYPTION || '').toLowerCase();
+  return { host, port, secure: enc === 'ssl' || port === 465, auth: { user, pass } };
+}
+
+let smtpTransport = null;
+async function sendViaSmtp({ to, subject, body, html, replyTo, cc, meta, attachments, headers }) {
+  const settings = smtpSettings();
+  if (!settings) throw new Error('SMTP is not configured');
+  // eslint-disable-next-line global-require
+  smtpTransport ||= require('nodemailer').createTransport(settings);
+  // The mailbox server only sends as its own address.
+  const name = process.env.MAIL_FROM_NAME || 'Cres Dynamics';
+  const fromAddr = `${name} <${process.env.MAIL_FROM_ADDRESS || settings.auth.user}>`;
+  const info = await smtpTransport.sendMail({
+    from: fromAddr,
+    to: Array.isArray(to) ? to : [to],
+    cc: cc?.length ? cc : undefined,
+    replyTo: replyTo || undefined,
+    inReplyTo: headers?.['In-Reply-To'],
+    references: headers?.References,
+    subject,
+    text: body || '',
+    html: html || undefined,
+    attachments: (attachments || []).filter(Boolean).map((a) => ({
+      filename: String(a.filename || 'attachment.pdf'),
+      content: Buffer.isBuffer(a.content) ? a.content : Buffer.from(String(a.content || ''), 'base64'),
+    })),
+  });
+  console.log(`[email:smtp] from=${fromAddr} → ${Array.isArray(to) ? to.join(', ') : to} | ${subject}`);
+  return { ok: true, provider: 'smtp', messageId: info.messageId, to, from: fromAddr, subject, meta };
+}
+
+async function sendViaProvider(provider, { to, subject, body, html, from, replyTo, cc, meta, attachments, headers }) {
+  if (provider === 'resend') {
+    return sendViaResend({ to, subject, body, html, from, replyTo, cc, meta, attachments, headers });
+  }
+  if (provider === 'smtp') {
+    return sendViaSmtp({ to, subject, body, html, replyTo, cc, meta, attachments, headers });
   }
   console.log(`[email:${provider}] from=${from || '-'} → ${to} | ${subject}`);
   if (provider === 'force-fail') {
@@ -138,7 +183,7 @@ function wrapBrandHtml(html) {
 </div>`;
 }
 
-async function sendWithFailover({ to, subject, body, html, meta = {}, from, replyTo, cc, attachments } = {}) {
+async function sendWithFailover({ to, subject, body, html, meta = {}, from, replyTo, cc, attachments, headers } = {}) {
   // Test-safety valve: when EMAIL_TEST_OVERRIDE is set OUTSIDE production, every
   // outbound email is redirected to that address (with the original recipient kept
   // in the subject). This is IGNORED in production so real mail is never misrouted.
@@ -158,7 +203,9 @@ async function sendWithFailover({ to, subject, body, html, meta = {}, from, repl
   const fromAddr = from || (await resolveFromAddress(sendMeta));
   const reply = replyTo || resolveReplyTo(sendMeta);
   const primary = config.email.mailer === 'resend' ? 'resend' : config.email.primary;
-  const fallback = config.email.mailer === 'resend' ? 'fallback' : config.email.fallback;
+  // With Resend as primary, the company mailbox is the fallback when configured,
+  // so a Resend problem (e.g. unverified domain) does not stop mail going out.
+  const fallback = config.email.mailer === 'resend' ? (smtpSettings() ? 'smtp' : 'resend') : config.email.fallback;
   const brandedHtml = wrapBrandHtml(html);
 
   try {
@@ -171,6 +218,7 @@ async function sendWithFailover({ to, subject, body, html, meta = {}, from, repl
       replyTo: reply,
       cc,
       attachments,
+      headers,
       meta: sendMeta,
     });
   } catch (primaryErr) {
@@ -185,6 +233,7 @@ async function sendWithFailover({ to, subject, body, html, meta = {}, from, repl
         replyTo: reply,
         cc,
         attachments,
+        headers,
         meta: { ...sendMeta, failoverFrom: primary },
       });
     } catch (fallbackErr) {

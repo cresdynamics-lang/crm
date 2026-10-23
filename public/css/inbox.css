@@ -1,0 +1,62 @@
+/* Admin inbox: list on the left, email + Jarvis reply on the right. */
+.ib-page { overflow: hidden; }
+.ib-main { display: grid; grid-template-columns: 360px minmax(0, 1fr); height: calc(100vh - 52px); }
+.ib-main[hidden] { display: none; }
+
+.ib-list-pane { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); background: var(--bg-elevated); }
+.ib-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.ib-tabs { display: flex; gap: 2px; }
+.ib-tabs button { padding: 4px 9px; border-radius: 999px; font-size: 0.74rem; color: var(--text-muted); }
+.ib-tabs button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.ib-list { list-style: none; margin: 0; padding: 4px; overflow: auto; flex: 1; }
+.ib-empty { padding: 16px; }
+.ib-item { position: relative; padding: 9px 10px; border-radius: 10px; cursor: pointer; display: grid; gap: 2px; }
+.ib-item:hover { background: var(--bg-soft); }
+.ib-item.on { background: var(--bg-soft); outline: 1px solid var(--border); }
+.ib-item-top { display: flex; justify-content: space-between; gap: 8px; }
+.ib-from { font-size: 0.82rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-item.unread .ib-from::before { content: '● '; color: var(--accent); }
+.ib-when { font-size: 0.7rem; color: var(--text-muted); flex-shrink: 0; }
+.ib-subj { font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-snip { font-size: 0.72rem; color: var(--text-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ib-chip { justify-self: start; margin-top: 3px; padding: 1px 8px; border-radius: 999px; font-size: 0.66rem; background: var(--bg-soft); color: var(--text-muted); text-transform: capitalize; }
+.ib-chip.drafted { background: var(--accent-soft); color: var(--accent); }
+.ib-chip.sent { color: var(--success, #2ecc71); }
+
+.ib-detail { overflow: auto; padding: 20px 24px 40px; }
+.ib-placeholder { margin-top: 30vh; text-align: center; }
+.ib-placeholder[hidden], #ib-message[hidden] { display: none; }
+.ib-head h2 { margin: 0 0 6px; font-size: 1.05rem; }
+.ib-meta { font-size: 0.8rem; }
+.ib-summary { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: var(--accent-soft); color: var(--text); font-size: 0.78rem; }
+.ib-summary[hidden] { display: none; }
+.ib-body { margin: 16px 0; white-space: pre-wrap; word-break: break-word; font-size: 0.84rem; line-height: 1.55; max-height: 42vh; overflow: auto;
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elevated); }
+.ib-attach { margin-bottom: 16px; display: grid; gap: 6px; }
+.ib-attach[hidden] { display: none; }
+.ib-att { font-size: 0.8rem; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; }
+
+.ib-reply { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elevated); }
+.ib-reply[hidden], .ib-closed[hidden] { display: none; }
+.ib-reply-head { display: flex; justify-content: space-between; align-items: center; }
+.ib-jarvis { display: flex; gap: 8px; }
+.ib-jarvis input, .ib-send-row input, #ib-draft-body {
+  flex: 1; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font: inherit; font-size: 0.82rem; outline: none;
+}
+.ib-jarvis input:focus, .ib-send-row input:focus, #ib-draft-body:focus { border-color: var(--accent); }
+#ib-draft-body { resize: vertical; line-height: 1.5; min-height: 200px; }
+.ib-send-row { display: flex; gap: 8px; align-items: center; }
+.ib-note { margin: 0; }
+.ib-sent { white-space: pre-wrap; font-size: 0.82rem; padding: 12px; border: 1px solid var(--border); border-radius: 10px; }
+.mt-toast.err { border-color: var(--danger, #e5484d); }
+
+@media (max-width: 820px) {
+  .ib-page { overflow: auto; }
+  .ib-main { grid-template-columns: 1fr; height: auto; }
+  .ib-list-pane { max-height: 45vh; }
+  .ib-jarvis, .ib-send-row { flex-wrap: wrap; }
+}
+.ib-list-pane, .ib-list { min-width: 0; overflow-x: hidden; }
+.ib-item, .ib-item-top { min-width: 0; }
+.ib-from { min-width: 0; flex: 1; }

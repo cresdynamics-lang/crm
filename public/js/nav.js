@@ -25,6 +25,19 @@ const CresNav = (() => {
       hideRoles: ['client'],
     },
     {
+      id: 'inbox',
+      label: 'Inbox',
+      href: '/inbox',
+      icon: '✉',
+      rolesOnly: ['admin'],
+    },
+    {
+      id: 'meetings',
+      label: 'Meetings',
+      href: '/meetings',
+      icon: '◉',
+    },
+    {
       id: 'approvals',
       label: 'Approvals',
       href: '#/approvals',

@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Meetings - Cres Dynamics</title>
+  <link rel="icon" href="/brand/logo-mark.png?v=20261023" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/tokens.css?v=20261023" />
+  <link rel="stylesheet" href="/css/meeting.css?v=20261024m4" />
+</head>
+<body class="mt-page">
+  <header class="mt-top">
+    <a class="mt-brand" href="/dashboard"><img src="/brand/logo-mark.png?v=20261023" alt="" /> <span>CRES OS · Meetings</span></a>
+    <div class="mt-top-right">
+      <a class="mt-link" href="/meetings" id="mt-all-link">All meetings</a>
+      <a class="mt-link" href="/dashboard">Dashboard</a>
+    </div>
+  </header>
+
+  <!-- Meetings list + new meeting -->
+  <main class="mt-lobby" id="view-list" hidden>
+    <section class="mt-card" id="new-meeting-card" hidden>
+      <h2>New meeting</h2>
+      <form id="new-meeting-form" class="mt-form">
+        <label>Title <input id="nm-title" type="text" maxlength="200" placeholder="e.g. Weekly sales sync" /></label>
+        <div class="mt-when">
+          <label class="mt-radio"><input type="radio" name="nm-when" value="now" checked /> Start now</label>
+          <label class="mt-radio"><input type="radio" name="nm-when" value="later" /> Schedule</label>
+          <input id="nm-at" type="datetime-local" disabled />
+        </div>
+        <label>Invite people
+          <input id="nm-search" type="search" placeholder="Search by name or role" autocomplete="off" />
+        </label>
+        <ul class="mt-people" id="nm-people"></ul>
+        <div class="mt-form-foot">
+          <span class="mt-muted" id="nm-count">No one selected</span>
+          <button type="submit" class="mt-btn primary" id="nm-submit">Start meeting</button>
+        </div>
+      </form>
+    </section>
+    <section class="mt-card">
+      <h2>Your meetings</h2>
+      <ul class="mt-list" id="meeting-list"><li class="mt-muted">Loading…</li></ul>
+    </section>
+  </main>
+
+  <!-- One meeting: gate (pre-join / request / waiting) -->
+  <main class="mt-lobby" id="view-gate" hidden>
+    <section class="mt-card mt-gate">
+      <div class="mt-preview" id="gate-preview-wrap">
+        <video id="gate-preview" autoplay playsinline muted></video>
+        <div class="mt-preview-off" id="gate-preview-off">Camera is off</div>
+      </div>
+      <div class="mt-gate-info">
+        <h2 id="gate-title">Meeting</h2>
+        <p class="mt-muted" id="gate-sub"></p>
+        <div class="mt-gate-toggles" id="gate-toggles">
+          <button type="button" class="mt-btn" id="gate-mic">🎙 Mic on</button>
+          <button type="button" class="mt-btn" id="gate-cam">📷 Camera on</button>
+        </div>
+        <p class="mt-msg" id="gate-msg"></p>
+        <div class="mt-summary" id="gate-summary" hidden></div>
+        <div class="mt-gate-actions">
+          <button type="button" class="mt-btn primary" id="gate-join" hidden>Join meeting</button>
+          <button type="button" class="mt-btn primary" id="gate-request" hidden>Request to join</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- In the meeting -->
+  <main class="mt-room" id="view-room" hidden>
+    <div class="mt-room-head">
+      <strong id="room-title">Meeting</strong>
+      <span class="mt-muted" id="room-count"></span>
+      <span class="mt-rec" id="room-minutes" hidden title="What people say is being transcribed for the minutes">● Minutes on</span>
+    </div>
+    <div class="mt-stage">
+      <div class="mt-grid" id="room-grid"></div>
+      <aside class="mt-side" id="room-side" hidden>
+        <div class="mt-side-head"><strong>People</strong><button type="button" class="mt-x" id="side-close" aria-label="Close">✕</button></div>
+        <div id="side-requests"></div>
+        <div class="mt-side-sec" id="side-live-wrap">
+          <div class="mt-side-label mt-row-flex"><span>In this meeting</span>
+            <span class="mt-host-only" hidden>
+              <button type="button" class="mt-btn sm" id="mute-all">Mute all</button>
+              <button type="button" class="mt-btn sm" id="allow-all">Allow all</button>
+            </span>
+          </div>
+          <ul class="mt-roster" id="side-live"></ul>
+        </div>
+        <div class="mt-side-label">Invited</div>
+        <div class="mt-side-sec" id="side-invite-wrap" hidden>
+          <input id="side-search" type="search" placeholder="Invite someone…" autocomplete="off" />
+          <ul class="mt-people small" id="side-people"></ul>
+        </div>
+        <ul class="mt-roster" id="side-roster"></ul>
+      </aside>
+      <aside class="mt-side mt-notes" id="notes-side" hidden>
+        <div class="mt-side-head"><strong>Notes &amp; minutes</strong><button type="button" class="mt-x" id="notes-close" aria-label="Close">✕</button></div>
+        <div class="mt-side-sec mt-host-only" hidden>
+          <label class="mt-switch"><input type="checkbox" id="minutes-toggle" /> Take minutes (transcribe what people say)</label>
+          <div class="mt-muted small">Everyone sees a notice while this is on. When you end the meeting, the minutes are emailed to everyone.</div>
+        </div>
+        <div class="mt-side-sec mt-minutes-note" id="minutes-note" hidden>Minutes are on: what you say while unmuted is transcribed. The notes and minutes are emailed to everyone after the meeting.</div>
+        <form class="mt-note-form" id="note-form">
+          <textarea id="note-input" rows="2" maxlength="4000" placeholder="Add a note for everyone… (Enter to add)"></textarea>
+          <button type="submit" class="mt-btn sm primary">Add note</button>
+        </form>
+        <div class="mt-side-label">Notes</div>
+        <ul class="mt-notes-list" id="notes-list"><li class="mt-muted small">No notes yet.</li></ul>
+        <div class="mt-side-label">Live minutes</div>
+        <ul class="mt-notes-list transcript" id="transcript-list"><li class="mt-muted small">Not recording.</li></ul>
+      </aside>
+    </div>
+    <div class="mt-controls">
+      <button type="button" class="mt-ctl" id="ctl-mic" title="Mute / unmute">🎙<span>Mute</span></button>
+      <button type="button" class="mt-ctl" id="ctl-cam" title="Camera on / off">📷<span>Stop video</span></button>
+      <button type="button" class="mt-ctl" id="ctl-screen" title="Share screen">🖥<span>Share</span></button>
+      <button type="button" class="mt-ctl" id="ctl-hand" title="Raise hand to ask to speak">✋<span>Raise hand</span></button>
+      <button type="button" class="mt-ctl" id="ctl-notes" title="Notes and minutes">📝<span>Notes</span></button>
+      <button type="button" class="mt-ctl" id="ctl-people" title="People">👥<span>People</span><b class="mt-badge" id="ctl-badge" hidden>0</b></button>
+      <button type="button" class="mt-ctl danger" id="ctl-leave" title="Leave">⏏<span>Leave</span></button>
+      <button type="button" class="mt-ctl danger" id="ctl-end" title="End meeting for everyone" hidden>⏹<span>End for all</span></button>
+    </div>
+  </main>
+
+  <div class="mt-toasts" id="toasts"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/api.js?v=20261024s1"></script>
+  <script src="/js/meeting.js?v=20261024m4"></script>
+</body>
+</html>

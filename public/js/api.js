@@ -193,6 +193,7 @@ const CresAPI = (() => {
     download,
     login,
     logout,
+    refresh,
     verify,
   };
 })();

@@ -851,7 +851,8 @@
       go.hidden = false;
       go.onclick = () => {
         modal.classList.remove('open');
-        location.hash = href;
+        if (href.startsWith('/')) location.href = href;
+        else location.hash = href;
       };
     } else {
       go.hidden = true;
@@ -901,7 +902,9 @@
         if (!n) return;
         const href = hrefForNotification(n);
         if (href) {
-          location.hash = href;
+          // Full page links (e.g. /meeting/<id>) leave the dashboard; the rest are in-app routes.
+          if (href.startsWith('/')) location.href = href;
+          else location.hash = href;
         } else {
           openNotificationDetail(n);
         }
