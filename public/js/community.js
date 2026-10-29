@@ -3,6 +3,7 @@
  * Contact list from server matrix; Socket.io + REST poll failover.
  */
 const CresCommunity = (() => {
+  let bound = false;
   let usersById = {};
   let conversations = [];
   let activeId = null;
@@ -70,7 +71,8 @@ const CresCommunity = (() => {
 
   async function loadConversations() {
     const res = await CresAPI.request('/api/messages/conversations');
-    conversations = res.data || [];
+    const seen = new Set();
+    conversations = (res.data || []).filter((c) => c?.id && !seen.has(c.id) && seen.add(c.id));
     renderConversationList();
   }
 
@@ -89,9 +91,22 @@ const CresCommunity = (() => {
     const match = (u) => !q || String(u.name || '').toLowerCase().includes(q) || String(u.role || '').toLowerCase().includes(q);
     const dot = (id) => (onlineIds.has(id) ? '<span class="online-dot" title="Online"></span>' : '');
 
-    const chats = conversations.map((c) => ({ c, peer: peerForConversation(c) })).filter(({ peer }) => match(peer));
-    const withChat = new Set(conversations.flatMap((c) => c.participant_ids || []));
+    const seenConv = new Set();
+    const seenPeer = new Set();
+    const chats = [];
+    for (const c of conversations) {
+      if (!c?.id || seenConv.has(c.id)) continue;
+      seenConv.add(c.id);
+      const peer = peerForConversation(c);
+      if (peer?.id) {
+        if (seenPeer.has(peer.id)) continue;
+        seenPeer.add(peer.id);
+      }
+      if (match(peer)) chats.push({ c, peer });
+    }
+    const withChat = new Set([selfId, ...seenPeer]);
     const people = Object.values(usersById)
+      .filter((u, i, arr) => arr.findIndex((x) => x.id === u.id) === i)
       .filter((u) => u.id !== selfId && !withChat.has(u.id) && match(u))
       .sort((a, b) => Number(onlineIds.has(b.id)) - Number(onlineIds.has(a.id)) || String(a.name).localeCompare(String(b.name)));
 
@@ -401,10 +416,15 @@ const CresCommunity = (() => {
     const modal = document.getElementById('new-chat-modal');
     const list = document.getElementById('contact-list');
     const res = await CresAPI.request('/api/messages/contacts');
-    const contacts = res.data || [];
-    contacts.forEach((u) => {
+    const contacts = [];
+    const seen = new Set();
+    for (const u of res.data || []) {
+      if (!u?.id || seen.has(u.id)) continue;
+      seen.add(u.id);
       usersById[u.id] = u;
-    });
+      contacts.push(u);
+    }
+    contacts.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
 
     if (!contacts.length) {
       list.innerHTML = `<li style="padding:16px;color:var(--text-muted);">No permitted contacts.</li>`;
@@ -465,6 +485,8 @@ const CresCommunity = (() => {
   }
 
   function bind() {
+    if (bound) return;
+    bound = true;
     function startPeerCall(kind) {
       if (!activePeer?.id) return;
       if (typeof CresCalls === 'undefined') {

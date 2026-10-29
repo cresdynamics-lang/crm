@@ -5,6 +5,7 @@ const { requirePermission } = require('../middleware/rbac');
 const { asyncHandler, AppError } = require('../lib/errors');
 const { idempotency } = require('../middleware/idempotency');
 const { queueInvoiceEmail } = require('../queues/jobs');
+const { logInvoiceEmail } = require('../lib/invoiceEmailLog');
 
 const router = express.Router();
 router.use(authenticate);
@@ -65,16 +66,18 @@ router.get(
 
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
     const { rows } = await query(
-      `SELECT i.*,
+      `SELECT DISTINCT ON (i.id) i.*,
               c.name AS client_name, c.business_name AS client_business, c.email AS client_email,
+              c.phone AS client_phone,
               p.name AS project_name
        FROM invoices i
        LEFT JOIN clients c ON c.id = i.client_id
        LEFT JOIN projects p ON p.id = i.project_id
        ${where}
-       ORDER BY i.created_at DESC`,
+       ORDER BY i.id, i.created_at DESC`,
       params
     );
+    rows.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     res.json({ ok: true, data: rows });
   })
 );
@@ -449,20 +452,23 @@ router.get(
     }
 
     const { rows: payments } = await query(
-      `SELECT pay.*, u.name AS recorded_by_name
+      `SELECT DISTINCT ON (pay.id) pay.*, u.name AS recorded_by_name
        FROM payments pay
        JOIN users u ON u.id = pay.recorded_by
        WHERE pay.invoice_id = $1
-       ORDER BY pay.paid_at DESC`,
+       ORDER BY pay.id, pay.paid_at DESC`,
       [req.params.id]
     );
+    payments.sort((a, b) => new Date(b.paid_at) - new Date(a.paid_at));
 
     const { rows: emailLog } = await query(
-      `SELECT * FROM invoice_email_log
+      `SELECT DISTINCT ON (channel, status, COALESCE(day, created_at::date)) *
+       FROM invoice_email_log
        WHERE invoice_id = $1
-       ORDER BY created_at DESC`,
+       ORDER BY channel, status, COALESCE(day, created_at::date) DESC, created_at DESC`,
       [req.params.id]
     );
+    emailLog.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
     const { rows: deadLetters } = await query(
       `SELECT * FROM failed_jobs
@@ -518,11 +524,7 @@ router.post(
       throw new AppError('Client has no email on file', 400, 'VALIDATION');
     }
 
-    await query(
-      `INSERT INTO invoice_email_log (invoice_id, channel, status, detail)
-       VALUES ($1, 'manual_resend', 'queued', 'Manual resend by finance')`,
-      [invoice.id]
-    );
+    await logInvoiceEmail(invoice.id, 'manual_resend', 'queued', 'Manual resend by finance');
 
     // Unique job id so retries don't collide with original send
     const { enqueue } = require('../queues');
@@ -593,11 +595,7 @@ router.post(
     const to = (req.body?.to || receipt.to || '').trim();
     if (!to) throw new AppError('No recipient email - set client email or pass to', 400, 'VALIDATION');
 
-    await query(
-      `INSERT INTO invoice_email_log (invoice_id, channel, status, detail)
-       VALUES ($1, 'receipt', 'queued', $2)`,
-      [receipt.id, `Receipt queued to ${to}`]
-    );
+    await logInvoiceEmail(receipt.id, 'receipt', 'queued', `Receipt queued to ${to}`);
     await queueReceiptEmail({
       to,
       subject: receipt.subject,

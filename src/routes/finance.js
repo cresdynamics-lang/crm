@@ -8,6 +8,9 @@ const { INTERNAL_CATEGORIES, expenseClass } = require('../lib/expenseClasses');
 const router = express.Router();
 router.use(authenticate);
 
+/** One row per id — live copies without PKs used to double every total. */
+const uniq = (table) => `(SELECT DISTINCT ON (id) * FROM ${table} ORDER BY id)`;
+
 function requireFinanceAdmin(req) {
   if (!['finance', 'admin'].includes(req.user.role)) {
     throw new AppError('Forbidden', 403, 'FORBIDDEN');
@@ -24,25 +27,25 @@ router.get(
     requireFinanceAdmin(req);
 
     const { rows: balances } = await query(
-      `SELECT id, label, balance, updated_at FROM account_balances ORDER BY label`
+      `SELECT id, label, balance, updated_at FROM ${uniq('account_balances')} account_balances ORDER BY label`
     );
     const accountBalance = balances.reduce((s, b) => s + Number(b.balance), 0);
 
     const { rows: monthRev } = await query(
       `SELECT COALESCE(SUM(amount),0)::float AS total
-       FROM payments
+       FROM ${uniq('payments')} payments
        WHERE paid_at >= date_trunc('month', CURRENT_DATE)`
     );
     const { rows: monthExpRows } = await query(
       `SELECT category, COALESCE(SUM(amount),0)::float AS total
-       FROM expenses
+       FROM ${uniq('expenses')} expenses
        WHERE approval_status = 'approved'
          AND COALESCE(approved_at, created_at) >= date_trunc('month', CURRENT_DATE)
        GROUP BY category`
     );
     const { rows: allExpRows } = await query(
       `SELECT category, COALESCE(SUM(amount),0)::float AS total
-       FROM expenses
+       FROM ${uniq('expenses')} expenses
        WHERE approval_status = 'approved'
        GROUP BY category`
     );
@@ -66,15 +69,15 @@ router.get(
 
     const { rows: outstanding } = await query(
       `SELECT COALESCE(SUM(GREATEST(amount - COALESCE(amount_paid,0), 0)),0)::float AS total
-       FROM invoices WHERE status IN ('issued','overdue','partially_paid')`
+       FROM ${uniq('invoices')} invoices WHERE status IN ('issued','overdue','partially_paid')`
     );
     const { rows: billed } = await query(
       `SELECT COALESCE(SUM(amount),0)::float AS invoiced,
               COALESCE(SUM(COALESCE(amount_paid,0)),0)::float AS paid
-       FROM invoices`
+       FROM ${uniq('invoices')} invoices`
     );
     const { rows: overdueCount } = await query(
-      `SELECT COUNT(*)::int AS count FROM invoices WHERE status = 'overdue'`
+      `SELECT COUNT(*)::int AS count FROM ${uniq('invoices')} invoices WHERE status = 'overdue'`
     );
     const invoiced = Number(billed[0].invoiced || 0);
     const paid = Number(billed[0].paid || 0);
@@ -94,9 +97,9 @@ router.get(
               COALESCE(SUM(i.amount), 0)::float AS invoiced,
               COALESCE(SUM(COALESCE(i.amount_paid, 0)), 0)::float AS paid,
               COALESCE(SUM(GREATEST(i.amount - COALESCE(i.amount_paid, 0), 0)), 0)::float AS balance
-       FROM projects p
-       LEFT JOIN clients c ON c.id = p.client_id
-       LEFT JOIN invoices i ON i.project_id = p.id
+       FROM ${uniq('projects')} p
+       LEFT JOIN ${uniq('clients')} c ON c.id = p.client_id
+       LEFT JOIN ${uniq('invoices')} i ON i.project_id = p.id
        WHERE p.status NOT IN ('pending_approval', 'rejected')
        GROUP BY p.id, p.name, p.status, p.value_amount, c.name, c.business_name
        ORDER BY p.name ASC`
@@ -154,32 +157,32 @@ router.get(
     }
 
     const { rows: balances } = await query(
-      `SELECT id, label, balance, updated_at FROM account_balances ORDER BY label`
+      `SELECT id, label, balance, updated_at FROM ${uniq('account_balances')} account_balances ORDER BY label`
     );
     const totalBalance = balances.reduce((s, b) => s + Number(b.balance), 0);
 
     const { rows: paid } = await query(
-      `SELECT COALESCE(SUM(amount),0)::float AS total FROM payments`
+      `SELECT COALESCE(SUM(amount),0)::float AS total FROM ${uniq('payments')} payments`
     );
     const { rows: exp } = await query(
-      `SELECT COALESCE(SUM(amount),0)::float AS total FROM expenses WHERE approval_status = 'approved'`
+      `SELECT COALESCE(SUM(amount),0)::float AS total FROM ${uniq('expenses')} expenses WHERE approval_status = 'approved'`
     );
     const { rows: outstanding } = await query(
       `SELECT COALESCE(SUM(amount - COALESCE(amount_paid,0)),0)::float AS total
-       FROM invoices WHERE status IN ('issued','overdue','partially_paid')`
+       FROM ${uniq('invoices')} invoices WHERE status IN ('issued','overdue','partially_paid')`
     );
     const { rows: issuedCount } = await query(
-      `SELECT COUNT(*)::int AS count FROM invoices WHERE status = 'issued'`
+      `SELECT COUNT(*)::int AS count FROM ${uniq('invoices')} invoices WHERE status = 'issued'`
     );
     const { rows: overdueCount } = await query(
-      `SELECT COUNT(*)::int AS count FROM invoices WHERE status = 'overdue'`
+      `SELECT COUNT(*)::int AS count FROM ${uniq('invoices')} invoices WHERE status = 'overdue'`
     );
     const { rows: pendingFinanceExp } = await query(
-      `SELECT COUNT(*)::int AS count FROM expenses
+      `SELECT COUNT(*)::int AS count FROM ${uniq('expenses')} expenses
        WHERE approval_status IN ('pending_finance', 'pending')`
     );
     const { rows: pendingFinanceFund } = await query(
-      `SELECT COUNT(*)::int AS count FROM salary_funding_requests
+      `SELECT COUNT(*)::int AS count FROM ${uniq('salary_funding_requests')} salary_funding_requests
        WHERE status = 'pending_finance'`
     );
 
@@ -199,13 +202,13 @@ router.get(
        LEFT JOIN (
          SELECT to_char(date_trunc('month', paid_at), 'YYYY-MM') AS month,
                 SUM(amount) AS in_amount
-         FROM payments
+         FROM ${uniq('payments')} payments
          GROUP BY 1
        ) p ON p.month = m.month
        LEFT JOIN (
          SELECT to_char(date_trunc('month', COALESCE(approved_at, created_at)), 'YYYY-MM') AS month,
                 SUM(amount) AS out_amount
-         FROM expenses
+         FROM ${uniq('expenses')} expenses
          WHERE approval_status = 'approved'
          GROUP BY 1
        ) e ON e.month = m.month
@@ -227,8 +230,8 @@ router.get(
     const { rows: byProject } = await query(
       `SELECT COALESCE(p.name, 'Unlinked') AS label,
               COALESCE(SUM(i.amount),0)::float AS total
-       FROM invoices i
-       LEFT JOIN projects p ON p.id = i.project_id
+       FROM ${uniq('invoices')} i
+       LEFT JOIN ${uniq('projects')} p ON p.id = i.project_id
        GROUP BY COALESCE(p.name, 'Unlinked')
        ORDER BY total DESC
        LIMIT 8`
@@ -237,7 +240,7 @@ router.get(
     // Expense breakdown by category
     const { rows: byCategory } = await query(
       `SELECT category AS label, COALESCE(SUM(amount),0)::float AS total
-       FROM expenses
+       FROM ${uniq('expenses')} expenses
        WHERE approval_status = 'approved'
        GROUP BY category
        ORDER BY total DESC`
@@ -304,13 +307,13 @@ router.get(
               i.id AS invoice_id, i.amount AS invoice_amount, i.amount_paid,
               i.status AS invoice_status, i.due_date,
               (COALESCE(i.amount, 0) - COALESCE(i.amount_paid, 0))::float AS balance_due
-       FROM projects p
-       LEFT JOIN clients c ON c.id = p.client_id
-       LEFT JOIN users u ON u.id = p.created_by
-       LEFT JOIN users d ON d.id = p.assigned_developer_id
+       FROM ${uniq('projects')} p
+       LEFT JOIN ${uniq('clients')} c ON c.id = p.client_id
+       LEFT JOIN ${uniq('users')} u ON u.id = p.created_by
+       LEFT JOIN ${uniq('users')} d ON d.id = p.assigned_developer_id
        LEFT JOIN LATERAL (
          SELECT inv.*
-         FROM invoices inv
+         FROM ${uniq('invoices')} inv
          WHERE inv.project_id = p.id
          ORDER BY inv.created_at DESC
          LIMIT 1

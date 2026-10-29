@@ -935,17 +935,17 @@
               <select id="pay-invoice" required></select>
             </div>
             <div style="grid-column:1/-1;" id="pay-client-card" class="placeholder-card" hidden>
-              <div class="meta" style="margin-bottom:6px;">Client on invoice</div>
+              <div class="meta" style="margin-bottom:6px;">Client on this invoice — filled from the CRM</div>
               <div id="pay-client-summary"></div>
-              <div class="toolbar" style="margin-top:10px;gap:8px;">
+              <div class="toolbar" id="pay-client-toolbar" style="margin-top:10px;gap:8px;" hidden>
                 <button type="button" class="btn btn-ghost btn-sm" id="btn-check-client">Check client in CRM</button>
                 <button type="button" class="btn btn-primary btn-sm" id="btn-add-client-manual" hidden>Add client details</button>
               </div>
               <div id="pay-client-manual" class="form-grid" style="margin-top:12px;" hidden>
-                <div><label>Client name</label><input id="pay-new-client-name" required placeholder="Contact name" /></div>
-                <div><label>Business</label><input id="pay-new-client-business" placeholder="Company" /></div>
-                <div><label>Email</label><input id="pay-new-client-email" type="email" required placeholder="billing@client.com" /></div>
-                <div><label>Phone</label><input id="pay-new-client-phone" placeholder="+254 7xx xxx xxx" /></div>
+                <div><label>Client name</label><input id="pay-new-client-name" placeholder="Contact name" autocomplete="off" /></div>
+                <div><label>Business</label><input id="pay-new-client-business" placeholder="Company" autocomplete="off" /></div>
+                <div><label>Email</label><input id="pay-new-client-email" type="email" placeholder="billing@client.com" autocomplete="off" /></div>
+                <div><label>Phone</label><input id="pay-new-client-phone" placeholder="+254 7xx xxx xxx" autocomplete="off" /></div>
                 <div class="form-actions" style="grid-column:1/-1;">
                   <button type="button" class="btn btn-primary btn-sm" id="btn-save-pay-client">Save client to invoice</button>
                 </div>
@@ -2160,14 +2160,14 @@
   <script src="/js/approvals.js?v=20261021e"></script>
   <script src="/js/projectDetail.js?v=20261021d"></script>
   <script src="/js/clientCard.js?v=20261021d"></script>
-  <script src="/js/community.js?v=20261024p2"></script>
+  <script src="/js/community.js?v=20261029a"></script>
   <script src="/js/voiceReport.js?v=20260827b"></script>
   <script src="/js/voiceForms.js?v=20260827b"></script>
   <script src="/js/ops.js?v=20260826a"></script>
   <script src="/js/sales.js?v=20261024v1"></script>
   <script src="/js/director.js?v=20261023h"></script>
   <script src="/js/developer.js?v=20261021d"></script>
-  <script src="/js/finance.js?v=20261023c"></script>
+  <script src="/js/finance.js?v=20261029b"></script>
   <script src="/js/hr.js?v=20261023i"></script>
   <script src="/js/pm.js?v=20261021e"></script>
   <script src="/js/admin.js?v=20261023i"></script>

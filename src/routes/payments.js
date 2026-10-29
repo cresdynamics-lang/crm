@@ -107,7 +107,7 @@ router.get(
     }
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
     const { rows } = await query(
-      `SELECT pay.*,
+      `SELECT DISTINCT ON (pay.id) pay.*,
               c.name AS client_name, c.email AS client_email,
               p.name AS project_name, i.status AS invoice_status, i.amount AS invoice_amount,
               (COALESCE(i.amount,0) - COALESCE(i.amount_paid,0))::float AS invoice_balance
@@ -116,10 +116,11 @@ router.get(
        LEFT JOIN clients c ON c.id = i.client_id
        LEFT JOIN projects p ON p.id = i.project_id
        ${where}
-       ORDER BY pay.paid_at DESC
-       LIMIT 200`,
+       ORDER BY pay.id, pay.paid_at DESC`,
       params
     );
+    rows.sort((a, b) => new Date(b.paid_at) - new Date(a.paid_at));
+    if (rows.length > 200) rows.length = 200;
     res.json({ ok: true, data: rows });
   })
 );

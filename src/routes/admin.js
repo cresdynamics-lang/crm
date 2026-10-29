@@ -120,22 +120,22 @@ router.get(
                AND (m->>'due_date')::date BETWEEN CURRENT_DATE AND CURRENT_DATE + 7
            )`
       ),
-      query(`SELECT COALESCE(SUM(balance),0)::float AS total FROM account_balances`),
-      query(`SELECT COALESCE(SUM(amount),0)::float AS total FROM payments`),
-      query(`SELECT COALESCE(SUM(amount),0)::float AS total FROM expenses`),
-      query(`SELECT COALESCE(SUM(amount),0)::float AS total FROM invoices WHERE status IN ('issued','overdue')`),
+      query(`SELECT COALESCE(SUM(balance),0)::float AS total FROM (SELECT DISTINCT ON (id) * FROM account_balances ORDER BY id) account_balances`),
+      query(`SELECT COALESCE(SUM(amount),0)::float AS total FROM (SELECT DISTINCT ON (id) * FROM payments ORDER BY id) payments`),
+      query(`SELECT COALESCE(SUM(amount),0)::float AS total FROM (SELECT DISTINCT ON (id) * FROM expenses ORDER BY id) expenses`),
+      query(`SELECT COALESCE(SUM(amount),0)::float AS total FROM (SELECT DISTINCT ON (id) * FROM invoices ORDER BY id) invoices WHERE status IN ('issued','overdue')`),
       query(
         `SELECT COALESCE(SUM(amount_expected),0)::float AS total
-         FROM salary_payments WHERE month = to_char(CURRENT_DATE, 'YYYY-MM')`
+         FROM (SELECT DISTINCT ON (id) * FROM salary_payments ORDER BY id) salary_payments WHERE month = to_char(CURRENT_DATE, 'YYYY-MM')`
       ),
       query(
         `SELECT COALESCE(SUM(amount_expected - amount_paid),0)::float AS total
-         FROM salary_payments
+         FROM (SELECT DISTINCT ON (id) * FROM salary_payments ORDER BY id) salary_payments
          WHERE month = to_char(CURRENT_DATE, 'YYYY-MM') AND status = 'owed'`
       ),
       query(
         `SELECT COALESCE(SUM(amount_paid),0)::float AS total
-         FROM salary_payments
+         FROM (SELECT DISTINCT ON (id) * FROM salary_payments ORDER BY id) salary_payments
          WHERE month = to_char(CURRENT_DATE, 'YYYY-MM') AND status = 'settled'`
       ),
       query(`SELECT COUNT(*)::int AS count FROM daily_reports WHERE routing_status = 'pending_pm'`),
@@ -198,22 +198,22 @@ router.get(
     for (const month of months) {
       const [pay, exp, salS, salO] = await Promise.all([
         query(
-          `SELECT COALESCE(SUM(amount),0)::float AS total FROM payments
+          `SELECT COALESCE(SUM(amount),0)::float AS total FROM (SELECT DISTINCT ON (id) * FROM payments ORDER BY id) payments
            WHERE to_char(paid_at, 'YYYY-MM') = $1`,
           [month]
         ),
         query(
-          `SELECT COALESCE(SUM(amount),0)::float AS total FROM expenses
+          `SELECT COALESCE(SUM(amount),0)::float AS total FROM (SELECT DISTINCT ON (id) * FROM expenses ORDER BY id) expenses
            WHERE to_char(created_at, 'YYYY-MM') = $1`,
           [month]
         ),
         query(
-          `SELECT COALESCE(SUM(amount_paid),0)::float AS total FROM salary_payments
+          `SELECT COALESCE(SUM(amount_paid),0)::float AS total FROM (SELECT DISTINCT ON (id) * FROM salary_payments ORDER BY id) salary_payments
            WHERE month = $1 AND status = 'settled'`,
           [month]
         ),
         query(
-          `SELECT COALESCE(SUM(amount_expected - amount_paid),0)::float AS total FROM salary_payments
+          `SELECT COALESCE(SUM(amount_expected - amount_paid),0)::float AS total FROM (SELECT DISTINCT ON (id) * FROM salary_payments ORDER BY id) salary_payments
            WHERE month = $1 AND status = 'owed'`,
           [month]
         ),
@@ -389,6 +389,10 @@ router.get(
          FROM invoice_email_log l
          LEFT JOIN invoices i ON i.id = l.invoice_id
          LEFT JOIN clients c ON c.id = i.client_id
+        WHERE l.ctid IN (
+          SELECT MIN(x.ctid) FROM invoice_email_log x
+          GROUP BY x.invoice_id, x.channel, x.status, COALESCE(x.day, x.created_at::date)
+        )
         ORDER BY l.created_at DESC
         LIMIT 40`
     ).catch(() => ({ rows: [] }));

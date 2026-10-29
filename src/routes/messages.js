@@ -25,16 +25,20 @@ router.get(
     }
 
     const { rows } = await query(
-      `SELECT u.id, u.name, u.email, u.phone, u.avatar_url, r.name AS role
+      `SELECT DISTINCT ON (u.id) u.id, u.name, u.email, u.phone, u.avatar_url, r.name AS role
        FROM users u
        JOIN roles r ON r.id = u.role_id
        WHERE u.status = 'active'
          AND u.id <> $1
-         AND r.name <> 'client'`,
+         AND r.name <> 'client'
+       ORDER BY u.id, u.name`,
       [req.user.id]
     );
 
-    const filtered = rows.filter((u) => canMessage(req.user.role, u.role));
+    const seen = new Set();
+    const filtered = rows
+      .filter((u) => canMessage(req.user.role, u.role) && !seen.has(u.id) && seen.add(u.id))
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
     res.json({ ok: true, data: filtered });
   })
 );
@@ -48,11 +52,15 @@ router.get(
     }
 
     const { rows } = await query(
-      `SELECT c.*
-       FROM conversations c
-       WHERE $1 = ANY(c.participant_ids)
-         AND NOT ($1 = ANY(c.archived_by))
-       ORDER BY c.updated_at DESC`,
+      `SELECT *
+       FROM (
+         SELECT DISTINCT ON (id) *
+         FROM conversations
+         WHERE $1 = ANY(participant_ids)
+           AND NOT ($1 = ANY(archived_by))
+         ORDER BY id
+       ) c
+       ORDER BY updated_at DESC`,
       [req.user.id]
     );
     res.json({ ok: true, data: rows });

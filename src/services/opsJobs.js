@@ -2,6 +2,7 @@
  * Periodic ops: invoice overdue detection + sales follow-up due alerts.
  */
 const { query } = require('../config/database');
+const { logInvoiceEmail } = require('../lib/invoiceEmailLog');
 const { queueNotification } = require('../queues/jobs');
 
 /**
@@ -67,10 +68,11 @@ async function queueOverdueEmail(inv, kind, { penaltyNumber, state }) {
   if (!updated.rows[0]) return false; // already handled this cycle
 
   if (!inv.client_email) {
-    await query(
-      `INSERT INTO invoice_email_log (invoice_id, channel, status, detail)
-       VALUES ($1, $2, 'failed', $3)`,
-      [inv.id, kind === 'followup' ? 'overdue_followup' : 'overdue_reminder', 'No client email on file']
+    await logInvoiceEmail(
+      inv.id,
+      kind === 'followup' ? 'overdue_followup' : 'overdue_reminder',
+      'failed',
+      'No client email on file'
     );
     return true;
   }
@@ -82,14 +84,11 @@ async function queueOverdueEmail(inv, kind, { penaltyNumber, state }) {
     kind,
     penaltyNumber,
   });
-  await query(
-    `INSERT INTO invoice_email_log (invoice_id, channel, status, detail)
-     VALUES ($1, $2, 'queued', $3)`,
-    [
-      inv.id,
-      kind === 'followup' ? 'overdue_followup' : 'overdue_reminder',
-      `Reminder (cycle ${penaltyNumber}) queued to ${inv.client_email}`,
-    ]
+  await logInvoiceEmail(
+    inv.id,
+    kind === 'followup' ? 'overdue_followup' : 'overdue_reminder',
+    'queued',
+    `Reminder (cycle ${penaltyNumber}) queued to ${inv.client_email}`
   );
   await notifyFinance(
     'invoice_overdue',
@@ -119,32 +118,29 @@ async function notifyFinance(type, content, invoiceId) {
  * Guarded UPDATE so concurrent runs only apply once. Emails + logs after.
  */
 async function applyPenalty(inv, penaltyNumber, state) {
-  const penalty = Math.round(Number(inv.amount) * 2) / 100;
-  const newAmount = Math.round((Number(inv.amount) + penalty) * 100) / 100;
-
   const updated = await query(
     `UPDATE invoices
-     SET amount = $1,
+     SET amount = round((amount * 1.02)::numeric, 2),
          penalty_count = penalty_count + 1,
          last_penalty_at = NOW(),
-         overdue_state = $2::jsonb,
+         overdue_state = $1::jsonb,
          updated_at = NOW()
-     WHERE id = $3
-     RETURNING id`,
-    [
-      String(newAmount),
-      JSON.stringify({ ...state, reminderBeforeCycle: penaltyNumber }),
-      inv.id,
-    ]
+     WHERE id = $2
+       AND (last_penalty_at IS NULL OR last_penalty_at < NOW() - INTERVAL '4 days')
+     RETURNING id, amount`,
+    [JSON.stringify({ ...state, reminderBeforeCycle: penaltyNumber }), inv.id]
   );
   if (!updated.rows[0]) return false;
+  const appliedAmount = Number(updated.rows[0].amount);
+  const appliedPenalty = Math.round((appliedAmount - Number(inv.amount)) * 100) / 100;
 
-  const detail = `2% penalty ${formatKsh(penalty)} applied (cycle ${penaltyNumber}) - amount now ${formatKsh(newAmount)}`;
+  const detail = `2% penalty ${formatKsh(appliedPenalty)} applied (cycle ${penaltyNumber}) - amount now ${formatKsh(appliedAmount)}`;
 
-  await query(
-    `INSERT INTO invoice_email_log (invoice_id, channel, status, detail)
-     VALUES ($1, 'overdue_penalty', $2, $3)`,
-    [inv.id, inv.client_email ? 'queued' : 'failed', inv.client_email ? `${detail} - emailed ${inv.client_email}` : `${detail} - no client email`]
+  await logInvoiceEmail(
+    inv.id,
+    'overdue_penalty',
+    inv.client_email ? 'queued' : 'failed',
+    inv.client_email ? `${detail} - emailed ${inv.client_email}` : `${detail} - no client email`
   );
 
   if (inv.client_email) {
@@ -153,15 +149,15 @@ async function applyPenalty(inv, penaltyNumber, state) {
       invoiceId: inv.id,
       clientEmail: inv.client_email,
       kind: 'penalty',
-      penaltyAmount: penalty,
-      newAmount,
+      penaltyAmount: appliedPenalty,
+      newAmount: appliedAmount,
       penaltyNumber,
     });
   }
 
   await notifyFinance(
     'invoice_penalty',
-    `Invoice ${invoiceLabel(inv)}: 2% penalty ${formatKsh(penalty)} added (expected amount now ${formatKsh(newAmount)})`,
+    `Invoice ${invoiceLabel(inv)}: 2% penalty ${formatKsh(appliedPenalty)} added (expected amount now ${formatKsh(appliedAmount)})`,
     inv.id
   );
   return true;
@@ -429,10 +425,24 @@ async function runOpsJobs() {
 }
 
 function startOpsScheduler(intervalMs = 5 * 60 * 1000) {
-  const { backfillPayroll } = require('./payrollRows');
-  const payroll = () => backfillPayroll().catch((e) => console.error('[ops] payroll backfill failed', e.message));
-  const { prewarmDigest } = require('./dailyOpsDigest');
-  const digest = () => prewarmDigest();
+  const payroll = () => {
+    try {
+      const { backfillPayroll } = require('./payrollRows');
+      if (typeof backfillPayroll === 'function') {
+        backfillPayroll().catch((e) => console.error('[ops] payroll backfill failed', e.message));
+      }
+    } catch (e) {
+      console.error('[ops] payroll scheduler skipped', e.message);
+    }
+  };
+  const digest = () => {
+    try {
+      const { prewarmDigest } = require('./dailyOpsDigest');
+      if (typeof prewarmDigest === 'function') prewarmDigest();
+    } catch (e) {
+      console.error('[ops] digest scheduler skipped', e.message);
+    }
+  };
   payroll();
   digest();
   runOpsJobs().catch(() => {});

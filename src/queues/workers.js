@@ -1,4 +1,5 @@
 const { query } = require('../config/database');
+const { logInvoiceEmail } = require('../lib/invoiceEmailLog');
 const { sendWithFailover } = require('../services/emailService');
 const { queueInvoiceEmail, queueNotification, queueNotificationDigestEmail } = require('./jobs');
 const { Worker, QUEUE_NAMES, connection, moveToDeadLetter, defaultJobOpts } = require('./index');
@@ -235,11 +236,7 @@ async function handleEmail(job) {
       meta: { type: 'receipt', receiptType: data.receiptType, receiptId: data.receiptId, fromRole: 'finance' },
     });
     if (data.receiptType === 'invoice' && data.receiptId) {
-      await query(
-        `INSERT INTO invoice_email_log (invoice_id, channel, status, detail)
-         VALUES ($1, 'receipt', 'sent', $2)`,
-        [data.receiptId, `Receipt emailed to ${data.to}`]
-      );
+      await logInvoiceEmail(data.receiptId, 'receipt', 'sent', `Receipt emailed to ${data.to}`);
     }
     return result;
   }
@@ -421,14 +418,11 @@ async function handleEmail(job) {
       meta: { type: 'invoice_overdue', kind, invoiceId, penaltyNumber, fromRole: 'finance' },
     });
 
-    await query(
-      `INSERT INTO invoice_email_log (invoice_id, channel, status, detail)
-       VALUES ($1, $2, 'sent', $3)`,
-      [
-        invoiceId,
-        kind === 'penalty' ? 'overdue_penalty' : kind === 'followup' ? 'overdue_followup' : 'overdue_reminder',
-        `${kind} reached ${clientEmail}`,
-      ]
+    await logInvoiceEmail(
+      invoiceId,
+      kind === 'penalty' ? 'overdue_penalty' : kind === 'followup' ? 'overdue_followup' : 'overdue_reminder',
+      'sent',
+      `${kind} reached ${clientEmail}`
     );
     return result;
   }
@@ -461,19 +455,11 @@ async function handleEmail(job) {
       `UPDATE invoices SET auto_sent_at = NOW(), updated_at = NOW() WHERE id = $1`,
       [invoiceId]
     );
-    await query(
-      `INSERT INTO invoice_email_log (invoice_id, channel, status, detail)
-       VALUES ($1, $2, 'sent', $3)`,
-      [invoiceId, channel || 'primary', result.messageId || 'sent']
-    );
+    await logInvoiceEmail(invoiceId, channel || 'primary', 'sent', result.messageId || 'sent');
 
     return result;
   } catch (err) {
-    await query(
-      `INSERT INTO invoice_email_log (invoice_id, channel, status, detail)
-       VALUES ($1, $2, 'failed', $3)`,
-      [invoiceId, channel || 'primary', err.message]
-    );
+    await logInvoiceEmail(invoiceId, channel || 'primary', 'failed', err.message);
     throw err;
   }
 }
@@ -489,10 +475,19 @@ async function handleNotification(job) {
 
   const { rows } = await query(
     `INSERT INTO notifications (user_id, type, content, meta)
-     VALUES ($1, $2, $3, $4)
+     SELECT $1, $2, $3, $4::jsonb
+     WHERE NOT (
+       $2 LIKE 'invoice_%'
+       AND EXISTS (
+         SELECT 1 FROM notifications n
+         WHERE n.user_id = $1 AND n.type = $2 AND n.content = $3
+           AND n.created_at::date = CURRENT_DATE
+       )
+     )
      RETURNING *`,
     [userId, type, content, JSON.stringify(meta || {})]
   );
+  if (!rows[0]) return { skipped: true, reason: 'duplicate_today' };
 
   try {
     const { emitNotification } = require('../realtime/socket');

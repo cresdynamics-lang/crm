@@ -318,57 +318,111 @@ const CresFinance = (() => {
 
   let payInvoiceCache = {};
 
-  async function refreshPayClientCard(invoiceId) {
+  function todayInputValue() {
+    const t = new Date();
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+  }
+
+  function fillClientFieldsFromInvoice(i) {
+    const set = (id, v) => {
+      const el = document.getElementById(id);
+      if (el) el.value = v || '';
+    };
+    set('pay-new-client-name', i.client_name);
+    set('pay-new-client-business', i.client_business);
+    set('pay-new-client-email', i.client_email);
+    set('pay-new-client-phone', i.client_phone);
+  }
+
+  function applyInvoiceToPayForm(i, { overwriteAmount = true } = {}) {
+    if (!i) return;
+    const bal = invoiceBalance(i);
+    const amountEl = document.getElementById('pay-amount');
+    if (amountEl) {
+      const prevAuto = amountEl.dataset.invoiceBalance;
+      const current = amountEl.value;
+      const stillAuto = !current || (prevAuto != null && current === prevAuto);
+      if (overwriteAmount || stillAuto) {
+        amountEl.value = bal > 0 ? String(bal) : '';
+      }
+      amountEl.dataset.invoiceBalance = String(bal);
+      amountEl.setAttribute('max', String(bal));
+    }
+    const dateEl = document.getElementById('pay-date');
+    if (dateEl && !dateEl.value) dateEl.value = todayInputValue();
+    const hint = document.getElementById('pay-debt-hint');
+    if (hint) {
+      hint.textContent = `Outstanding on this invoice: ${fmtMoney(bal)}. Enter the amount received and the M-Pesa / bank code.`;
+    }
+    fillClientFieldsFromInvoice(i);
+  }
+
+  function renderPayClientSummary(i) {
     const card = document.getElementById('pay-client-card');
     const summary = document.getElementById('pay-client-summary');
     const addBtn = document.getElementById('btn-add-client-manual');
+    const checkBtn = document.getElementById('btn-check-client');
+    const toolbar = document.getElementById('pay-client-toolbar');
     const manual = document.getElementById('pay-client-manual');
-    const hint = document.getElementById('pay-debt-hint');
+    if (!card || !summary || !i) return;
+
+    const hasClient = !!i.client_id;
+    const hasEmail = !!(i.client_email || '').trim();
+    const invNo = i.invoice_number ? `${esc(i.invoice_number)} · ` : '';
+
+    if (hasClient && hasEmail) {
+      if (manual) manual.hidden = true;
+      if (addBtn) addBtn.hidden = true;
+      if (checkBtn) checkBtn.hidden = true;
+      if (toolbar) toolbar.hidden = true;
+      summary.innerHTML = `<strong>${esc(i.client_business || i.client_name || 'Client')}</strong>
+        <div class="meta">${invNo}${esc(i.client_name || '')}${i.client_email ? ` · ${esc(i.client_email)}` : ''}${i.client_phone ? ` · ${esc(i.client_phone)}` : ''}${i.project_name ? ` · ${esc(i.project_name)}` : ''}</div>
+        <div style="margin-top:6px;"><span class="status-pill paid">Client found in CRM</span>
+          ${i.client_id ? ` <button type="button" class="btn btn-ghost btn-sm" data-open-pay-client="${esc(i.client_id)}">Client card</button>` : ''}
+        </div>
+        <div class="meta" style="margin-top:8px;">Name and contact are taken from this invoice. Record the payment and transaction code only.</div>`;
+      summary.querySelector('[data-open-pay-client]')?.addEventListener('click', () => {
+        if (typeof CresClientCard !== 'undefined') {
+          CresClientCard.open(i.client_id).catch(console.error);
+        }
+      });
+      return;
+    }
+
+    if (toolbar) toolbar.hidden = false;
+    if (addBtn) addBtn.hidden = false;
+    if (checkBtn) checkBtn.hidden = false;
+    if (manual) manual.hidden = false;
+    if (!hasClient) {
+      summary.innerHTML = `<span class="status-pill overdue">No client linked</span>
+        <div class="meta" style="margin-top:6px;">This invoice has no CRM client. Add details once, then they sync on later payments.</div>`;
+    } else {
+      summary.innerHTML = `<strong>${esc(i.client_name || i.client_business || 'Client')}</strong>
+        <div class="meta">In CRM — missing email (needed for receipts / balance invoice). Fill the email only.</div>`;
+    }
+  }
+
+  async function refreshPayClientCard(invoiceId, { overwriteAmount = false } = {}) {
+    const card = document.getElementById('pay-client-card');
+    const summary = document.getElementById('pay-client-summary');
     if (!card || !invoiceId) {
       if (card) card.hidden = true;
       return;
     }
     card.hidden = false;
-    if (manual) manual.hidden = true;
+    const cached = payInvoiceCache[invoiceId];
+    if (cached) {
+      applyInvoiceToPayForm(cached, { overwriteAmount });
+      renderPayClientSummary(cached);
+    }
     try {
       const res = await CresAPI.request(`/api/invoices/${invoiceId}`);
       const i = res.data?.invoice || res.data;
       payInvoiceCache[invoiceId] = i;
-      const bal = invoiceBalance(i);
-      if (hint) {
-        hint.textContent = `Outstanding debt on this invoice: ${fmtMoney(bal)}. Pay in full or less — a partial payment issues a new balance invoice.`;
-      }
-      const amountEl = document.getElementById('pay-amount');
-      if (amountEl && !amountEl.value) amountEl.value = bal;
-      amountEl?.setAttribute('max', String(bal));
-
-      const hasClient = !!i.client_id;
-      const hasEmail = !!(i.client_email || '').trim();
-      if (summary) {
-        if (!hasClient) {
-          summary.innerHTML = `<span class="status-pill overdue">No client linked</span>
-            <div class="meta" style="margin-top:6px;">Add client details before recording this payment.</div>`;
-          if (addBtn) addBtn.hidden = false;
-        } else if (!hasEmail) {
-          summary.innerHTML = `<strong>${esc(i.client_name || i.client_business || 'Client')}</strong>
-            <div class="meta">In CRM — missing email (required for receipts / balance invoice).</div>`;
-          if (addBtn) addBtn.hidden = false;
-        } else {
-          summary.innerHTML = `<strong>${esc(i.client_business || i.client_name || 'Client')}</strong>
-            <div class="meta">${esc(i.client_name || '')} · ${esc(i.client_email)} ${i.client_phone ? `· ${esc(i.client_phone)}` : ''}</div>
-            <div style="margin-top:6px;"><span class="status-pill paid">Client found in CRM</span>
-              ${i.client_id ? ` <button type="button" class="btn btn-ghost btn-sm" data-open-pay-client="${esc(i.client_id)}">Client card</button>` : ''}
-            </div>`;
-          if (addBtn) addBtn.hidden = true;
-          summary.querySelector('[data-open-pay-client]')?.addEventListener('click', () => {
-            if (typeof CresClientCard !== 'undefined') {
-              CresClientCard.open(i.client_id).catch(console.error);
-            }
-          });
-        }
-      }
+      applyInvoiceToPayForm(i, { overwriteAmount: false });
+      renderPayClientSummary(i);
     } catch (err) {
-      if (summary) summary.textContent = err.message;
+      if (summary && !cached) summary.textContent = err.message;
     }
   }
 
@@ -382,6 +436,12 @@ const CresFinance = (() => {
     const byId = new Map();
     [...issued.data, ...(partial.data || []), ...(overdue.data || [])].forEach((i) => byId.set(i.id, i));
     const openInvoices = [...byId.values()];
+    openInvoices.forEach((i) => {
+      payInvoiceCache[i.id] = i;
+    });
+
+    const dateEl = document.getElementById('pay-date');
+    if (dateEl && !dateEl.value) dateEl.value = todayInputValue();
 
     const select = document.getElementById('pay-invoice');
     select.innerHTML =
@@ -389,71 +449,88 @@ const CresFinance = (() => {
       openInvoices
         .map((i) => {
           const bal = invoiceBalance(i);
-          return `<option value="${i.id}" data-balance="${bal}">${esc(i.client_name || 'No client')} — balance ${fmtMoney(bal)} of ${fmtMoney(i.amount)} (${esc(i.status)})</option>`;
+          const label = [i.invoice_number, i.client_name || i.client_business || 'No client', i.project_name]
+            .filter(Boolean)
+            .join(' · ');
+          return `<option value="${i.id}" data-balance="${bal}">${esc(label)} — ${fmtMoney(bal)} due (${esc(i.status)})</option>`;
         })
         .join('');
 
     select.onchange = () => {
-      const opt = select.selectedOptions[0];
-      const bal = opt?.dataset.balance;
-      if (bal) document.getElementById('pay-amount').value = bal;
-      refreshPayClientCard(select.value).catch(console.error);
-      updateBankCard();
+      const id = select.value;
+      if (!id) {
+        document.getElementById('pay-client-card').hidden = true;
+        const hint = document.getElementById('pay-debt-hint');
+        if (hint) hint.textContent = 'Select an invoice to see outstanding debt.';
+        return;
+      }
+      refreshPayClientCard(id, { overwriteAmount: true }).then(updateBankCard).catch(console.error);
     };
 
     document.getElementById('pay-bank-ref')?.addEventListener('input', updateBankCard);
     document.getElementById('pay-amount')?.addEventListener('input', updateBankCard);
 
-    document.getElementById('btn-check-client')?.addEventListener('click', async () => {
-      const id = select.value;
-      if (!id) return flash(document.getElementById('payments-flash'), 'Select an invoice first', false);
-      await refreshPayClientCard(id);
-      const i = payInvoiceCache[id];
-      if (i?.client_id && i?.client_email) {
-        flash(document.getElementById('payments-flash'), 'Client is already in the CRM with an email');
-      } else {
-        flash(document.getElementById('payments-flash'), 'Client missing — add details manually', false);
-        const addBtn = document.getElementById('btn-add-client-manual');
-        if (addBtn) addBtn.hidden = false;
+    const checkBtn = document.getElementById('btn-check-client');
+    if (checkBtn) {
+      checkBtn.onclick = async () => {
+        const id = select.value;
+        if (!id) return flash(document.getElementById('payments-flash'), 'Select an invoice first', false);
+        await refreshPayClientCard(id, { overwriteAmount: false });
+        const i = payInvoiceCache[id];
+        if (i?.client_id && i?.client_email) {
+          flash(document.getElementById('payments-flash'), 'Client already in the CRM — no need to re-enter details');
+        } else {
+          flash(document.getElementById('payments-flash'), 'Client missing — add details once so later payments sync', false);
+          const addBtn = document.getElementById('btn-add-client-manual');
+          const toolbar = document.getElementById('pay-client-toolbar');
+          if (addBtn) addBtn.hidden = false;
+          if (toolbar) toolbar.hidden = false;
+          document.getElementById('pay-client-manual').hidden = false;
+        }
+      };
+    }
+
+    const addBtn = document.getElementById('btn-add-client-manual');
+    if (addBtn) {
+      addBtn.onclick = () => {
         document.getElementById('pay-client-manual').hidden = false;
-      }
-    });
+      };
+    }
 
-    document.getElementById('btn-add-client-manual')?.addEventListener('click', () => {
-      document.getElementById('pay-client-manual').hidden = false;
-    });
-
-    document.getElementById('btn-save-pay-client')?.addEventListener('click', async () => {
-      const id = select.value;
-      if (!id) return;
-      const name = document.getElementById('pay-new-client-name').value.trim();
-      const email = document.getElementById('pay-new-client-email').value.trim();
-      if (!name || !email) {
-        flash(document.getElementById('payments-flash'), 'Name and email required', false);
-        return;
-      }
-      try {
-        await CresAPI.request(`/api/invoices/${id}/client`, {
-          method: 'PATCH',
-          body: {
-            client: {
-              name,
-              email,
-              business_name: document.getElementById('pay-new-client-business').value.trim() || undefined,
-              phone: document.getElementById('pay-new-client-phone').value.trim() || undefined,
+    const saveBtn = document.getElementById('btn-save-pay-client');
+    if (saveBtn) {
+      saveBtn.onclick = async () => {
+        const id = select.value;
+        if (!id) return;
+        const name = document.getElementById('pay-new-client-name').value.trim();
+        const email = document.getElementById('pay-new-client-email').value.trim();
+        if (!name || !email) {
+          flash(document.getElementById('payments-flash'), 'Name and email required', false);
+          return;
+        }
+        try {
+          await CresAPI.request(`/api/invoices/${id}/client`, {
+            method: 'PATCH',
+            body: {
+              client: {
+                name,
+                email,
+                business_name: document.getElementById('pay-new-client-business').value.trim() || undefined,
+                phone: document.getElementById('pay-new-client-phone').value.trim() || undefined,
+              },
             },
-          },
-          idempotencyKey: `inv-client-${id}-${Date.now()}`,
-        });
-        flash(document.getElementById('payments-flash'), 'Client saved on invoice');
-        document.getElementById('pay-client-manual').hidden = true;
-        await refreshPayClientCard(id);
-      } catch (err) {
-        flash(document.getElementById('payments-flash'), err.message, false);
-      }
-    });
+            idempotencyKey: `inv-client-${id}-${Date.now()}`,
+          });
+          flash(document.getElementById('payments-flash'), 'Client saved on invoice');
+          document.getElementById('pay-client-manual').hidden = true;
+          await refreshPayClientCard(id, { overwriteAmount: false });
+        } catch (err) {
+          flash(document.getElementById('payments-flash'), err.message, false);
+        }
+      };
+    }
 
-    if (select.value) await refreshPayClientCard(select.value);
+    if (select.value) await refreshPayClientCard(select.value, { overwriteAmount: true });
 
     const tbody = document.getElementById('payments-tbody');
     tbody.innerHTML = payments.data.length
@@ -511,11 +588,14 @@ const CresFinance = (() => {
     if (!inv?.client_id || !inv?.client_email) {
       flash(
         document.getElementById('payments-flash'),
-        'Check / add client details before recording the payment',
+        'This invoice has no client email in the CRM yet — add it once, then later payments fill automatically',
         false
       );
+      const toolbar = document.getElementById('pay-client-toolbar');
+      if (toolbar) toolbar.hidden = false;
       document.getElementById('pay-client-manual').hidden = false;
-      document.getElementById('btn-add-client-manual').hidden = false;
+      const addBtn = document.getElementById('btn-add-client-manual');
+      if (addBtn) addBtn.hidden = false;
       return;
     }
 
@@ -1381,22 +1461,31 @@ const CresFinance = (() => {
       } catch { /* mic denied */ }
     });
 
-    // Use these details → fill the main payment form
+    // Use these details → fill the main payment form from the matched invoice
     document.getElementById('btn-vp-use')?.addEventListener('click', () => {
       const amount = document.getElementById('vp-amount').value;
       const bankRef = document.getElementById('vp-bank-ref').value;
       const invoiceId = previewSection.dataset.invoiceId;
 
+      const applyVoice = () => {
+        if (amount) document.getElementById('pay-amount').value = amount;
+        if (bankRef) document.getElementById('pay-bank-ref').value = bankRef;
+        updateBankCard();
+      };
+
       if (invoiceId) {
         const select = document.getElementById('pay-invoice');
-        if (select) { select.value = invoiceId; select.dispatchEvent(new Event('change')); }
+        if (select) select.value = invoiceId;
+        refreshPayClientCard(invoiceId, { overwriteAmount: true })
+          .then(applyVoice)
+          .catch(() => applyVoice());
+      } else {
+        applyVoice();
       }
-      if (amount) document.getElementById('pay-amount').value = amount;
-      if (bankRef) document.getElementById('pay-bank-ref').value = bankRef;
 
       previewSection.style.display = 'none';
       transcriptSection.style.display = 'none';
-      flash(document.getElementById('payments-flash'), 'Voice details loaded — review and submit');
+      flash(document.getElementById('payments-flash'), 'Invoice and client loaded — enter or confirm the transaction code, then record');
     });
 
     document.getElementById('btn-vp-cancel')?.addEventListener('click', () => {
