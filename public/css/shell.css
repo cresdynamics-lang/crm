@@ -484,6 +484,12 @@ body.shell-page {
   color: var(--text-muted);
 }
 
+#pay-client-card[hidden],
+#pay-client-manual[hidden],
+#pay-client-toolbar[hidden] {
+  display: none !important;
+}
+
 .placeholder-card strong {
   color: var(--text);
 }

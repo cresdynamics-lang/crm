@@ -87,8 +87,12 @@ CREATE TABLE IF NOT EXISTS leads (
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS deleted_by UUID REFERENCES users(id) ON DELETE SET NULL;
+
 CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
 CREATE INDEX IF NOT EXISTS idx_leads_created_by ON leads(created_by);
+CREATE INDEX IF NOT EXISTS idx_leads_alive ON leads (created_at DESC) WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS lead_engagements (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -113,6 +117,10 @@ CREATE TABLE IF NOT EXISTS clients (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS deleted_by UUID REFERENCES users(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_clients_alive ON clients (converted_at DESC) WHERE deleted_at IS NULL;
+
 CREATE INDEX IF NOT EXISTS idx_clients_lead ON clients(lead_id);
 
 -- ---------------------------------------------------------------------------
@@ -131,7 +139,7 @@ CREATE TABLE IF NOT EXISTS projects (
   status                 VARCHAR(30) NOT NULL DEFAULT 'pending_approval'
                          CHECK (status IN (
                            'pending_approval', 'approved', 'rejected',
-                           'in_progress', 'blocked', 'completed'
+                           'in_progress', 'blocked', 'completed', 'suspended'
                          )),
   value_amount           NUMERIC(14, 2),
   approved_by            UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -139,6 +147,20 @@ CREATE TABLE IF NOT EXISTS projects (
   created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_status_check;
+ALTER TABLE projects ADD CONSTRAINT projects_status_check
+  CHECK (status IN (
+    'pending_approval', 'approved', 'rejected',
+    'in_progress', 'blocked', 'completed', 'suspended'
+  ));
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS suspended_at TIMESTAMPTZ;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS suspended_by UUID REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS suspend_reason TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS status_before_suspend VARCHAR(30);
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS deleted_by UUID REFERENCES users(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_projects_alive ON projects (created_at DESC) WHERE deleted_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
 CREATE INDEX IF NOT EXISTS idx_projects_developer ON projects(assigned_developer_id);

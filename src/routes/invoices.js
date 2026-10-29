@@ -415,7 +415,8 @@ router.get(
       `SELECT i.*,
               c.name AS client_name, c.business_name AS client_business,
               c.email AS client_email, c.phone AS client_phone,
-              p.name AS project_name, p.summary AS project_summary
+              p.name AS project_name, p.summary AS project_summary,
+              p.status AS project_status, p.suspend_reason AS project_suspend_reason
        FROM invoices i
        LEFT JOIN clients c ON c.id = i.client_id
        LEFT JOIN projects p ON p.id = i.project_id

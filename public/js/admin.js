@@ -427,7 +427,7 @@ const CresAdmin = (() => {
       tbody.innerHTML = rows.length
         ? rows
             .map(
-              (p) => `<tr>
+              (p) => `<tr class="clickable-row" data-id="${esc(p.id)}">
                 <td>${esc(p.name)}</td>
                 <td>${esc(p.client_name || p.client_business || '—')}</td>
                 <td>${statusPill(p.status)}</td>
@@ -436,12 +436,36 @@ const CresAdmin = (() => {
                 <td>${fmtMoney(p.invoiced)}</td>
                 <td>${fmtMoney(p.paid)}</td>
                 <td>${fmtMoney(p.balance)}</td>
+                <td>
+                  <button type="button" class="btn btn-ghost btn-sm" data-delete-project="${esc(p.id)}" data-name="${esc(p.name)}" style="padding:6px 10px;font-size:0.8rem;color:#ffb4b4;">Delete</button>
+                </td>
               </tr>`
             )
             .join('')
-        : `<tr><td colspan="8" class="empty-state">No projects yet.</td></tr>`;
+        : `<tr><td colspan="9" class="empty-state">No projects yet.</td></tr>`;
+      tbody.querySelectorAll('tr[data-id]').forEach((tr) => {
+        tr.addEventListener('click', (e) => {
+          if (e.target.closest('[data-delete-project]')) return;
+          if (typeof CresProjectDetail !== 'undefined') {
+            CresProjectDetail.open(tr.dataset.id, { onSaved: () => mountProjectsBoard() }).catch(console.error);
+          }
+        });
+      });
+      tbody.querySelectorAll('[data-delete-project]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (typeof CresSales !== 'undefined' && CresSales.deleteProject) {
+            CresSales.deleteProject(btn.dataset.deleteProject, btn.dataset.name).catch((err) =>
+              alert(err.message)
+            );
+          }
+        });
+      });
+      if (typeof CresSales !== 'undefined' && CresSales.fillProjectCreateOptions) {
+        CresSales.fillProjectCreateOptions().catch(console.error);
+      }
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="8" class="empty-state">${esc(err.message)}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9" class="empty-state">${esc(err.message)}</td></tr>`;
     }
   }
 
@@ -1159,5 +1183,5 @@ const CresAdmin = (() => {
     else if (faceId === 'login-audit') await mountLoginAudit();
   }
 
-  return { bind, mount };
+  return { bind, mount, refreshProjects: mountProjectsBoard };
 })();

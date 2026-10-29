@@ -555,7 +555,12 @@ const CresProjectDetail = (() => {
       }
 
       ${
-        salesLocked
+        p.status === 'suspended'
+          ? `<div style="background:rgba(220,80,80,0.1);border:1px solid rgba(220,80,80,0.35);border-radius:10px;padding:12px;margin:14px 0;">
+              <strong>Project suspended by Finance</strong>
+              <p style="margin:4px 0 0;font-size:0.85rem;">Delivery is paused${p.suspend_reason ? ` — ${esc(p.suspend_reason)}` : ''}. Finance resumes this after payment. No further invoice penalties after 3.</p>
+            </div>`
+          : salesLocked
           ? `<div style="background:rgba(0,168,197,0.08);border:1px solid rgba(0,168,197,0.3);border-radius:10px;padding:12px;margin:14px 0;">
               <strong style="color:var(--accent);">Project locked</strong>
               <p style="margin:4px 0 0;font-size:0.85rem;">This project has been approved. You cannot edit milestones, status, or progress notes. Only the Director can unlock by rejecting.</p>
@@ -587,12 +592,22 @@ const CresProjectDetail = (() => {
                 : ''
             }
             <div id="proj-detail-flash" class="flash" style="margin-top:10px;"></div>
-            <div class="form-actions" style="margin-top:10px;">
+            <div class="form-actions" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
               <button type="button" class="btn btn-primary" id="proj-detail-save">${
                 canEdit && canUpdate ? 'Save project &amp; progress' : canEdit ? 'Save project' : salesLocked ? 'Save preview link' : 'Save progress'
               }</button>
+              ${
+                meta.canDelete
+                  ? `<button type="button" class="btn btn-ghost" id="proj-detail-delete" style="color:#ffb4b4;">Delete project</button>`
+                  : ''
+              }
             </div>`
-          : ''
+          : meta.canDelete
+            ? `<div id="proj-detail-flash" class="flash" style="margin-top:10px;"></div>
+              <div class="form-actions" style="margin-top:10px;">
+                <button type="button" class="btn btn-ghost" id="proj-detail-delete" style="color:#ffb4b4;">Delete project</button>
+              </div>`
+            : ''
       }
 
       ${
@@ -690,6 +705,18 @@ const CresProjectDetail = (() => {
       document.getElementById('proj-detail-save').onclick = () =>
         save().catch((err) => flash(document.getElementById('proj-detail-flash'), err.message, false));
     }
+
+    document.getElementById('proj-detail-delete')?.addEventListener('click', () => {
+      const run =
+        typeof CresSales !== 'undefined' && CresSales.deleteProject
+          ? CresSales.deleteProject(state.id, p.name)
+          : CresAPI.request(`/api/projects/${state.id}`, { method: 'DELETE' }).then(() => {
+              document.getElementById('project-detail-modal')?.classList.remove('open');
+            });
+      Promise.resolve(run).catch((err) =>
+        flash(document.getElementById('proj-detail-flash'), err.message, false)
+      );
+    });
 
     if (showResubmit) {
       document.getElementById('pd-add-ms')?.addEventListener('click', () => {

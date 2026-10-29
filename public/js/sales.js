@@ -33,6 +33,50 @@ const CresSales = (() => {
     setTimeout(() => el.classList.remove('visible'), 3500);
   }
 
+  function canCrmMutate(role) {
+    return ['admin', 'director', 'sales'].includes(role);
+  }
+
+  async function refreshProjectsView() {
+    const role = CresAPI.getUser()?.role;
+    if (role === 'admin' && typeof CresAdmin !== 'undefined' && CresAdmin.refreshProjects) {
+      await CresAdmin.refreshProjects();
+      return;
+    }
+    if (role === 'director' && typeof CresDirector !== 'undefined' && CresDirector.refreshProjects) {
+      await CresDirector.refreshProjects();
+      return;
+    }
+    await mountProjects();
+  }
+
+  async function fillProjectCreateOptions() {
+    const [clients, developers, workload] = await Promise.all([
+      CresAPI.request('/api/clients').catch(() => ({ data: [] })),
+      CresAPI.request('/api/users/developers').catch(() => ({ data: [] })),
+      CresAPI.request('/api/projects/meta/developer-workload').catch(() => ({ data: [] })),
+    ]);
+    const loadMap = Object.fromEntries((workload.data || []).map((w) => [w.id, w.active_count]));
+    const clientSelect = document.getElementById('proj-client');
+    if (clientSelect) {
+      clientSelect.innerHTML =
+        `<option value="">- Manual / none -</option>` +
+        (clients.data || []).map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+    }
+    const devSelect = document.getElementById('proj-developer');
+    if (devSelect) {
+      devSelect.innerHTML =
+        `<option value="">- Unassigned -</option>` +
+        (developers.data || [])
+          .map((d) => {
+            const n = loadMap[d.id];
+            const load = n != null ? ` (${n} active)` : '';
+            return `<option value="${d.id}">${esc(d.name)}${load}</option>`;
+          })
+          .join('');
+    }
+  }
+
   // ---------- Dashboard ----------
   async function mountHome() {
     const host = document.getElementById('sales-dashboard');
@@ -128,11 +172,13 @@ const CresSales = (() => {
     const stage = document.querySelector('#pipeline-tabs button.active')?.dataset.stage || '';
     const leadsWrap = document.getElementById('pipeline-leads-wrap');
     const clientsWrap = document.getElementById('pipeline-clients-wrap');
-    const canEditLeads = ['sales', 'admin'].includes(me?.role);
+    const canEditLeads = canCrmMutate(me?.role);
     ['btn-new-lead', 'btn-voice-capture'].forEach((id) => {
       const el = document.getElementById(id);
       if (el) el.hidden = !canEditLeads || stage === 'clients';
     });
+    const newClientBtn = document.getElementById('btn-new-client');
+    if (newClientBtn) newClientBtn.hidden = !canEditLeads || stage !== 'clients';
     if (stage === 'clients') {
       if (leadsWrap) leadsWrap.hidden = true;
       if (clientsWrap) clientsWrap.hidden = false;
@@ -151,7 +197,7 @@ const CresSales = (() => {
       rows = rows.filter((l) => PIPELINE_STAGES[stage].includes(l.status));
     }
     if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="6" class="empty-state">No leads in this stage. Add a lead to start.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No leads in this stage. Add a lead to start.</td></tr>`;
       return;
     }
     tbody.innerHTML = rows
@@ -163,11 +209,25 @@ const CresSales = (() => {
           <td>${l.value_amount != null ? fmtMoney(l.value_amount) : '—'}</td>
           <td>${fmtDate(l.next_follow_up)}</td>
           <td>${statusPill(stageLabel(l.status))}</td>
+          <td>${
+            canEditLeads
+              ? `<button type="button" class="btn btn-ghost btn-sm" data-delete-lead="${esc(l.id)}" style="padding:6px 10px;font-size:0.8rem;color:#ffb4b4;">Delete</button>`
+              : ''
+          }</td>
         </tr>`
       )
       .join('');
     tbody.querySelectorAll('tr[data-id]').forEach((tr) => {
-      tr.addEventListener('click', () => openLeadDetail(tr.dataset.id));
+      tr.addEventListener('click', (e) => {
+        if (e.target.closest('[data-delete-lead]')) return;
+        openLeadDetail(tr.dataset.id);
+      });
+    });
+    tbody.querySelectorAll('[data-delete-lead]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteLead(btn.dataset.deleteLead).catch((err) => alert(err.message));
+      });
     });
   }
 
@@ -194,10 +254,12 @@ const CresSales = (() => {
     const me = CresAPI.getUser();
     if (winBox) {
       winBox.hidden =
-        ['won', 'converted'].includes(lead.status) || !['sales', 'admin'].includes(me?.role);
+        ['won', 'converted'].includes(lead.status) || !canCrmMutate(me?.role);
     }
     const newLeadBtn = document.getElementById('btn-new-lead');
-    if (newLeadBtn) newLeadBtn.hidden = !['sales', 'admin'].includes(me?.role);
+    if (newLeadBtn) newLeadBtn.hidden = !canCrmMutate(me?.role);
+    const delLeadBtn = document.getElementById('btn-delete-lead');
+    if (delLeadBtn) delLeadBtn.hidden = !canCrmMutate(me?.role);
     const winName = document.getElementById('win-project-name');
     if (winName && !winName.value) winName.value = `${lead.business_name || lead.name} project`;
     const winVal = document.getElementById('win-value');
@@ -281,6 +343,44 @@ const CresSales = (() => {
     flash(document.getElementById('lead-detail-flash'), 'Lead updated');
   }
 
+  async function deleteLead(id) {
+    const name = document.getElementById('lead-detail-title')?.textContent || 'this lead';
+    if (!confirm(`Delete ${name}? It will leave the pipeline. Linked clients stay unless you delete them separately.`)) {
+      return;
+    }
+    await CresAPI.request(`/api/leads/${id}`, { method: 'DELETE' });
+    document.getElementById('lead-detail-modal')?.classList.remove('open');
+    leadModalId = null;
+    await mountLeads();
+  }
+
+  async function createClient(e) {
+    e.preventDefault();
+    await CresAPI.request('/api/clients', {
+      method: 'POST',
+      body: {
+        name: document.getElementById('new-client-name').value.trim(),
+        phone: document.getElementById('new-client-phone').value.trim() || null,
+        email: document.getElementById('new-client-email').value.trim() || null,
+        business_name: document.getElementById('new-client-business').value.trim() || null,
+      },
+      idempotencyKey: `client-${Date.now()}`,
+    });
+    document.getElementById('new-client-modal')?.classList.remove('open');
+    e.target.reset();
+    await mountClients();
+  }
+
+  async function deleteClient(id, name) {
+    if (!confirm(`Delete client ${name || ''}? Their projects leave the board. Invoices and receipts stay.`)) {
+      return;
+    }
+    await CresAPI.request(`/api/clients/${id}`, { method: 'DELETE' });
+    document.getElementById('client-card-modal')?.classList.remove('open');
+    await mountClients();
+    await refreshProjectsView().catch(() => {});
+  }
+
   async function addEngagement(e) {
     e.preventDefault();
     const note = document.getElementById('eng-note').value.trim();
@@ -348,23 +448,37 @@ const CresSales = (() => {
   async function mountClients() {
     const res = await CresAPI.request('/api/clients');
     const tbody = document.getElementById('clients-tbody');
+    const canMutate = canCrmMutate(CresAPI.getUser()?.role);
     if (!res.data.length) {
-      tbody.innerHTML = `<tr><td colspan="5" class="empty-state">No clients yet. Mark a lead as won to create one.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" class="empty-state">No clients yet. Add a client or mark a lead as won.</td></tr>`;
       return;
     }
     tbody.innerHTML = res.data
       .map(
-        (c) => `<tr class="clickable-row" data-id="${c.id}">
+        (c) => `<tr class="clickable-row" data-id="${c.id}" data-name="${esc(c.name)}">
           <td>${esc(c.name)}</td>
           <td>${esc(c.phone || '-')}</td>
           <td>${esc(c.email || '-')}</td>
           <td>${esc(c.business_name || '-')}</td>
           <td>${c.project_count ?? 0}</td>
+          <td>${
+            canMutate
+              ? `<button type="button" class="btn btn-ghost btn-sm" data-delete-client="${esc(c.id)}" style="padding:6px 10px;font-size:0.8rem;color:#ffb4b4;">Delete</button>`
+              : ''
+          }</td>
         </tr>`
       )
       .join('');
+    tbody.querySelectorAll('[data-delete-client]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const row = btn.closest('tr');
+        deleteClient(btn.dataset.deleteClient, row?.dataset.name).catch((err) => alert(err.message));
+      });
+    });
     tbody.querySelectorAll('tr[data-id]').forEach((tr) => {
-      tr.addEventListener('click', () => {
+      tr.addEventListener('click', (e) => {
+        if (e.target.closest('[data-delete-client]')) return;
         if (typeof CresClientCard !== 'undefined') {
           CresClientCard.open(tr.dataset.id).catch(console.error);
         } else {
@@ -642,6 +756,11 @@ const CresSales = (() => {
               `<button type="button" class="btn btn-primary btn-sm" data-reassign="${esc(p.id)}" style="padding:6px 10px;font-size:0.8rem;">Reassign</button>`
             );
           }
+          if (canCrmMutate(CresAPI.getUser()?.role)) {
+            actions.push(
+              `<button type="button" class="btn btn-ghost btn-sm" data-delete-project="${esc(p.id)}" data-name="${esc(p.name)}" style="padding:6px 10px;font-size:0.8rem;color:#ffb4b4;">Delete</button>`
+            );
+          }
           const pct = p.progress_percent != null ? `${Number(p.progress_percent)}%` : '—';
           return `<tr class="clickable-row" data-id="${esc(p.id)}">
             <td>${esc(p.name)}
@@ -663,7 +782,7 @@ const CresSales = (() => {
         .join('');
       tbody.querySelectorAll('tr[data-id]').forEach((tr) => {
         tr.addEventListener('click', (e) => {
-          if (e.target.closest('[data-resubmit],[data-reassign]')) return;
+          if (e.target.closest('[data-resubmit],[data-reassign],[data-delete-project]')) return;
           if (typeof CresProjectDetail !== 'undefined') {
             CresProjectDetail.open(tr.dataset.id, { onSaved: () => mountProjects() }).catch(console.error);
           }
@@ -679,6 +798,12 @@ const CresSales = (() => {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           reassignProject(btn.dataset.reassign).catch((err) => alert(err.message));
+        });
+      });
+      tbody.querySelectorAll('[data-delete-project]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          deleteProject(btn.dataset.deleteProject, btn.dataset.name).catch((err) => alert(err.message));
         });
       });
     }
@@ -821,7 +946,19 @@ const CresSales = (() => {
     document.getElementById('milestone-list').innerHTML =
       `<div class="milestone-row"><input placeholder="Milestone title" /><button type="button" class="btn btn-ghost" data-remove-ms style="padding:6px 10px;">✕</button></div>`;
     flash(document.getElementById('projects-flash'), 'Project submitted for Director approval');
-    await mountProjects();
+    await refreshProjectsView();
+  }
+
+  async function deleteProject(id, name) {
+    if (!confirm(`Delete project ${name || ''}? It leaves the board. Invoices and receipts stay.`)) {
+      return;
+    }
+    await CresAPI.request(`/api/projects/${id}`, { method: 'DELETE' });
+    document.getElementById('project-detail-modal')?.classList.remove('open');
+    const flashEl =
+      document.getElementById('projects-flash') || document.getElementById('admin-projects-flash');
+    flash(flashEl, 'Project deleted');
+    await refreshProjectsView();
   }
 
   function bindModals() {
@@ -839,9 +976,24 @@ const CresSales = (() => {
     document.getElementById('btn-new-lead')?.addEventListener('click', () => {
       document.getElementById('new-lead-modal').classList.add('open');
     });
+    document.getElementById('btn-new-client')?.addEventListener('click', () => {
+      document.getElementById('new-client-modal').classList.add('open');
+    });
     document.getElementById('btn-new-project')?.addEventListener('click', () => {
+      fillProjectCreateOptions().catch(console.error);
       document.getElementById('new-project-modal').classList.add('open');
     });
+    document.getElementById('btn-new-admin-project')?.addEventListener('click', () => {
+      fillProjectCreateOptions().catch(console.error);
+      document.getElementById('new-project-modal').classList.add('open');
+    });
+    document.getElementById('btn-delete-lead')?.addEventListener('click', () => {
+      if (!leadModalId) return;
+      deleteLead(leadModalId).catch((err) => alert(err.message));
+    });
+    document.getElementById('new-client-form')?.addEventListener('submit', (e) =>
+      createClient(e).catch((err) => alert(err.message))
+    );
     document.getElementById('add-milestone')?.addEventListener('click', () => {
       const row = document.createElement('div');
       row.className = 'milestone-row';
@@ -988,7 +1140,7 @@ const CresSales = (() => {
   }
 
   async function mount(faceId, user) {
-    if (!['sales', 'director', 'pm'].includes(user.role)) return;
+    if (!['sales', 'director', 'pm', 'admin'].includes(user.role)) return;
 
     if (faceId === 'home' && user.role === 'sales') {
       await mountHome();
@@ -1319,5 +1471,5 @@ const CresSales = (() => {
     });
   }
 
-  return { bindModals, mount };
+  return { bindModals, mount, fillProjectCreateOptions, deleteProject, deleteClient, refreshProjectsView };
 })();

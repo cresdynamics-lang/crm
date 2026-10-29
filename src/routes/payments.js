@@ -462,7 +462,7 @@ router.post(
     // Fetch clients and projects for matching
     const [clientsRes, projectsRes] = await Promise.all([
       query(`SELECT id, name, business_name FROM clients ORDER BY name LIMIT 200`),
-      query(`SELECT id, name FROM projects WHERE status NOT IN ('pending_approval','rejected','deleted') ORDER BY name LIMIT 200`),
+      query(`SELECT id, name FROM projects WHERE status NOT IN ('pending_approval','rejected','deleted') AND deleted_at IS NULL ORDER BY name LIMIT 200`),
     ]);
 
     let result;

@@ -51,7 +51,7 @@ const CresNav = (() => {
       href: '#/pipeline',
       icon: '◎',
       anyOf: ['leads:view'],
-      rolesOnly: ['director', 'sales', 'pm'],
+      rolesOnly: ['director', 'sales', 'pm', 'admin'],
     },
     {
       id: 'projects',

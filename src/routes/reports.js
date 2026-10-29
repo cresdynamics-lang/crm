@@ -398,13 +398,13 @@ router.post(
         const { rows } = await query(
           `SELECT p.id, p.name FROM projects p
            JOIN assignments a ON a.project_id = p.id
-           WHERE a.user_id = $1 AND p.status != 'deleted'`,
+           WHERE a.user_id = $1 AND p.status != 'deleted' AND p.deleted_at IS NULL`,
           [req.user.id]
         );
         projects = rows;
       } else {
         const { rows } = await query(
-          `SELECT id, name FROM projects WHERE status != 'deleted' ORDER BY name`
+          `SELECT id, name FROM projects WHERE status != 'deleted' AND deleted_at IS NULL ORDER BY name`
         );
         projects = rows;
       }

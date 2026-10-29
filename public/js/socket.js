@@ -44,14 +44,17 @@ const CresRealtime = (() => {
       socket = null;
     }
 
+    setStatus('connecting');
     socket = io({
       path: '/socket.io',
       // A function, so every reconnect uses the latest (refreshed) token.
       auth: (cb) => cb({ token: CresAPI.getAccess() }),
-      transports: ['websocket'],
-      timeout: 4000,
+      // Polling first so nginx that does not upgrade websockets still goes Live,
+      // then upgrade to websocket when the proxy allows it.
+      transports: ['polling', 'websocket'],
+      timeout: 8000,
       reconnection: true,
-      reconnectionAttempts: 6,
+      reconnectionAttempts: Infinity,
       reconnectionDelay: 2000,
       reconnectionDelayMax: 10000,
     });
@@ -64,6 +67,11 @@ const CresRealtime = (() => {
     socket.on('disconnect', () => {
       setStatus('degraded');
       startPollFallback(2000);
+    });
+
+    socket.on('reconnect_failed', () => {
+      setStatus('offline');
+      startPollFallback();
     });
 
     socket.on('connect_error', async (err) => {

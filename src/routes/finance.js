@@ -101,6 +101,7 @@ router.get(
        LEFT JOIN ${uniq('clients')} c ON c.id = p.client_id
        LEFT JOIN ${uniq('invoices')} i ON i.project_id = p.id
        WHERE p.status NOT IN ('pending_approval', 'rejected')
+         AND p.deleted_at IS NULL
        GROUP BY p.id, p.name, p.status, p.value_amount, c.name, c.business_name
        ORDER BY p.name ASC`
     );
@@ -305,8 +306,9 @@ router.get(
               u.name AS owner_name, u.email AS owner_email, u.phone AS owner_phone,
               d.name AS developer_name,
               i.id AS invoice_id, i.amount AS invoice_amount, i.amount_paid,
-              i.status AS invoice_status, i.due_date,
-              (COALESCE(i.amount, 0) - COALESCE(i.amount_paid, 0))::float AS balance_due
+              i.status AS invoice_status, i.due_date, i.penalty_count,
+              (COALESCE(i.amount, 0) - COALESCE(i.amount_paid, 0))::float AS balance_due,
+              p.suspended_at, p.suspend_reason
        FROM ${uniq('projects')} p
        LEFT JOIN ${uniq('clients')} c ON c.id = p.client_id
        LEFT JOIN ${uniq('users')} u ON u.id = p.created_by
@@ -319,6 +321,7 @@ router.get(
          LIMIT 1
        ) i ON TRUE
        WHERE p.status NOT IN ('pending_approval', 'rejected')
+         AND p.deleted_at IS NULL
        ORDER BY
          CASE WHEN i.status = 'overdue' THEN 0
               WHEN i.status IN ('issued', 'partially_paid') THEN 1
@@ -348,7 +351,10 @@ router.get(
         amount_paid: r.amount_paid != null ? Number(r.amount_paid) : 0,
         invoice_status: r.invoice_status,
         due_date: r.due_date,
+        penalty_count: Number(r.penalty_count || 0),
         balance_due: Number(r.balance_due || 0),
+        suspended_at: r.suspended_at,
+        suspend_reason: r.suspend_reason,
         updated_at: r.updated_at,
       })),
     });
@@ -508,6 +514,62 @@ router.post(
     });
 
     res.status(202).json({ ok: true, queued: true, to: payer.email });
+  })
+);
+
+/**
+ * Finance suspends a project (non-payment / collections). Delivery pauses.
+ */
+router.post(
+  '/projects/:id/suspend',
+  requirePermission('invoices', 'edit'),
+  asyncHandler(async (req, res) => {
+    requireFinanceAdmin(req);
+    const { suspendProject } = require('../services/projectSuspend');
+    const { rows } = await query(`SELECT * FROM projects WHERE id = $1`, [req.params.id]);
+    if (!rows[0]) throw new AppError('Project not found', 404, 'NOT_FOUND');
+    if (rows[0].status === 'suspended') {
+      return res.json({ ok: true, data: rows[0], already: true });
+    }
+    const updated = await suspendProject({
+      projectId: req.params.id,
+      actorUserId: req.user.id,
+      actorRole: req.user.role,
+      reason: req.body?.reason || 'Suspended by Finance',
+      source: 'finance',
+    });
+    if (!updated) {
+      throw new AppError(
+        'This project cannot be suspended (completed, rejected, or not yet approved)',
+        409,
+        'INVALID_STATE'
+      );
+    }
+    res.json({ ok: true, data: updated });
+  })
+);
+
+/**
+ * Finance resumes a suspended project after payment or agreement.
+ */
+router.post(
+  '/projects/:id/unsuspend',
+  requirePermission('invoices', 'edit'),
+  asyncHandler(async (req, res) => {
+    requireFinanceAdmin(req);
+    const { unsuspendProject } = require('../services/projectSuspend');
+    const { rows } = await query(`SELECT * FROM projects WHERE id = $1`, [req.params.id]);
+    if (!rows[0]) throw new AppError('Project not found', 404, 'NOT_FOUND');
+    if (rows[0].status !== 'suspended') {
+      throw new AppError('Project is not suspended', 409, 'INVALID_STATE');
+    }
+    const updated = await unsuspendProject({
+      projectId: req.params.id,
+      actorUserId: req.user.id,
+      actorRole: req.user.role,
+      note: req.body?.note || 'Resumed by Finance',
+    });
+    res.json({ ok: true, data: updated });
   })
 );
 

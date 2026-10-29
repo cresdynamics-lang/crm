@@ -280,7 +280,7 @@
       return;
     }
 
-    if (['pipeline', 'leads', 'clients'].includes(faceId) && !['director', 'sales', 'pm'].includes(user.role)) {
+    if (['pipeline', 'leads', 'clients'].includes(faceId) && !['director', 'sales', 'pm', 'admin'].includes(user.role)) {
       location.hash = '#/';
       return;
     }
@@ -517,7 +517,7 @@
       const newProjBtn = document.getElementById('btn-new-project');
       if (newProjBtn) {
         newProjBtn.hidden =
-          timelineOn || isFinance || isClient || isPm || isDirector || isAdmin || user.role === 'developer';
+          timelineOn || isFinance || isClient || isPm || isAdmin || user.role === 'developer';
       }
       const hero = salesProjects?.querySelector('.face-hero');
       if (hero) {
@@ -526,7 +526,7 @@
         if (isDirector) {
           if (h2) h2.textContent = 'Projects';
           if (p) {
-            p.textContent = 'Open a project to review progress and milestones.';
+            p.textContent = 'Create, edit, or delete a project, and review progress.';
           }
         } else if (user.role === 'sales') {
           if (h2) h2.textContent = 'Projects';
@@ -581,9 +581,9 @@
     if (typeof CresSales !== 'undefined') {
       if (user.role === 'sales') {
         jobs.push(CresSales.mount(faceId, user));
-      } else if (user.role === 'admin' && ['followups', 'email'].includes(faceId)) {
+      } else if (user.role === 'admin' && ['followups', 'email', 'pipeline', 'leads', 'clients'].includes(faceId)) {
         jobs.push(CresSales.mount(faceId, user));
-      } else if (['director', 'pm'].includes(user.role) && faceId === 'pipeline') {
+      } else if (['director', 'pm'].includes(user.role) && ['pipeline', 'leads', 'clients'].includes(faceId)) {
         jobs.push(CresSales.mount(faceId, user));
       }
     }
@@ -931,14 +931,16 @@
   // Live indicator
   const liveEl = document.getElementById('live-indicator');
   function paintLive(status) {
+    if (!liveEl) return;
     liveEl.classList.remove('online', 'degraded');
     const label = liveEl.querySelector('.label');
+    if (!label) return;
     if (status === 'online') {
       liveEl.classList.add('online');
       label.textContent = 'Live';
-    } else if (status === 'degraded') {
+    } else if (status === 'degraded' || status === 'connecting') {
       liveEl.classList.add('degraded');
-      label.textContent = 'Reconnecting';
+      label.textContent = status === 'connecting' ? 'Connecting' : 'Reconnecting';
     } else {
       label.textContent = 'Offline';
     }

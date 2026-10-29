@@ -27,13 +27,16 @@ const PERMISSIONS = [
   ['leads', 'view'],
   ['leads', 'create'],
   ['leads', 'edit'],
+  ['leads', 'delete'],
   ['clients', 'view'],
   ['clients', 'create'],
   ['clients', 'edit'],
+  ['clients', 'delete'],
   // Projects
   ['projects', 'view'],
   ['projects', 'create'],
   ['projects', 'edit'],
+  ['projects', 'delete'],
   ['projects', 'approve'],
   // Finance - granular money visibility
   ['invoices', 'view'],
@@ -89,9 +92,9 @@ const ROLE_PERMS = {
   admin: '*', // all permissions
 
   sales: [
-    'leads:view', 'leads:create', 'leads:edit',
-    'clients:view', 'clients:create', 'clients:edit',
-    'projects:view', 'projects:create', 'projects:edit',
+    'leads:view', 'leads:create', 'leads:edit', 'leads:delete',
+    'clients:view', 'clients:create', 'clients:edit', 'clients:delete',
+    'projects:view', 'projects:create', 'projects:edit', 'projects:delete',
     'invoice_followups:view', 'invoice_followups:edit',
     'messages:view', 'messages:create',
     'notifications:view',
@@ -104,9 +107,9 @@ const ROLE_PERMS = {
   ],
 
   director: [
-    'leads:view',
-    'clients:view',
-    'projects:view', 'projects:edit', 'projects:approve',
+    'leads:view', 'leads:create', 'leads:edit', 'leads:delete',
+    'clients:view', 'clients:create', 'clients:edit', 'clients:delete',
+    'projects:view', 'projects:create', 'projects:edit', 'projects:delete', 'projects:approve',
     'invoices:view', // projected money in/out only
     'expenses:view', 'expenses:create', 'expenses:edit', // Director can submit; Finance→Admin approve
     'messages:view', 'messages:create',

@@ -134,7 +134,7 @@ function initSocket(server) {
     // Same rule as the HTTP API: only our own site(s) may open a live connection.
     cors: {
       origin(origin, cb) {
-        const allowed = (process.env.CORS_ORIGINS || process.env.PUBLIC_APP_URL || 'https://cresos.cresdynamics.com')
+        const allowed = (process.env.CORS_ORIGINS || process.env.PUBLIC_APP_URL || 'https://cresos.cresdynamics.com,https://crm.cresdynamics.com')
           .split(',').map((o) => o.trim().replace(/\/+$/, '')).filter(Boolean);
         const ok = !origin || allowed.includes(origin.replace(/\/+$/, '')) ||
           (process.env.NODE_ENV !== 'production' && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin));

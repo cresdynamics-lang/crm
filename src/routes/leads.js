@@ -6,6 +6,8 @@ const { requirePermission, hasPermission } = require('../middleware/rbac');
 const { asyncHandler, AppError } = require('../lib/errors');
 const { idempotency } = require('../middleware/idempotency');
 const { queueNotification } = require('../queues/jobs');
+const { recordAction } = require('../services/actionAudit');
+const { loadLead, assertLeadWritable } = require('../lib/crmRecords');
 
 const router = express.Router();
 router.use(authenticate);
@@ -30,6 +32,8 @@ router.get(
     const params = [];
     const clauses = [];
 
+    clauses.push('l.deleted_at IS NULL');
+
     if (req.user.role === 'sales') {
       params.push(req.user.id);
       clauses.push(`l.created_by = $${params.length}`);
@@ -50,7 +54,7 @@ router.get(
       );
     }
 
-    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const where = `WHERE ${clauses.join(' AND ')}`;
     const { rows } = await query(
       `SELECT l.*,
               (SELECT MAX(e.created_at) FROM lead_engagements e WHERE e.lead_id = l.id) AS last_engagement_at,
@@ -159,7 +163,8 @@ router.post(
         }
         if (!raw.force && dupeClauses.length) {
           const { rows: dups } = await query(
-            `SELECT id, name, phone, business_name, business_type FROM leads WHERE ${dupeClauses.join(' OR ')} LIMIT 3`,
+            `SELECT id, name, phone, business_name, business_type FROM leads
+              WHERE deleted_at IS NULL AND (${dupeClauses.join(' OR ')}) LIMIT 3`,
             dupeParams
           );
           if (dups.length) {
@@ -228,7 +233,7 @@ router.post(
           `SELECT id, name, phone, business_name, business_type, status, created_by,
                   (SELECT u.name FROM users u WHERE u.id = leads.created_by) AS owner_name
            FROM leads
-           WHERE ${clauses.join(' OR ')}
+           WHERE deleted_at IS NULL AND (${clauses.join(' OR ')})
            ORDER BY created_at DESC
            LIMIT 5`,
           params
@@ -266,12 +271,12 @@ router.get(
   '/:id',
   requirePermission('leads', 'view'),
   asyncHandler(async (req, res) => {
-    const { rows } = await query(`SELECT * FROM leads WHERE id = $1`, [req.params.id]);
-    if (!rows[0]) throw new AppError('Lead not found', 404, 'NOT_FOUND');
-    if (req.user.role === 'sales' && rows[0].created_by !== req.user.id) {
+    const lead = await loadLead(req.params.id);
+    if (!lead || lead.deleted_at) throw new AppError('Lead not found', 404, 'NOT_FOUND');
+    if (req.user.role === 'sales' && lead.created_by !== req.user.id) {
       throw new AppError('Forbidden', 403, 'FORBIDDEN');
     }
-    res.json({ ok: true, data: rows[0] });
+    res.json({ ok: true, data: lead });
   })
 );
 
@@ -279,6 +284,9 @@ router.patch(
   '/:id',
   requirePermission('leads', 'edit'),
   asyncHandler(async (req, res) => {
+    const lead = await loadLead(req.params.id);
+    assertLeadWritable(req.user, lead);
+
     const allowed = ['name', 'phone', 'email', 'business_name', 'business_type', 'status', 'value_amount'];
     const sets = [];
     const params = [];
@@ -289,16 +297,46 @@ router.patch(
       }
     }
     if (!sets.length) throw new AppError('No fields to update', 400, 'VALIDATION');
-    params.push(req.params.id);
+    params.push(lead.id);
 
     const { rows } = await query(
       `UPDATE leads SET ${sets.join(', ')}, updated_at = NOW()
-       WHERE id = $${params.length}
+       WHERE id = $${params.length} AND deleted_at IS NULL
        RETURNING *`,
       params
     );
     if (!rows[0]) throw new AppError('Lead not found', 404, 'NOT_FOUND');
     res.json({ ok: true, data: rows[0] });
+  })
+);
+
+router.delete(
+  '/:id',
+  requirePermission('leads', 'delete'),
+  asyncHandler(async (req, res) => {
+    const lead = await loadLead(req.params.id);
+    assertLeadWritable(req.user, lead);
+
+    const { rows } = await query(
+      `UPDATE leads
+          SET deleted_at = NOW(), deleted_by = $2, updated_at = NOW()
+        WHERE id = $1 AND deleted_at IS NULL
+        RETURNING id`,
+      [lead.id, req.user.id]
+    );
+    if (!rows[0]) throw new AppError('Lead not found', 404, 'NOT_FOUND');
+
+    await recordAction({
+      actorId: req.user.id,
+      actorRole: req.user.role,
+      action: 'lead.delete',
+      resourceType: 'lead',
+      resourceId: lead.id,
+      summary: `Deleted lead ${lead.name}`,
+      before: { name: lead.name, phone: lead.phone, status: lead.status },
+    });
+
+    res.json({ ok: true, data: { id: lead.id, deleted: true } });
   })
 );
 
@@ -321,7 +359,7 @@ router.post(
     const result = await withTransaction(async (tx) => {
       const leadRes = await tx.query(`SELECT * FROM leads WHERE id = $1 FOR UPDATE`, [req.params.id]);
       const lead = leadRes.rows[0];
-      if (!lead) throw new AppError('Lead not found', 404, 'NOT_FOUND');
+      if (!lead || lead.deleted_at) throw new AppError('Lead not found', 404, 'NOT_FOUND');
       if (req.user.role === 'sales' && lead.created_by !== req.user.id) {
         throw new AppError('Forbidden', 403, 'FORBIDDEN');
       }
@@ -382,7 +420,7 @@ router.get(
 
 async function assertLeadAccess(req, leadId) {
   const { rows } = await query(`SELECT * FROM leads WHERE id = $1`, [leadId]);
-  if (!rows[0]) throw new AppError('Lead not found', 404, 'NOT_FOUND');
+  if (!rows[0] || rows[0].deleted_at) throw new AppError('Lead not found', 404, 'NOT_FOUND');
   if (req.user.role === 'sales' && rows[0].created_by !== req.user.id) {
     throw new AppError('Forbidden', 403, 'FORBIDDEN');
   }

@@ -196,6 +196,12 @@ const CresFinance = (() => {
           <td>${fmtMoney(invoiceBalance(i))}</td>
           <td>${i.due_date ? CresFormat.date(i.due_date) : '-'}</td>
           <td>${statusPill(i.status)}${
+            Number(i.penalty_count || 0) > 0
+              ? `<div class="meta">${esc(i.penalty_count)} / 3 penalties${
+                  Number(i.penalty_count) >= 3 ? ' · stopped' : ''
+                }</div>`
+              : ''
+          }${
             i.mpesa_claim_code && i.status !== 'paid'
               ? `<div class="meta">M-Pesa ${esc(i.mpesa_claim_code)}</div>`
               : ''
@@ -243,8 +249,18 @@ const CresFinance = (() => {
         <div><strong>Issue date</strong><div>${i.issue_date ? CresFormat.date(i.issue_date) : fmtDate(i.created_at)}</div></div>
         <div><strong>Due date</strong><div>${i.due_date ? CresFormat.date(i.due_date) : '-'}</div></div>
         <div><strong>Status</strong><div>${statusPill(i.status)}</div></div>
+        <div><strong>Penalties</strong><div>${Number(i.penalty_count || 0)} / 3${
+          Number(i.penalty_count || 0) >= 3 ? ' · stopped' : ''
+        }</div></div>
         <div><strong>Auto-sent</strong><div>${i.auto_sent_at ? fmtDate(i.auto_sent_at) : 'Never'}</div></div>
       </div>
+      ${
+        i.project_status === 'suspended'
+          ? `<div class="flash visible err" style="margin-bottom:14px;">Project is suspended. Delivery is paused. Penalties have stopped at 3.</div>`
+          : Number(i.penalty_count || 0) >= 3
+            ? `<div class="flash visible err" style="margin-bottom:14px;">This invoice has 3 penalties. No further penalties will be added.</div>`
+            : ''
+      }
       <div id="fin-inv-flash" class="flash"></div>
       <div class="form-actions" style="margin-bottom:16px;">
         <button type="button" class="btn btn-primary" id="btn-download-invoice-receipt">Download invoice</button>
@@ -252,6 +268,13 @@ const CresFinance = (() => {
           ['overdue', 'issued', 'partially_paid'].includes(i.status)
             ? `<a href="#/flag" class="btn btn-ghost">Flag follow-up</a>`
             : ''
+        }
+        ${
+          i.project_id && i.project_status === 'suspended'
+            ? `<button type="button" class="btn btn-ghost" id="btn-resume-project">Resume project</button>`
+            : i.project_id && !['completed', 'rejected', 'pending_approval'].includes(i.project_status)
+              ? `<button type="button" class="btn btn-ghost" id="btn-suspend-project">Suspend project</button>`
+              : ''
         }
       </div>
       <p class="meta" style="margin:0 0 14px;">Email is sent automatically when the invoice is created or when payments change project balances.</p>
@@ -308,6 +331,16 @@ const CresFinance = (() => {
       CresReceipts.downloadFile(`/api/invoices/${id}/receipt`).catch((err) =>
         flash(document.getElementById('fin-inv-flash'), err.message, false)
       );
+    document.getElementById('btn-suspend-project')?.addEventListener('click', () =>
+      toggleProjectSuspend(i.project_id, { resume: false, flashId: 'fin-inv-flash' }).then(() =>
+        openInvoice(id)
+      )
+    );
+    document.getElementById('btn-resume-project')?.addEventListener('click', () =>
+      toggleProjectSuspend(i.project_id, { resume: true, flashId: 'fin-inv-flash' }).then(() =>
+        openInvoice(id)
+      )
+    );
     document.querySelectorAll('[data-download-pay]').forEach((btn) => {
       btn.onclick = () =>
         CresReceipts.downloadFile(`/api/payments/${btn.dataset.downloadPay}/receipt`).catch((err) =>
@@ -368,27 +401,18 @@ const CresFinance = (() => {
 
     const hasClient = !!i.client_id;
     const hasEmail = !!(i.client_email || '').trim();
-    const invNo = i.invoice_number ? `${esc(i.invoice_number)} · ` : '';
 
     if (hasClient && hasEmail) {
+      card.hidden = true;
       if (manual) manual.hidden = true;
       if (addBtn) addBtn.hidden = true;
       if (checkBtn) checkBtn.hidden = true;
       if (toolbar) toolbar.hidden = true;
-      summary.innerHTML = `<strong>${esc(i.client_business || i.client_name || 'Client')}</strong>
-        <div class="meta">${invNo}${esc(i.client_name || '')}${i.client_email ? ` · ${esc(i.client_email)}` : ''}${i.client_phone ? ` · ${esc(i.client_phone)}` : ''}${i.project_name ? ` · ${esc(i.project_name)}` : ''}</div>
-        <div style="margin-top:6px;"><span class="status-pill paid">Client found in CRM</span>
-          ${i.client_id ? ` <button type="button" class="btn btn-ghost btn-sm" data-open-pay-client="${esc(i.client_id)}">Client card</button>` : ''}
-        </div>
-        <div class="meta" style="margin-top:8px;">Name and contact are taken from this invoice. Record the payment and transaction code only.</div>`;
-      summary.querySelector('[data-open-pay-client]')?.addEventListener('click', () => {
-        if (typeof CresClientCard !== 'undefined') {
-          CresClientCard.open(i.client_id).catch(console.error);
-        }
-      });
+      summary.innerHTML = '';
       return;
     }
 
+    card.hidden = false;
     if (toolbar) toolbar.hidden = false;
     if (addBtn) addBtn.hidden = false;
     if (checkBtn) checkBtn.hidden = false;
@@ -409,7 +433,6 @@ const CresFinance = (() => {
       if (card) card.hidden = true;
       return;
     }
-    card.hidden = false;
     const cached = payInvoiceCache[invoiceId];
     if (cached) {
       applyInvoiceToPayForm(cached, { overwriteAmount });
@@ -422,7 +445,10 @@ const CresFinance = (() => {
       applyInvoiceToPayForm(i, { overwriteAmount: false });
       renderPayClientSummary(i);
     } catch (err) {
-      if (summary && !cached) summary.textContent = err.message;
+      if (summary && !cached) {
+        card.hidden = false;
+        summary.textContent = err.message;
+      }
     }
   }
 
@@ -1284,6 +1310,39 @@ const CresFinance = (() => {
     }
   }
 
+  async function toggleProjectSuspend(projectId, { resume = false, flashId = 'finance-projects-flash' } = {}) {
+    if (!projectId) return;
+    let reason = 'Non-payment / collections';
+    if (resume) {
+      if (!confirm('Resume this project so delivery can continue?')) return;
+    } else {
+      const entered = window.prompt(
+        'Suspend this project? Delivery will pause. After 3 unpaid-invoice penalties this also happens automatically.',
+        reason
+      );
+      if (entered == null) return;
+      if (!String(entered).trim()) {
+        flash(document.getElementById(flashId), 'Give a short reason to suspend', false);
+        return;
+      }
+      reason = String(entered).trim();
+    }
+    try {
+      await CresAPI.request(`/api/finance/projects/${projectId}/${resume ? 'unsuspend' : 'suspend'}`, {
+        method: 'POST',
+        body: resume ? { note: 'Resumed by Finance' } : { reason },
+        idempotencyKey: `${resume ? 'unsuspend' : 'suspend'}-${projectId}-${Date.now()}`,
+      });
+      flash(
+        document.getElementById(flashId),
+        resume ? 'Project resumed' : 'Project suspended — delivery paused'
+      );
+      await mountProjects();
+    } catch (err) {
+      flash(document.getElementById(flashId), err.message, false);
+    }
+  }
+
   async function mountProjects() {
     const panel = document.getElementById('finance-projects-panel');
     const sales = document.getElementById('sales-projects-chrome');
@@ -1299,12 +1358,23 @@ const CresFinance = (() => {
     const tbody = document.getElementById('finance-projects-tbody');
     if (!tbody) return;
     if (!res.data.length) {
-      tbody.innerHTML = `<tr><td colspan="8" class="empty-state">No billed projects yet.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="10" class="empty-state">No billed projects yet.</td></tr>`;
       return;
     }
     tbody.innerHTML = res.data
-      .map(
-        (p) => `<tr class="clickable-row" data-invoice="${esc(p.invoice_id || '')}" data-id="${esc(p.id)}">
+      .map((p) => {
+        const canSuspend = !['completed', 'rejected', 'pending_approval', 'suspended'].includes(p.status);
+        const action =
+          p.status === 'suspended'
+            ? `<button type="button" class="btn btn-ghost btn-sm" data-resume="${esc(p.id)}">Resume</button>`
+            : canSuspend
+              ? `<button type="button" class="btn btn-ghost btn-sm" data-suspend="${esc(p.id)}">Suspend</button>`
+              : '';
+        const penalties =
+          Number(p.penalty_count || 0) > 0
+            ? `<div class="meta">${esc(p.penalty_count)} / 3 penalties</div>`
+            : '';
+        return `<tr class="clickable-row" data-invoice="${esc(p.invoice_id || '')}" data-id="${esc(p.id)}">
           <td>${esc(p.name)}</td>
           <td>${esc(p.client_name || p.client_business || '-')}</td>
           <td style="font-size:0.8rem;">${esc(p.client_email || '')} ${esc(p.client_phone || '')}</td>
@@ -1313,9 +1383,10 @@ const CresFinance = (() => {
           <td>${p.invoice_id ? fmtMoney(p.amount_paid) : '—'}</td>
           <td>${p.invoice_id ? fmtMoney(p.balance_due) : '—'}</td>
           <td>${p.due_date ? CresFormat.date(p.due_date) : '—'}</td>
-          <td>${p.invoice_status ? statusPill(p.invoice_status) : statusPill(p.status)}</td>
-        </tr>`
-      )
+          <td>${p.status === 'suspended' ? statusPill('suspended') : p.invoice_status ? statusPill(p.invoice_status) : statusPill(p.status)}${penalties}</td>
+          <td>${action}</td>
+        </tr>`;
+      })
       .join('');
     tbody.querySelectorAll('tr[data-id]').forEach((tr) => {
       tr.addEventListener('click', () => {
@@ -1324,6 +1395,18 @@ const CresFinance = (() => {
         } else {
           alert('No invoice linked to this project yet.');
         }
+      });
+    });
+    tbody.querySelectorAll('[data-suspend]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleProjectSuspend(btn.dataset.suspend, { resume: false }).catch(console.error);
+      });
+    });
+    tbody.querySelectorAll('[data-resume]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleProjectSuspend(btn.dataset.resume, { resume: true }).catch(console.error);
       });
     });
   }

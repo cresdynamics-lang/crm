@@ -21,6 +21,8 @@ const {
 } = require('../services/milestones');
 const { transcribeAudio } = require('../services/voiceLeads');
 const { groqChat } = require('../services/groq');
+const { recordAction } = require('../services/actionAudit');
+const { canDeleteProject, assertProjectDeletable } = require('../lib/crmRecords');
 
 const router = express.Router();
 router.use(authenticate);
@@ -29,28 +31,31 @@ const PROGRESS_ROLES = ['sales', 'director', 'pm', 'developer', 'admin'];
 
 function scopeClause(user, params, alias = '') {
   const p = alias ? `${alias}.` : '';
+  const alive = `${p}deleted_at IS NULL`;
   // Role-based row scoping
   if (user.role === 'developer') {
     params.push(user.id);
     return `${p}assigned_developer_id = $${params.length}
             AND COALESCE(${p}assignment_status, 'accepted') IN ('accepted', 'auto_reassigned')
-            AND ${p}status NOT IN ('pending_approval', 'rejected')`;
+            AND ${p}status NOT IN ('pending_approval', 'rejected')
+            AND ${alive}`;
   }
   if (user.role === 'sales') {
     params.push(user.id);
-    return `${p}created_by = $${params.length}`;
+    return `${p}created_by = $${params.length} AND ${alive}`;
   }
   if (user.role === 'client') {
     params.push(user.id);
     params.push(user.email);
     return `${p}client_id IN (SELECT id FROM clients WHERE user_id = $${params.length - 1} OR email = $${params.length})
-            AND ${p}status NOT IN ('pending_approval', 'rejected')`;
+            AND ${p}status NOT IN ('pending_approval', 'rejected')
+            AND ${alive}`;
   }
   if (user.role === 'finance') {
     // Finance uses /api/finance/projects — block ops list
     return `FALSE`;
   }
-  return null;
+  return alive;
 }
 
 function canSeeProjectMoney(role, status) {
@@ -91,7 +96,7 @@ function canEditProject(role, status) {
 }
 
 function canUpdateProgress(role, status) {
-  if (['pending_approval', 'rejected'].includes(status)) return false;
+  if (['pending_approval', 'rejected', 'suspended'].includes(status)) return false;
   // Director/Admin/PM: always
   if (['director', 'admin', 'pm'].includes(role)) return true;
   // Developer: manage milestones, tasks, preview after assignment
@@ -202,7 +207,7 @@ function buildChangeAudit(before, after, { note, milestone_status } = {}) {
 }
 
 async function assertCanAccessProject(user, project) {
-  if (!project) throw new AppError('Project not found', 404, 'NOT_FOUND');
+  if (!project || project.deleted_at) throw new AppError('Project not found', 404, 'NOT_FOUND');
 
   if (user.role === 'developer') {
     if (project.assigned_developer_id !== user.id
@@ -283,7 +288,7 @@ router.post(
   requirePermission('projects', 'create'),
   idempotency,
   asyncHandler(async (req, res) => {
-    if (req.user.role === 'finance' || req.user.role === 'admin') {
+    if (req.user.role === 'finance') {
       throw new AppError('This role cannot create projects', 403, 'FORBIDDEN');
     }
     const {
@@ -350,7 +355,7 @@ router.get(
               COUNT(p.id) FILTER (WHERE p.status = 'completed')::int AS completed_count
        FROM users u
        JOIN roles r ON r.id = u.role_id
-       LEFT JOIN projects p ON p.assigned_developer_id = u.id
+       LEFT JOIN projects p ON p.assigned_developer_id = u.id AND p.deleted_at IS NULL
        WHERE r.name = 'developer' AND u.status = 'active'
        GROUP BY u.id, u.name, u.email
        ORDER BY active_count DESC, u.name`
@@ -376,6 +381,7 @@ router.get(
        LEFT JOIN users d ON d.id = p.assigned_developer_id
        LEFT JOIN clients c ON c.id = p.client_id
        WHERE p.status NOT IN ('pending_approval', 'rejected')
+         AND p.deleted_at IS NULL
        ORDER BY p.updated_at DESC
        LIMIT 100`
     );
@@ -463,8 +469,53 @@ router.get(
         canSeeContact: canSeeClientContact(req.user.role, project.status),
         canUseThread: canUseProjectThread(req.user, project),
         isApproved: !['pending_approval', 'rejected'].includes(project.status),
+        canDelete: canDeleteProject(req.user, project),
       },
     });
+  })
+);
+
+router.delete(
+  '/:id',
+  requirePermission('projects', 'delete'),
+  asyncHandler(async (req, res) => {
+    const { rows } = await query(`SELECT * FROM projects WHERE id = $1`, [req.params.id]);
+    const project = rows[0];
+    assertProjectDeletable(req.user, project);
+
+    const { rows: updated } = await query(
+      `UPDATE projects
+          SET deleted_at = NOW(), deleted_by = $2, updated_at = NOW()
+        WHERE id = $1 AND deleted_at IS NULL
+        RETURNING id`,
+      [project.id, req.user.id]
+    );
+    if (!updated[0]) throw new AppError('Project not found', 404, 'NOT_FOUND');
+
+    await query(
+      `INSERT INTO project_updates
+         (project_id, updated_by, note, actor_role, change_summary, changes)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+      [
+        project.id,
+        req.user.id,
+        req.body?.reason || 'Project deleted',
+        req.user.role,
+        'Project deleted',
+        JSON.stringify({ deleted: true }),
+      ]
+    );
+    await recordAction({
+      actorId: req.user.id,
+      actorRole: req.user.role,
+      action: 'project.delete',
+      resourceType: 'project',
+      resourceId: project.id,
+      summary: `Deleted project ${project.name}`,
+      before: { name: project.name, status: project.status },
+    });
+
+    res.json({ ok: true, data: { id: project.id, deleted: true } });
   })
 );
 
@@ -682,6 +733,13 @@ router.patch(
 
     if (['pending_approval', 'rejected'].includes(current.status)) {
       throw new AppError('Project not available for progress updates', 403, 'FORBIDDEN');
+    }
+    if (current.status === 'suspended') {
+      throw new AppError(
+        'This project is suspended by Finance. Delivery is paused until Finance resumes it.',
+        403,
+        'PROJECT_SUSPENDED'
+      );
     }
 
     await assertCanAccessProject(req.user, current);
@@ -977,7 +1035,7 @@ router.post(
   requirePermission('projects', 'create'),
   projMemUpload.single('audio'),
   asyncHandler(async (req, res) => {
-    if (req.user.role === 'finance' || req.user.role === 'admin') {
+    if (req.user.role === 'finance') {
       throw new AppError('This role cannot create projects', 403, 'FORBIDDEN');
     }
     let transcript;

@@ -48,7 +48,7 @@ const { fileAccess } = require('./middleware/fileAccess');
 const meetingsRoutes = require('./routes/meetings');
 
 /** Allowed browser origins: CORS_ORIGINS (comma separated), else the public URL; localhost in development. */
-const allowedOrigins = (process.env.CORS_ORIGINS || process.env.PUBLIC_APP_URL || 'https://cresos.cresdynamics.com')
+const allowedOrigins = (process.env.CORS_ORIGINS || process.env.PUBLIC_APP_URL || 'https://cresos.cresdynamics.com,https://crm.cresdynamics.com')
   .split(',')
   .map((o) => o.trim().replace(/\/+$/, ''))
   .filter(Boolean);

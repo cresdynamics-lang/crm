@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/tokens.css?v=20261023" />
-  <link rel="stylesheet" href="/css/shell.css?v=20261023" />
+  <link rel="stylesheet" href="/css/shell.css?v=20261029c" />
   <link rel="stylesheet" href="/css/community.css?v=20261024p1" />
   <link rel="stylesheet" href="/css/sales.css" />
   <link rel="stylesheet" href="/css/jarvis.css?v=20261023f" />
@@ -316,12 +316,13 @@
           <div class="spacer"></div>
           <button type="button" class="btn btn-primary" id="btn-voice-capture">Voice capture</button>
           <button type="button" class="btn btn-primary" id="btn-new-lead">Add lead</button>
+          <button type="button" class="btn btn-primary" id="btn-new-client" hidden>Add client</button>
         </div>
         <div id="pipeline-leads-wrap" class="data-table-wrap">
           <table class="data-table">
             <thead>
               <tr>
-                <th>Name</th><th>Phone</th><th>Business</th><th>Value</th><th>Next follow-up</th><th>Stage</th>
+                <th>Name</th><th>Phone</th><th>Business</th><th>Value</th><th>Next follow-up</th><th>Stage</th><th></th>
               </tr>
             </thead>
             <tbody id="leads-tbody"></tbody>
@@ -330,7 +331,7 @@
         <div id="pipeline-clients-wrap" class="data-table-wrap" hidden>
           <table class="data-table">
             <thead>
-              <tr><th>Name</th><th>Phone</th><th>Email</th><th>Business</th><th>Projects</th></tr>
+              <tr><th>Name</th><th>Phone</th><th>Email</th><th>Business</th><th>Projects</th><th></th></tr>
             </thead>
             <tbody id="clients-tbody"></tbody>
           </table>
@@ -433,8 +434,9 @@
         <div id="finance-projects-panel" hidden>
           <div class="face-hero">
             <h2>Project finances</h2>
-            <p>See value, payments, and outstanding balance per project.</p>
+            <p>See value, payments, and outstanding balance per project. Suspend a project to pause delivery for non-payment. After 3 invoice penalties the project suspends automatically and penalties stop.</p>
           </div>
+          <div id="finance-projects-flash" class="flash"></div>
           <div class="toolbar">
             <div class="spacer"></div>
             <button type="button" class="btn btn-ghost" id="btn-export-fin-projects">Export CSV</button>
@@ -444,7 +446,7 @@
               <thead>
                 <tr>
                   <th>Project</th><th>Client</th><th>Contact</th><th>Value</th><th>Invoice</th>
-                  <th>Paid</th><th>Balance</th><th>Due</th><th>Status</th>
+                  <th>Paid</th><th>Balance</th><th>Due</th><th>Status</th><th></th>
                 </tr>
               </thead>
               <tbody id="finance-projects-tbody"></tbody>
@@ -461,13 +463,14 @@
           <div class="toolbar">
             <div class="spacer"></div>
             <button type="button" class="btn btn-ghost" id="btn-export-admin-projects">Export CSV</button>
+            <button type="button" class="btn btn-primary" id="btn-new-admin-project">Create project</button>
           </div>
           <div class="data-table-wrap">
             <table class="data-table">
               <thead>
                 <tr>
                   <th>Project</th><th>Client</th><th>Status</th><th>Progress</th>
-                  <th>Value</th><th>Invoiced</th><th>Paid</th><th>Balance</th>
+                  <th>Value</th><th>Invoiced</th><th>Paid</th><th>Balance</th><th></th>
                 </tr>
               </thead>
               <tbody id="admin-projects-tbody"></tbody>
@@ -1609,6 +1612,24 @@
     </div>
   </div>
 
+  <div class="modal-backdrop" id="new-client-modal">
+    <div class="modal-card">
+      <header>
+        <h3>Add client</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body">
+        <form id="new-client-form" class="form-grid">
+          <div><label>Client name</label><input id="new-client-name" required /></div>
+          <div><label>Phone number</label><input id="new-client-phone" type="tel" placeholder="+254 7xx xxx xxx" /></div>
+          <div><label>Email</label><input id="new-client-email" type="email" /></div>
+          <div><label>Business name</label><input id="new-client-business" /></div>
+          <div class="form-actions"><button type="submit" class="btn btn-primary">Save client</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="new-lead-modal">
     <div class="modal-card">
       <header>
@@ -1665,7 +1686,10 @@
             <label>Deal value (KES)</label>
             <input id="lead-edit-value" type="number" min="0" step="0.01" placeholder="0.00" />
           </div>
-          <div class="form-actions"><button type="submit" class="btn btn-ghost">Save changes</button></div>
+          <div class="form-actions" style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button type="submit" class="btn btn-ghost">Save changes</button>
+            <button type="button" class="btn btn-ghost" id="btn-delete-lead" style="color:#ffb4b4;">Delete lead</button>
+          </div>
         </form>
         <div id="lead-win-box" class="settings-section" style="max-width:none;margin-bottom:20px;">
           <h4 style="margin:0 0 8px;font-size:0.9rem;">Mark as won</h4>
@@ -2151,30 +2175,30 @@
   <script src="/js/jarvis.js?v=20261023g"></script>
   <script src="/js/format.js?v=20261021e"></script>
   <script src="/js/receipts.js?v=20260815g"></script>
-  <script src="/js/nav.js?v=20261024i1"></script>
-  <script src="/js/socket.js?v=20261024s1"></script>
+  <script src="/js/nav.js?v=20261029e"></script>
+  <script src="/js/socket.js?v=20261029f"></script>
   <script src="/js/calls.js?v=20261023i"></script>
   <script src="/js/settings.js?v=20260815g"></script>
   <script src="/js/tasks.js?v=20261021b"></script>
   <script src="/js/myWork.js?v=20261021b"></script>
   <script src="/js/approvals.js?v=20261021e"></script>
-  <script src="/js/projectDetail.js?v=20261021d"></script>
-  <script src="/js/clientCard.js?v=20261021d"></script>
+  <script src="/js/projectDetail.js?v=20261029e"></script>
+  <script src="/js/clientCard.js?v=20261029e"></script>
   <script src="/js/community.js?v=20261029a"></script>
   <script src="/js/voiceReport.js?v=20260827b"></script>
   <script src="/js/voiceForms.js?v=20260827b"></script>
   <script src="/js/ops.js?v=20260826a"></script>
-  <script src="/js/sales.js?v=20261024v1"></script>
-  <script src="/js/director.js?v=20261023h"></script>
+  <script src="/js/sales.js?v=20261029e"></script>
+  <script src="/js/director.js?v=20261029e"></script>
   <script src="/js/developer.js?v=20261021d"></script>
-  <script src="/js/finance.js?v=20261029b"></script>
+  <script src="/js/finance.js?v=20261029d"></script>
   <script src="/js/hr.js?v=20261023i"></script>
   <script src="/js/pm.js?v=20261021e"></script>
-  <script src="/js/admin.js?v=20261023i"></script>
+  <script src="/js/admin.js?v=20261029e"></script>
   <script src="/js/client.js?v=20261021d"></script>
   <script src="/js/traffic.js?v=20261021e"></script>
   <script src="/js/websitePayments.js?v=20261021e"></script>
   <script src="/js/adminHealth.js?v=20261021e"></script>
-  <script src="/js/shell.js?v=20261024m1"></script>
+  <script src="/js/shell.js?v=20261029f"></script>
 </body>
 </html>

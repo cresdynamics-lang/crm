@@ -76,7 +76,7 @@
     socket = io({
       path: '/socket.io',
       auth: (cb) => cb({ token: CresAPI.getAccess() }),
-      transports: ['websocket'],
+      transports: ['polling', 'websocket'],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,

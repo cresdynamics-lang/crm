@@ -10,7 +10,11 @@ const CresClientCard = (() => {
       .replace(/"/g, '&quot;');
   }
 
-  function render(c, { showMoney = false } = {}) {
+  function canMutate(role) {
+    return ['admin', 'director', 'sales'].includes(role);
+  }
+
+  function render(c, { showMoney = false, canEdit = false } = {}) {
     const phone = c.phone || '';
     const wa = CresFormat.waLink(phone);
     const tel = CresFormat.telLink(phone);
@@ -23,8 +27,20 @@ const CresClientCard = (() => {
           ${tel ? `<a class="btn btn-ghost btn-sm" href="${esc(tel)}">Call</a>` : ''}
           ${wa ? `<a class="btn btn-primary btn-sm" href="${esc(wa)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
           ${c.email ? `<a class="btn btn-ghost btn-sm" href="mailto:${esc(c.email)}">Email</a>` : ''}
+          ${canEdit ? `<button type="button" class="btn btn-ghost btn-sm" id="client-card-delete" style="color:#ffb4b4;">Delete</button>` : ''}
         </div>
         <p style="margin:0 0 8px;">${esc(phone || 'No phone')} · ${esc(c.email || 'No email')}</p>
+        ${
+          canEdit
+            ? `<form id="client-card-edit" class="form-grid" style="margin:12px 0 16px;">
+                <div><label>Name</label><input id="client-edit-name" value="${esc(c.name || '')}" required /></div>
+                <div><label>Phone</label><input id="client-edit-phone" value="${esc(c.phone || '')}" /></div>
+                <div><label>Email</label><input id="client-edit-email" type="email" value="${esc(c.email || '')}" /></div>
+                <div><label>Business</label><input id="client-edit-business" value="${esc(c.business_name || '')}" /></div>
+                <div class="form-actions"><button type="submit" class="btn btn-ghost">Save client</button></div>
+              </form>`
+            : ''
+        }
         ${
           showMoney
             ? `<div class="kpi-grid" style="margin:12px 0;">
@@ -58,7 +74,34 @@ const CresClientCard = (() => {
       const res = await CresAPI.request(`/api/clients/${clientId}`);
       const me = CresAPI.getUser();
       const showMoney = ['admin', 'finance', 'director', 'sales'].includes(me?.role);
-      body.innerHTML = render(res.data, { showMoney });
+      const canEdit = canMutate(me?.role);
+      body.innerHTML = render(res.data, { showMoney, canEdit });
+      body.querySelector('#client-card-edit')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+          await CresAPI.request(`/api/clients/${clientId}`, {
+            method: 'PATCH',
+            body: {
+              name: document.getElementById('client-edit-name').value.trim(),
+              phone: document.getElementById('client-edit-phone').value.trim() || null,
+              email: document.getElementById('client-edit-email').value.trim() || null,
+              business_name: document.getElementById('client-edit-business').value.trim() || null,
+            },
+          });
+          await open(clientId);
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+      body.querySelector('#client-card-delete')?.addEventListener('click', () => {
+        const run =
+          typeof CresSales !== 'undefined' && CresSales.deleteClient
+            ? CresSales.deleteClient(clientId, res.data.name)
+            : CresAPI.request(`/api/clients/${clientId}`, { method: 'DELETE' }).then(() => {
+                modal.classList.remove('open');
+              });
+        Promise.resolve(run).catch((err) => alert(err.message));
+      });
     } catch (err) {
       body.innerHTML = `<div class="placeholder-card">${esc(err.message)}</div>`;
     }

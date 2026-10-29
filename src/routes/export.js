@@ -63,6 +63,7 @@ router.get(
          LEFT JOIN clients c ON c.id = p.client_id
          LEFT JOIN users d ON d.id = p.assigned_developer_id
          LEFT JOIN invoices i ON i.project_id = p.id
+         WHERE p.deleted_at IS NULL
          GROUP BY p.id, p.name, p.status, p.value_amount, p.milestones, p.due_date, p.created_at,
                   c.name, d.name
          ORDER BY p.name ASC
@@ -92,6 +93,7 @@ router.get(
        LEFT JOIN clients c ON c.id = p.client_id
        LEFT JOIN users d ON d.id = p.assigned_developer_id
        WHERE p.status NOT IN ('pending_approval','rejected')
+         AND p.deleted_at IS NULL
        ORDER BY p.updated_at DESC
        LIMIT 2000`
     );

@@ -4,6 +4,10 @@
 const { query } = require('../config/database');
 const { logInvoiceEmail } = require('../lib/invoiceEmailLog');
 const { queueNotification } = require('../queues/jobs');
+const {
+  MAX_INVOICE_PENALTIES,
+  suspendProjectForInvoice,
+} = require('./projectSuspend');
 
 /**
  * Africa/Nairobi date (UTC+3, no DST) serialized as YYYY-MM-DD.
@@ -127,12 +131,13 @@ async function applyPenalty(inv, penaltyNumber, state) {
          updated_at = NOW()
      WHERE id = $2
        AND (last_penalty_at IS NULL OR last_penalty_at < NOW() - INTERVAL '4 days')
-     RETURNING id, amount`,
+     RETURNING id, amount, penalty_count`,
     [JSON.stringify({ ...state, reminderBeforeCycle: penaltyNumber }), inv.id]
   );
   if (!updated.rows[0]) return false;
   const appliedAmount = Number(updated.rows[0].amount);
   const appliedPenalty = Math.round((appliedAmount - Number(inv.amount)) * 100) / 100;
+  const appliedCount = Number(updated.rows[0].penalty_count || 0);
 
   const detail = `2% penalty ${formatKsh(appliedPenalty)} applied (cycle ${penaltyNumber}) - amount now ${formatKsh(appliedAmount)}`;
 
@@ -160,6 +165,16 @@ async function applyPenalty(inv, penaltyNumber, state) {
     `Invoice ${invoiceLabel(inv)}: 2% penalty ${formatKsh(appliedPenalty)} added (expected amount now ${formatKsh(appliedAmount)})`,
     inv.id
   );
+  if (appliedCount >= MAX_INVOICE_PENALTIES) {
+    await suspendProjectForInvoice(inv, {
+      reason: `Invoice ${invoiceLabel(inv)} reached ${MAX_INVOICE_PENALTIES} overdue penalties — no further penalties`,
+    });
+    await notifyFinance(
+      'project_suspended',
+      `Invoice ${invoiceLabel(inv)} hit ${MAX_INVOICE_PENALTIES} penalties. The project was suspended and penalties have stopped.`,
+      inv.id
+    );
+  }
   return true;
 }
 
@@ -171,7 +186,7 @@ async function applyPenalty(inv, penaltyNumber, state) {
 async function runInvoiceOverdueCycle() {
   const { rows } = await query(
     `SELECT i.id, i.amount, i.amount_paid, i.status, i.due_date, i.invoice_number,
-            i.penalty_count, i.last_penalty_at, i.overdue_state,
+            i.penalty_count, i.last_penalty_at, i.overdue_state, i.project_id,
             c.email AS client_email, c.name AS client_name,
             p.name AS project_name
      FROM invoices i
@@ -192,6 +207,10 @@ async function runInvoiceOverdueCycle() {
     if (elapsed < 5) continue;
 
     const applied = Number(inv.penalty_count || 0);
+    if (applied >= MAX_INVOICE_PENALTIES) {
+      await suspendProjectForInvoice(inv);
+      continue;
+    }
     const nextCycle = applied + 1;
     const nextThreshold = 5 * nextCycle;
     const state =

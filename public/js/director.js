@@ -623,8 +623,11 @@ const CresDirector = (() => {
     const tbody = document.getElementById('projects-tbody');
     const btn = document.getElementById('btn-new-project');
     const exportBtn = document.getElementById('btn-export-projects');
-    if (btn) btn.hidden = true;
-    if (exportBtn) exportBtn.hidden = true;
+    if (btn) btn.hidden = false;
+    if (exportBtn) exportBtn.hidden = false;
+    if (typeof CresSales !== 'undefined' && CresSales.fillProjectCreateOptions) {
+      CresSales.fillProjectCreateOptions().catch(console.error);
+    }
     if (!tbody) return;
 
     const thead = document.querySelector('#sales-projects-chrome thead tr');
@@ -648,11 +651,14 @@ const CresDirector = (() => {
           <td>${fmtDate(p.due_date)}</td>
           <td>${esc(pct)}</td>
           <td>${esc(p.developer_name || '-')}</td>
-          <td>${
-            canEdit
-              ? `<button type="button" class="btn btn-ghost btn-sm" data-edit-project="${esc(p.id)}" style="padding:6px 10px;font-size:0.8rem;">Edit</button>`
-              : ''
-          }</td>
+          <td>
+            ${
+              canEdit
+                ? `<button type="button" class="btn btn-ghost btn-sm" data-edit-project="${esc(p.id)}" style="padding:6px 10px;font-size:0.8rem;">Edit</button>`
+                : ''
+            }
+            <button type="button" class="btn btn-ghost btn-sm" data-delete-project="${esc(p.id)}" data-name="${esc(p.name)}" style="padding:6px 10px;font-size:0.8rem;color:#ffb4b4;">Delete</button>
+          </td>
         </tr>`;
       })
       .join('');
@@ -667,13 +673,23 @@ const CresDirector = (() => {
 
     tbody.querySelectorAll('tr[data-id]').forEach((tr) => {
       tr.addEventListener('click', (e) => {
-        if (e.target.closest('[data-edit-project], [data-open-project]')) return;
+        if (e.target.closest('[data-edit-project], [data-open-project], [data-delete-project]')) return;
         openProject(tr.dataset.id, e);
       });
     });
     tbody.querySelectorAll('[data-open-project], [data-edit-project]').forEach((el) => {
       el.addEventListener('click', (e) => {
         openProject(el.dataset.openProject || el.dataset.editProject, e);
+      });
+    });
+    tbody.querySelectorAll('[data-delete-project]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (typeof CresSales !== 'undefined' && CresSales.deleteProject) {
+          CresSales.deleteProject(btn.dataset.deleteProject, btn.dataset.name).catch((err) =>
+            alert(err.message)
+          );
+        }
       });
     });
   }
@@ -734,5 +750,5 @@ const CresDirector = (() => {
     }
   }
 
-  return { bind, mount, openApproval };
+  return { bind, mount, openApproval, refreshProjects: mountProjects };
 })();
