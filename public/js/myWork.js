@@ -41,6 +41,10 @@ const CresMyWork = (() => {
       if (me.role === 'developer') {
         const res = await CresAPI.request('/api/developer/projects');
         rows = res.data || [];
+      } else if (me.role === 'finance') {
+        // Finance isn't allowed the ops project list; use its own money view
+        const res = await CresAPI.request('/api/finance/projects').catch(() => ({ data: [] }));
+        rows = res.data || [];
       } else if (me.role !== 'hr' && me.role !== 'client') {
         const res = await CresAPI.request('/api/projects').catch(() => ({ data: [] }));
         rows = res.data || [];

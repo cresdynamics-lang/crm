@@ -27,7 +27,9 @@ function startBackgroundServices() {
     guard('health-sampler start', () => require('./healthSampler').startSampler(60000)),
     guard('health-sampler stop', () => require('./healthSampler').stopSampler())
   );
-  runAsLeader(
+  // INBOX_WATCHER=off keeps a development machine from logging in to the live mailbox
+  // (the mail provider drops the live watcher's connection when a second login arrives).
+  if (process.env.INBOX_WATCHER !== 'off') runAsLeader(
     'inbox-watcher',
     guard('inbox-watcher start', async () => {
       const w = require('./inboxWatcher').createWatcher();

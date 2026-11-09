@@ -59,12 +59,16 @@ const CresAdminHealth = (() => {
       `Last sampled ${fmtTime(d.asOf)} (${d.timezone}) · sampler runs every ~60s · live socket feed active`;
 
     const sys = d.system || {};
-    const crmOk = okFor(d.groups.crm);
+    // The server sends { system, processes, crm: { status, groups: { name: { status } } } }
+    const groups = d.crm?.groups || {};
+    const crmEntities = Object.entries(groups).map(([name, g]) => ({ name, ...g }));
+    const crmOk = d.crm ? d.crm.status === 'up' : okFor(crmEntities);
+    const st = (g) => (g && g.status === 'up' ? 'up' : g ? g.status || 'down' : 'unknown');
     el('health-cards').innerHTML = `
       <div class="settings-section" style="max-width:none;margin:0;padding:14px;">
         <div class="kpi-label">CRM API</div>
         <div style="margin-top:4px;">${pill(crmOk ? 'up' : 'degraded')}</div>
-        <div class="meta" style="margin-top:6px;">${(d.groups.crm || []).length} features · db ${d.dbHealth ? 'up' : 'down'} · redis ${d.redisHealth ? 'up' : 'down'} · queue ${d.queueHealth ? 'up' : 'down'}</div>
+        <div class="meta" style="margin-top:6px;">${crmEntities.length} features · db ${st(groups.database)} · redis ${st(groups.redis)} · queue ${st(groups.queues)}</div>
       </div>
       <div class="settings-section" style="max-width:none;margin:0;padding:14px;">
         <div class="kpi-label">Server load</div>
@@ -72,9 +76,7 @@ const CresAdminHealth = (() => {
         <div class="meta" style="margin-top:6px;">${fnum(sys.memUsedMb, 0)} / ${fnum(sys.memTotalMb, 0)} MB · ${esc(sys.hostname || '')} · up ${fmtUptime(sys.uptimeSec)}</div>
       </div>`;
 
-    const series = [
-      ...(d.groups.crm || []).map((e) => ({ ...e, group: 'crm' })),
-    ];
+    const series = crmEntities.map((e) => ({ ...e, group: 'crm' }));
     el('health-entities').innerHTML = series.map((e) => `
       <li class="engagement-item">
         <div class="engagement-content">
@@ -121,8 +123,8 @@ const CresAdminHealth = (() => {
       if (r.category !== 'system.cpu' && r.category !== 'system.memory') continue;
       const t = fmtTime(r.checkedAt);
       const item = byTime.get(t) || { t, cpu: null, mem: null };
-      if (r.category === 'system.cpu') item.cpu = r.detail?.cpuPercent;
-      if (r.category === 'system.memory') item.mem = r.detail?.memUsedPct;
+      if (r.category === 'system.cpu') item.cpu = r.detail?.pct ?? r.detail?.cpuPercent;
+      if (r.category === 'system.memory') item.mem = r.detail?.usedPct ?? r.detail?.memUsedPct;
       byTime.set(t, item);
     }
     const arr = [...byTime.values()].slice(-40);
