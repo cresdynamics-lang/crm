@@ -19,7 +19,6 @@ const messagesRoutes = require('./routes/messages');
 const reportsRoutes = require('./routes/reports');
 const queryRoutes = require('./routes/query');
 const healthRoutes = require('./routes/health');
-const siteAnalyticsRoutes = require('./routes/siteAnalytics');
 const adminHealthRoutes = require('./routes/adminHealth');
 const settingsRoutes = require('./routes/settings');
 const salesRoutes = require('./routes/sales');
@@ -125,7 +124,6 @@ function createApp() {
   app.use('/api/query', queryRoutes);
   app.use('/api/settings', settingsRoutes);
   app.use('/api/sales', salesRoutes);
-  app.use('/api/analytics', siteAnalyticsRoutes);
   app.use('/api/admin/health', adminHealthRoutes);
   app.use('/api/emails', emailsRoutes);
   app.use('/api/director', directorRoutes);
@@ -135,6 +133,7 @@ function createApp() {
   app.use('/api/hr', hrRoutes);
   app.use('/api/pm', pmRoutes);
   app.use('/api/admin/inbox', adminInboxRoutes);
+  app.use('/api/mail', require('./routes/teamMail'));
   app.use('/api/admin', adminRoutes);
   app.use('/api/client', clientPortalRoutes);
   app.use('/api/search', searchRoutes);
@@ -150,7 +149,7 @@ function createApp() {
   app.use('/api/meetings', meetingsRoutes);
 
   // Uploaded files need a signed-in user (file cookie set at sign-in; see fileAccess).
-  app.use('/uploads', fileAccess, express.static(uploadsDir, { fallthrough: false }));
+  app.use('/uploads', fileAccess, express.static(uploadsDir, { fallthrough: false, dotfiles: 'deny' })); // .inbox (email attachments) is never served
 
   // Shared shell faces (Step 2)
   app.get('/', (_req, res) => res.redirect('/login'));
@@ -158,6 +157,7 @@ function createApp() {
   app.get('/dashboard', (_req, res) => res.sendFile(path.join(publicDir, 'app.html')));
   app.get(['/meetings', '/meeting/:id'], (_req, res) => res.sendFile(path.join(publicDir, 'meeting.html')));
   app.get('/inbox', (_req, res) => res.sendFile(path.join(publicDir, 'inbox.html')));
+  app.get('/mail', (_req, res) => res.sendFile(path.join(publicDir, 'mail.html')));
   app.get('/app', (_req, res) => res.redirect('/dashboard'));
 
   app.use(

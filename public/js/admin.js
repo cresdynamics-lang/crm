@@ -498,10 +498,15 @@ const CresAdmin = (() => {
     if (role) params.set('role', role);
     if (person) params.set('user_id', person);
 
-    const [coverage, reports] = await Promise.all([
+    const [coverage, reports, delayRes] = await Promise.all([
       CresAPI.request(`/api/reports/coverage?${covQs}`),
       CresAPI.request(`/api/reports?${params}`),
+      CresAPI.request('/api/reports/delay-notes').catch(() => ({ data: [] })),
     ]);
+    const nairobiDay = (iso) => new Date(new Date(iso).getTime() + 3 * 3600000).toISOString().slice(0, 10);
+    const delays = (delayRes.data || []).filter(
+      (n) => nairobiDay(n.created_at) === day && (!person || n.user_id === person) && (!role || n.user_role === role)
+    );
 
     const submitted = coverage.data?.submitted || [];
     const missing = coverage.data?.missing || [];
@@ -532,6 +537,20 @@ const CresAdmin = (() => {
         <div class="coverage-col">
           <h3>Did not share</h3>
           <ul>${missing.length ? missing.map((p) => personLi(p, false)).join('') : '<li class="meta">Everyone filed.</li>'}</ul>
+        </div>
+        <div class="coverage-col">
+          <h3>Delay reasons filed</h3>
+          <ul>${
+            delays.length
+              ? delays
+                  .map(
+                    (n) => `<li><strong>${esc(n.user_name)}</strong><div class="meta">${esc(n.user_role)} · ${CresFormat.datetime(n.created_at)} · ${
+                      n.already_communicated ? `told ${esc(n.communicated_to || 'someone')}` : 'had not told anyone'
+                    }</div><div>${esc(n.reason)}</div></li>`
+                  )
+                  .join('')
+              : '<li class="meta">No delay reasons filed.</li>'
+          }</ul>
         </div>`;
     }
 
@@ -1037,7 +1056,7 @@ const CresAdmin = (() => {
             body: payload,
             idempotencyKey: `user-${payload.email}-${Date.now()}`,
           });
-          flash(document.getElementById('users-flash'), 'User created');
+          flash(document.getElementById('users-flash'), `User created. Sign-in details are being emailed to ${payload.email}`);
         }
         document.getElementById('user-modal').classList.remove('open');
         await mountUsers();

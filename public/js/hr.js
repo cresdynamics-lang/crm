@@ -505,7 +505,7 @@ const CresHR = (() => {
             body: payload,
             idempotencyKey: `emp-${payload.email}-${Date.now()}`,
           });
-          flash(document.getElementById('employees-flash'), 'Employee created with login account');
+          flash(document.getElementById('employees-flash'), `Employee created. Sign-in details are being emailed to ${payload.email}`);
         }
         document.getElementById('employee-modal').classList.remove('open');
         await mountEmployees();

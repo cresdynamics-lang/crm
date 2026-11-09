@@ -1,6 +1,6 @@
 /**
  * Admin health endpoints.
- * live     - immediate system/website/CRM snapshot (no DB write)
+ * live     - immediate system/CRM snapshot (no DB write)
  * overview - latest persisted snapshot + rolling history from health_snapshots
  */
 const express = require('express');

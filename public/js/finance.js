@@ -403,12 +403,15 @@ const CresFinance = (() => {
     const hasEmail = !!(i.client_email || '').trim();
 
     if (hasClient && hasEmail) {
-      card.hidden = true;
+      // Client is in the CRM: show what will be used, nothing to type
+      card.hidden = false;
       if (manual) manual.hidden = true;
       if (addBtn) addBtn.hidden = true;
       if (checkBtn) checkBtn.hidden = true;
       if (toolbar) toolbar.hidden = true;
-      summary.innerHTML = '';
+      summary.innerHTML = `<span class="status-pill paid">✓ In the CRM</span>
+        <div style="margin-top:6px;"><strong>${esc(i.client_name || i.client_business || 'Client')}</strong>${i.client_business && i.client_name ? ` · ${esc(i.client_business)}` : ''}</div>
+        <div class="meta">${esc(i.client_email)}${i.client_phone ? ` · ${esc(i.client_phone)}` : ''} · the receipt is emailed here</div>`;
       return;
     }
 
@@ -419,11 +422,35 @@ const CresFinance = (() => {
     if (manual) manual.hidden = false;
     if (!hasClient) {
       summary.innerHTML = `<span class="status-pill overdue">No client linked</span>
-        <div class="meta" style="margin-top:6px;">This invoice has no CRM client. Add details once, then they sync on later payments.</div>`;
+        <div class="meta" style="margin-top:6px;">Pick the client if they're already in the CRM, or add them once - later payments fill in automatically.</div>`;
+      fillPayClientPicker().catch(() => {});
     } else {
       summary.innerHTML = `<strong>${esc(i.client_name || i.client_business || 'Client')}</strong>
         <div class="meta">In CRM — missing email (needed for receipts / balance invoice). Fill the email only.</div>`;
     }
+  }
+
+  let payClients = null;
+  async function fillPayClientPicker() {
+    const sel = document.getElementById('pay-pick-client');
+    if (!sel) return;
+    if (!payClients) payClients = (await CresAPI.request('/api/clients')).data || [];
+    sel.innerHTML = '<option value="">- New client (type below) -</option>' +
+      payClients.map((c) => `<option value="${esc(c.id)}">${esc(c.business_name || c.name)}${c.email ? ` — ${esc(c.email)}` : ''}</option>`).join('');
+    sel.onchange = () => {
+      const c = payClients.find((x) => x.id === sel.value);
+      const set = (id, v) => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.value = v || '';
+          el.readOnly = Boolean(c) && Boolean(v);
+        }
+      };
+      set('pay-new-client-name', c?.name);
+      set('pay-new-client-business', c?.business_name);
+      set('pay-new-client-email', c?.email);
+      set('pay-new-client-phone', c?.phone);
+    };
   }
 
   async function refreshPayClientCard(invoiceId, { overwriteAmount = false } = {}) {
@@ -530,14 +557,15 @@ const CresFinance = (() => {
         if (!id) return;
         const name = document.getElementById('pay-new-client-name').value.trim();
         const email = document.getElementById('pay-new-client-email').value.trim();
-        if (!name || !email) {
+        const pickedId = document.getElementById('pay-pick-client')?.value || '';
+        if (!pickedId && (!name || !email)) {
           flash(document.getElementById('payments-flash'), 'Name and email required', false);
           return;
         }
         try {
           await CresAPI.request(`/api/invoices/${id}/client`, {
             method: 'PATCH',
-            body: {
+            body: pickedId ? { client_id: pickedId } : {
               client: {
                 name,
                 email,
@@ -1496,7 +1524,7 @@ const CresFinance = (() => {
         clearInterval(timerInterval);
         resetTimer();
         const blob = await new Promise((res) => {
-          recorder.onstop = () => { stream?.getTracks().forEach((t) => t.stop()); res(new Blob(chunks, { type: 'audio/webm' })); };
+          recorder.onstop = () => { stream?.getTracks().forEach((t) => t.stop()); res(new Blob(chunks, { type: CresAudio.blobType(recorder) })); };
           recorder.stop();
         });
         chunks = [];
@@ -1505,7 +1533,7 @@ const CresFinance = (() => {
         btn.disabled = true; btn.textContent = 'Analyzing...';
         try {
           const fd = new FormData();
-          fd.append('audio', blob, `payment-${Date.now()}.webm`);
+          fd.append('audio', blob, `payment-${Date.now()}.${CresAudio.ext(blob.type)}`);
           const res = await CresAPI.request('/api/payments/voice-capture', { method: 'POST', body: fd });
 
           transcriptSection.style.display = '';
@@ -1531,9 +1559,9 @@ const CresFinance = (() => {
 
       // Start recording
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream = await CresAudio.mic();
         chunks = [];
-        recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+        recorder = CresAudio.recorder(stream);
         recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
         recorder.start();
         btn.textContent = 'Stop'; btn.classList.add('btn-danger');
@@ -1761,11 +1789,39 @@ const CresFinance = (() => {
           <div><strong>Email:</strong> ${esc(c.email || '—')}</div>
           <div><strong>Phone:</strong> ${esc(c.phone || '—')}</div>`;
       }
+      const emailWrap = document.getElementById('new-inv-email-wrap');
+      if (emailWrap) emailWrap.hidden = Boolean(c.email);
       if (hint) {
         hint.textContent = c.email
           ? `Will download and email to ${c.email}`
-          : 'Client has no email — add email on the client record before creating.';
+          : 'This client has no email yet - type it above and it is saved on the client.';
         hint.style.color = c.email ? '' : '#c0392b';
+      }
+    }
+
+    /** Client chosen: show only their projects; if there is exactly one, pick it. */
+    function onNewInvClient(clientId) {
+      fillNewInvProjects(clientId);
+      showNewInvContact(clientId);
+      const projSel = document.getElementById('new-inv-project');
+      const options = [...(projSel?.options || [])].filter((o) => o.value);
+      if (clientId && options.length === 1) projSel.value = options[0].value;
+    }
+
+    /** Project chosen first: fill in its client automatically. */
+    function onNewInvProject(projectId) {
+      const p = newInvProjects.find((x) => x.id === projectId);
+      const clientSel = document.getElementById('new-inv-client');
+      if (!p?.client_id || !clientSel) return;
+      if (clientSel.value !== p.client_id) {
+        if (![...clientSel.options].some((o) => o.value === p.client_id)) {
+          document.getElementById('new-inv-client-filter').value = '';
+          fillNewInvClients('');
+        }
+        clientSel.value = p.client_id;
+        showNewInvContact(p.client_id);
+        fillNewInvProjects(p.client_id);
+        document.getElementById('new-inv-project').value = projectId;
       }
     }
 
@@ -1787,6 +1843,8 @@ const CresFinance = (() => {
       fillNewInvClients();
       fillNewInvProjects('');
       showNewInvContact('');
+      const emailIn = document.getElementById('new-inv-email');
+      if (emailIn) emailIn.value = '';
       document.getElementById('new-inv-date').value = new Date().toISOString().slice(0, 10);
       document.getElementById('new-inv-items').innerHTML = '';
       addNewInvItem();
@@ -1801,10 +1859,8 @@ const CresFinance = (() => {
       fillNewInvClients(e.target.value);
       showNewInvContact(document.getElementById('new-inv-client')?.value || '');
     });
-    document.getElementById('new-inv-client')?.addEventListener('change', (e) => {
-      fillNewInvProjects(e.target.value);
-      showNewInvContact(e.target.value);
-    });
+    document.getElementById('new-inv-client')?.addEventListener('change', (e) => onNewInvClient(e.target.value));
+    document.getElementById('new-inv-project')?.addEventListener('change', (e) => onNewInvProject(e.target.value));
     document.getElementById('new-invoice-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const flashEl = document.getElementById('new-inv-flash');
@@ -1812,9 +1868,14 @@ const CresFinance = (() => {
       const project_id = document.getElementById('new-inv-project').value;
       const issue_date = document.getElementById('new-inv-date').value;
       const client = newInvClients.find((c) => c.id === client_id);
-      if (!client?.email?.trim()) {
-        flash(flashEl, 'Selected client has no email — update the client record first', false);
-        return;
+      const typedEmail = document.getElementById('new-inv-email')?.value.trim() || '';
+      if (client && !client.email?.trim()) {
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(typedEmail)) {
+          flash(flashEl, "Type the client's email so the invoice can be sent", false);
+          document.getElementById('new-inv-email')?.focus();
+          return;
+        }
+        client.email = typedEmail;
       }
       const items = [...document.querySelectorAll('#new-inv-items tr')].map((tr) => ({
         description: tr.querySelector('[data-desc]')?.value?.trim(),
@@ -1834,6 +1895,7 @@ const CresFinance = (() => {
             issue_date,
             items,
             send_email: true,
+            client_email: typedEmail || undefined,
           },
           idempotencyKey: `inv-create-${Date.now()}`,
         });

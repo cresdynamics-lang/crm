@@ -130,6 +130,7 @@ function roleRoom(role) {
 }
 
 function initSocket(server) {
+  startEmitBridge();
   io = new Server(server, {
     // Same rule as the HTTP API: only our own site(s) may open a live connection.
     cors: {
@@ -518,13 +519,55 @@ function initSocket(server) {
   return io;
 }
 
+/*
+ * Cross-process bridge: background processes (the queue worker, schedulers,
+ * the inbox watcher) have no socket server. Their emits are published on Redis
+ * and the web process, which holds the sockets, delivers them. If Redis is
+ * down they are simply dropped (screens still refresh on their own timers).
+ */
+const BRIDGE_CHANNEL = 'cres:socket-emit';
+
+function publishEmit(kind, target, event, payload) {
+  try {
+    const { getRedis } = require('../config/redis');
+    const r = getRedis();
+    if (r.status !== 'ready') return;
+    r.publish(BRIDGE_CHANNEL, JSON.stringify({ kind, target, event, payload })).catch(() => {});
+  } catch {
+    /* no redis: best effort */
+  }
+}
+
+let bridgeSub = null;
+function startEmitBridge() {
+  if (bridgeSub) return;
+  try {
+    const { getRedis } = require('../config/redis');
+    bridgeSub = getRedis().duplicate();
+    bridgeSub.on('error', () => {});
+    bridgeSub.subscribe(BRIDGE_CHANNEL).catch(() => {});
+    bridgeSub.on('message', (_channel, raw) => {
+      if (!io) return;
+      try {
+        const m = JSON.parse(raw);
+        if (m.kind === 'user') io.to(userRoom(m.target)).emit(m.event, m.payload);
+        else if (m.kind === 'role') io.to(roleRoom(m.target)).emit(m.event, m.payload);
+      } catch {
+        /* ignore malformed */
+      }
+    });
+  } catch (e) {
+    console.warn('[socket] emit bridge unavailable:', e.message);
+  }
+}
+
 function emitToUser(userId, event, payload) {
-  if (!io) return;
+  if (!io) return publishEmit('user', userId, event, payload);
   io.to(userRoom(userId)).emit(event, payload);
 }
 
 function emitToRole(role, event, payload) {
-  if (!io) return;
+  if (!io) return publishEmit('role', role, event, payload);
   io.to(roleRoom(role)).emit(event, payload);
 }
 

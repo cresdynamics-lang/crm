@@ -191,6 +191,20 @@ async function handleEmail(job) {
     return result;
   }
 
+  if (name === 'meeting.invite') {
+    const { sendMeetingInvite } = require('../services/meetingService');
+    return sendMeetingInvite(data);
+  }
+
+  if (name === 'report.reminder') {
+    return sendWithFailover({
+      to: data.to,
+      subject: data.subject,
+      body: data.body,
+      meta: { type: 'report_reminder', reminderId: data.reminderId },
+    });
+  }
+
   if (name === 'notification.digest') {
     return sendWithFailover({
       to: data.to,
@@ -238,38 +252,6 @@ async function handleEmail(job) {
     if (data.receiptType === 'invoice' && data.receiptId) {
       await logInvoiceEmail(data.receiptId, 'receipt', 'sent', `Receipt emailed to ${data.to}`);
     }
-    return result;
-  }
-
-  if (name === 'site.payer-contact') {
-    const result = await sendWithFailover({
-      to: data.to,
-      subject: data.subject,
-      body: data.message,
-      html: `<p style="font-family:Arial,Helvetica,sans-serif;color:#2F3B52;line-height:1.6;">${String(
-        data.message || ''
-      ).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')}</p><p style="color:#8b9aab;font-size:12px;">Sent via CRES Dynamics CRM | Event: ${String(
-        data.context?.event_title || ''
-      ).replace(/&/g, '&amp;').replace(/</g, '&lt;')} · Ticket ${String(
-        data.context?.ticket_type || ''
-      ).replace(/&/g, '&amp;').replace(/</g, '&lt;')}</p>`,
-      meta: {
-        type: 'site_payer_contact',
-        reservationId: data.reservationId,
-        sentBy: data.sentBy,
-      },
-    });
-    await query(
-      `INSERT INTO website_payer_emails (reservation_id, payer_email, payer_name, send_by, status, detail)
-       VALUES ($1, $2, $3, $4, 'sent', $5)`,
-      [
-        data.reservationId,
-        data.to,
-        data.name,
-        data.sentBy?.name || 'finance',
-        result?.messageId || result?.id || 'sent',
-      ]
-    );
     return result;
   }
 
@@ -475,9 +457,9 @@ async function handleNotification(job) {
 
   const { rows } = await query(
     `INSERT INTO notifications (user_id, type, content, meta)
-     SELECT $1, $2, $3, $4::jsonb
+     SELECT $1::uuid, $2::text, $3::text, $4::jsonb
      WHERE NOT (
-       $2 LIKE 'invoice_%'
+       $2::text LIKE 'invoice_%'
        AND EXISTS (
          SELECT 1 FROM notifications n
          WHERE n.user_id = $1 AND n.type = $2 AND n.content = $3
@@ -544,6 +526,15 @@ function startWorkers() {
     }
     if (job && job.attemptsMade >= (job.opts.attempts || defaultJobOpts.attempts)) {
       await moveToDeadLetter(QUEUE_NAMES.email, job, err);
+      // Tell whoever sent a meeting invite that the email did not go out
+      if (job.name === 'meeting.invite' && job.data?.inviterId) {
+        await queueNotification({
+          userId: job.data.inviterId,
+          type: 'meeting_invite_email_failed',
+          content: `The meeting invite email to ${job.data.to} did not send. They still have the invite in CRES OS; share the link another way if needed.`,
+          meta: { meetingId: job.data.meetingId, href: `/meeting/${job.data.meetingId}` },
+        }).catch(() => {});
+      }
     }
   });
   workers.push(email);
@@ -566,8 +557,24 @@ function startWorkers() {
 
 if (require.main === module) {
   require('dotenv').config();
-  startWorkers();
+  process.env.CRES_PROCESS = process.env.CRES_PROCESS || 'worker';
+  require('../lib/errorLog').installProcessHandlers?.();
+  const running = startWorkers();
   console.log('[workers] running standalone');
+  // The worker also takes over background services if the web process is down.
+  try {
+    require('../services/backgroundServices').startBackgroundServices();
+  } catch (e) {
+    console.warn('[workers] background services skipped:', e.message);
+  }
+  const stop = async (sig) => {
+    console.log(`[workers] ${sig} - shutting down`);
+    await require('../services/backgroundServices').stopBackgroundServices().catch(() => {});
+    await Promise.all(running.map((w) => w.close().catch(() => {})));
+    process.exit(0);
+  };
+  process.on('SIGINT', () => stop('SIGINT'));
+  process.on('SIGTERM', () => stop('SIGTERM'));
 }
 
 module.exports = {

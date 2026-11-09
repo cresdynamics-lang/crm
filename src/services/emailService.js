@@ -110,17 +110,23 @@ function smtpSettings() {
   if (!host || !user || !pass) return null;
   const port = Number(process.env.MAIL_PORT || 465);
   const enc = String(process.env.MAIL_ENCRYPTION || '').toLowerCase();
-  return { host, port, secure: enc === 'ssl' || port === 465, auth: { user, pass } };
+  // Short timeouts: if the host blocks SMTP (DigitalOcean does by default), fail fast
+  return {
+    host, port, secure: enc === 'ssl' || port === 465, auth: { user, pass },
+    connectionTimeout: 15000, greetingTimeout: 10000, socketTimeout: 30000,
+  };
 }
 
 let smtpTransport = null;
-async function sendViaSmtp({ to, subject, body, html, replyTo, cc, meta, attachments, headers }) {
+async function sendViaSmtp({ to, subject, body, html, from, replyTo, cc, meta, attachments, headers }) {
   const settings = smtpSettings();
   if (!settings) throw new Error('SMTP is not configured');
   // eslint-disable-next-line global-require
   smtpTransport ||= require('nodemailer').createTransport(settings);
   // The mailbox server only sends as its own address.
-  const name = process.env.MAIL_FROM_NAME || 'Cres Dynamics';
+  // Keep the sender's display name (e.g. "Allan Abere - Developer Team, Cres Dynamics Ltd"); the address stays the mailbox's.
+  const fromName = String(from || '').match(/^\s*"?([^"<]+?)"?\s*</)?.[1];
+  const name = fromName || process.env.MAIL_FROM_NAME || 'Cres Dynamics';
   const fromAddr = `${name} <${process.env.MAIL_FROM_ADDRESS || settings.auth.user}>`;
   const info = await smtpTransport.sendMail({
     from: fromAddr,
@@ -146,7 +152,7 @@ async function sendViaProvider(provider, { to, subject, body, html, from, replyT
     return sendViaResend({ to, subject, body, html, from, replyTo, cc, meta, attachments, headers });
   }
   if (provider === 'smtp') {
-    return sendViaSmtp({ to, subject, body, html, replyTo, cc, meta, attachments, headers });
+    return sendViaSmtp({ to, subject, body, html, from, replyTo, cc, meta, attachments, headers });
   }
   console.log(`[email:${provider}] from=${from || '-'} → ${to} | ${subject}`);
   if (provider === 'force-fail') {
@@ -183,7 +189,18 @@ function wrapBrandHtml(html) {
 </div>`;
 }
 
+/** Addresses that can never receive mail (seed/test data): sending only causes bounces. */
+const UNDELIVERABLE = /@([^@\s]+\.)?(local|localhost|invalid|test|example)$|@example\.(com|org|net)$/i;
+
 async function sendWithFailover({ to, subject, body, html, meta = {}, from, replyTo, cc, attachments, headers } = {}) {
+  const toList = (Array.isArray(to) ? to : [to]).filter(Boolean);
+  const real = toList.filter((a) => !UNDELIVERABLE.test(String(a).trim()));
+  if (toList.length && !real.length) {
+    console.warn(`[email] skipped test address ${toList.join(', ')} | ${subject}`);
+    return { ok: true, skipped: true, provider: 'none', to, subject, meta };
+  }
+  if (real.length !== toList.length) to = Array.isArray(to) ? real : real[0];
+  if (Array.isArray(cc)) cc = cc.filter((a) => !UNDELIVERABLE.test(String(a).trim()));
   // Test-safety valve: when EMAIL_TEST_OVERRIDE is set OUTSIDE production, every
   // outbound email is redirected to that address (with the original recipient kept
   // in the subject). This is IGNORED in production so real mail is never misrouted.

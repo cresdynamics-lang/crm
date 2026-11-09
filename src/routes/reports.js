@@ -14,6 +14,32 @@ const { markAttendance } = require('../services/attendanceService');
 const router = express.Router();
 router.use(authenticate);
 
+/**
+ * The one Director a sales/developer report goes to: the person's assigned
+ * director if that's an active director, otherwise the single active director
+ * (the earliest, if there are ever several). Falls back to an active admin.
+ */
+async function reportDirectorFor(userId) {
+  const { rows } = await query(
+    `SELECT d.id, d.name FROM users u
+       JOIN users d ON d.id = u.assigned_director_id
+       JOIN roles r ON r.id = d.role_id
+      WHERE u.id = $1 AND r.name = 'director' AND d.status = 'active'`,
+    [userId]
+  );
+  if (rows[0]) return rows[0];
+  const { rows: dirs } = await query(
+    `SELECT u.id, u.name FROM users u JOIN roles r ON r.id = u.role_id
+      WHERE r.name = 'director' AND u.status = 'active' ORDER BY u.created_at LIMIT 1`
+  );
+  if (dirs[0]) return dirs[0];
+  const { rows: admins } = await query(
+    `SELECT u.id, u.name FROM users u JOIN roles r ON r.id = u.role_id
+      WHERE r.name = 'admin' AND u.status = 'active' ORDER BY u.created_at LIMIT 1`
+  );
+  return admins[0] || null;
+}
+
 const ADMIN_NOTE_KEYS = [
   'admin_director_note',
   'admin_director_note_by',
@@ -245,6 +271,95 @@ router.get(
   })
 );
 
+/**
+ * Report delay notes: staff file why a daily report is late (and whether they
+ * already told someone). PM / Admin / Director / HR see everyone's; others see their own.
+ */
+const DELAY_REVIEWERS = ['pm', 'admin', 'director', 'hr']; // who can read delay notes (the Director is notified)
+
+router.get(
+  '/delay-notes',
+  requirePermission('reports', 'view'),
+  asyncHandler(async (req, res) => {
+    const seeAll = DELAY_REVIEWERS.includes(req.user.role) && req.query.mine !== '1';
+    const params = [];
+    let where = '';
+    if (!seeAll) {
+      params.push(req.user.id);
+      where = 'WHERE n.user_id = $1';
+    }
+    const { rows } = await query(
+      `SELECT n.id, n.user_id, n.reason, n.already_communicated, n.communicated_to, n.created_at,
+              u.name AS user_name, r.name AS user_role,
+              l.hours_since, l.sent_at AS reminded_at
+         FROM report_delay_notes n
+         JOIN users u ON u.id = n.user_id
+         JOIN roles r ON r.id = u.role_id
+         LEFT JOIN report_reminder_log l ON l.id = n.reminder_id
+         ${where}
+        ORDER BY n.created_at DESC
+        LIMIT 100`,
+      params
+    );
+    res.json({ ok: true, data: rows });
+  })
+);
+
+router.post(
+  '/delay-notes',
+  requirePermission('reports', 'create'),
+  asyncHandler(async (req, res) => {
+    const reason = String(req.body?.reason || '').trim();
+    const alreadyCommunicated = req.body?.already_communicated === true || req.body?.already_communicated === 'true';
+    const communicatedTo = String(req.body?.communicated_to || '').trim().slice(0, 255) || null;
+    if (reason.length < 5) throw new AppError('Explain the delay in a sentence or two', 400, 'VALIDATION');
+    if (reason.length > 2000) throw new AppError('Keep the reason under 2000 characters', 400, 'VALIDATION');
+    if (alreadyCommunicated && !communicatedTo) {
+      throw new AppError('Say who you told about the delay', 400, 'VALIDATION');
+    }
+
+    // Link to the most recent unanswered reminder, if any
+    const { rows: rem } = await query(
+      `SELECT l.id FROM report_reminder_log l
+        WHERE l.user_id = $1
+          AND NOT EXISTS (SELECT 1 FROM report_delay_notes n WHERE n.reminder_id = l.id)
+        ORDER BY l.sent_at DESC LIMIT 1`,
+      [req.user.id]
+    );
+
+    const { rows } = await query(
+      `INSERT INTO report_delay_notes (user_id, reminder_id, reason, already_communicated, communicated_to)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [req.user.id, rem[0]?.id || null, reason, alreadyCommunicated, communicatedTo]
+    );
+
+    const dir = await reportDirectorFor(req.user.id);
+    const reviewers = dir && dir.id !== req.user.id ? [dir] : [];
+    const told = alreadyCommunicated ? ` (says they told ${communicatedTo})` : ' (had not told anyone yet)';
+    for (const r of reviewers) {
+      await queueNotification({
+        userId: r.id,
+        type: 'report_delay_note',
+        content: `${req.user.name} filed a report delay${told}: ${reason.slice(0, 140)}`,
+        meta: { delayNoteId: rows[0].id, userId: req.user.id, href: '#/reports?tab=daily' },
+      }).catch(() => {});
+    }
+
+    await recordAction({
+      actorId: req.user.id,
+      actorRole: req.user.role,
+      action: 'filed_delay',
+      resourceType: 'report',
+      resourceId: rows[0].id,
+      summary: `${req.user.name} filed a report delay reason: ${reason.slice(0, 80)}`,
+      after: { already_communicated: alreadyCommunicated, communicated_to: communicatedTo },
+    }).catch(() => {});
+
+    res.status(201).json({ ok: true, data: rows[0] });
+  })
+);
+
 router.post(
   '/',
   requirePermission('reports', 'create'),
@@ -279,19 +394,12 @@ router.post(
       }
     }
 
-    // Sales/Developer reports enter PM inbox; PM/Finance/Director own notes skip routing
-    const routing =
-      ['sales', 'developer'].includes(req.user.role) ? 'pending_pm' : 'pm_reviewed';
-
-    // Resolve assigned director for targeted notification
-    let assignedDirectorId = null;
-    try {
-      const { rows: dirRows } = await query(
-        `SELECT assigned_director_id FROM users WHERE id = $1`,
-        [req.user.id]
-      );
-      assignedDirectorId = dirRows[0]?.assigned_director_id || null;
-    } catch { /* column may not exist yet */ }
+    // Sales and developer reports go straight to the one Director (their assigned
+    // director, else the single active director). PM/Finance/Director own notes skip routing.
+    const fieldReport = ['sales', 'developer'].includes(req.user.role);
+    const routing = fieldReport ? 'forwarded_director' : 'pm_reviewed';
+    const director = fieldReport ? await reportDirectorFor(req.user.id) : null;
+    const assignedDirectorId = director?.id || null;
 
     const { rows } = await query(
       `INSERT INTO daily_reports
@@ -307,42 +415,29 @@ router.post(
       ]
     );
 
-    // Notify PM + Admin (if sales/dev), or assigned Director specifically
-    if (routing === 'pending_pm') {
-      const { rows: hubs } = await query(
-        `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
-         WHERE r.name IN ('pm', 'admin') AND u.status = 'active'`
-      );
-      for (const h of hubs) {
-        await queueNotification({
-          userId: h.id,
-          type: 'daily_report',
-          content: `Daily report from ${req.user.name}`,
-          meta: { reportId: rows[0].id, userId: req.user.id, routing },
-        });
-      }
-    } else {
-      // Notify assigned director if set, otherwise all directors + admin
+    // Notify the Director the report was routed to (field reports), or Director + Admin for own notes
+    if (fieldReport) {
       if (assignedDirectorId) {
         await queueNotification({
           userId: assignedDirectorId,
           type: 'daily_report',
+          content: `Daily report from ${req.user.name} (${req.user.role})`,
+          meta: { reportId: rows[0].id, userId: req.user.id, routing, href: '#/reports?tab=daily' },
+        });
+      }
+    } else {
+      const { rows: dirs } = await query(
+        `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
+         WHERE r.name IN ('director', 'admin') AND u.status = 'active' AND u.id <> $1`,
+        [req.user.id]
+      );
+      for (const d of dirs) {
+        await queueNotification({
+          userId: d.id,
+          type: 'daily_report',
           content: `Daily report from ${req.user.name}`,
           meta: { reportId: rows[0].id, userId: req.user.id, routing },
         });
-      } else {
-        const { rows: dirs } = await query(
-          `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
-           WHERE r.name IN ('director', 'admin') AND u.status = 'active'`
-        );
-        for (const d of dirs) {
-          await queueNotification({
-            userId: d.id,
-            type: 'daily_report',
-            content: `Daily report from ${req.user.name}`,
-            meta: { reportId: rows[0].id, userId: req.user.id, routing },
-          });
-        }
       }
     }
 
@@ -741,3 +836,4 @@ router.post(
 );
 
 module.exports = router;
+module.exports.reportDirectorFor = reportDirectorFor;

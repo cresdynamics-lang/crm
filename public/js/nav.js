@@ -26,10 +26,17 @@ const CresNav = (() => {
     },
     {
       id: 'inbox',
-      label: 'Inbox',
+      label: 'Company inbox',
       href: '/inbox',
-      icon: '✉',
+      icon: '📥',
       rolesOnly: ['admin'],
+    },
+    {
+      id: 'mail',
+      label: 'Team mail',
+      href: '/mail',
+      icon: '✉',
+      rolesOnly: ['admin', 'director', 'sales', 'developer', 'finance', 'hr', 'pm'],
     },
     {
       id: 'meetings',
@@ -170,30 +177,6 @@ const CresNav = (() => {
       labelByRole: { finance: 'Financial reports' },
     },
     {
-      id: 'websites',
-      label: 'Websites',
-      href: '#/traffic',
-      icon: '◔',
-      anyOf: ['reports:view'],
-      rolesOnly: ['admin'],
-    },
-    {
-      id: 'traffic',
-      label: 'Website traffic',
-      href: '#/traffic',
-      icon: '◔',
-      anyOf: ['reports:view'],
-      rolesOnly: ['director'],
-    },
-    {
-      id: 'website-payments',
-      label: 'Event registrations',
-      href: '#/website-payments',
-      icon: '₡',
-      anyOf: ['payments:view', 'cash_flow:view'],
-      rolesOnly: ['finance'],
-    },
-    {
       id: 'system',
       label: 'Organization',
       href: '#/users',
@@ -242,7 +225,6 @@ const CresNav = (() => {
     const mine = /(?:\?|&)mine=1\b/.test(activeHref || '');
     const moneyPaths = ['#/finance', '#/invoices', '#/payments', '#/flag', '#/expenses', '#/billing'];
     const peoplePaths = ['#/employees', '#/leave', '#/salaries', '#/applicants', '#/onboarding'];
-    const websitePaths = ['#/traffic', '#/website-payments'];
     const systemPaths = ['#/users', '#/login-audit', '#/health', '#/organization', '#/email'];
     const payrollPaths = ['#/salaries', '#/salary-funding'];
     const billingPaths = ['#/invoices', '#/payments', '#/flag', '#/billing'];
@@ -258,7 +240,6 @@ const CresNav = (() => {
           ((item.id === 'money' || item.id === 'finance') && moneyPaths.includes(hrefPath)) ||
           (item.id === 'people' && peoplePaths.includes(hrefPath) && !mine) ||
           (item.id === 'salaries' && payrollPaths.includes(hrefPath) && !mine) ||
-          (item.id === 'websites' && websitePaths.includes(hrefPath)) ||
           (item.id === 'system' && systemPaths.includes(hrefPath)) ||
           (item.id === 'projects' && (hrefPath === '#/projects' || hrefPath === '#/timeline')) ||
           (item.id === 'pipeline' && (hrefPath === '#/leads' || hrefPath === '#/clients'));

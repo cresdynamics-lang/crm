@@ -804,3 +804,54 @@ body.shell-page {
     min-width: 120px;
   }
 }
+
+/* Phones: the grid must not grow past the screen, and the top bar must fit 360px */
+@media (max-width: 860px) {
+  .app-shell { grid-template-columns: minmax(0, 1fr); }
+  .main-content, .topbar { min-width: 0; }
+}
+@media (max-width: 600px) {
+  .topbar { padding: 0 10px; gap: 8px; }
+  .topbar-left { gap: 8px; min-width: 0; flex: 1 1 auto; }
+  .topbar-right { gap: 6px; min-width: 0; flex: 0 1 auto; }
+  .page-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1rem; }
+  .live-indicator .label { display: none; }
+  .live-indicator { padding: 4px 6px; }
+  .global-search-wrap { min-width: 0; width: 34vw; max-width: 140px; }
+  .profile-btn { padding: 2px; }
+  .main-content { padding-left: 12px; padding-right: 12px; }
+}
+
+
+.install-app-btn { padding: 6px 12px; font-size: 0.82rem; white-space: nowrap; }
+@media (max-width: 600px) { .install-app-btn { padding: 6px 8px; font-size: 0.75rem; } }
+
+.face-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 166, 35, 0.45);
+  background: rgba(245, 166, 35, 0.1);
+  font-size: 0.86rem;
+}
+
+/* ---- Compact top bar: avatar-only profile button, no Live badge / search ---- */
+.live-indicator[hidden], .global-search-wrap[hidden] { display: none !important; }
+.profile-btn { padding: 2px; border-radius: 50%; gap: 0; }
+.profile-btn .avatar { width: 30px; height: 30px; }
+.profile-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.profile-dropdown { min-width: 230px; }
+.profile-card { display: flex; align-items: center; gap: 10px; padding: 8px 8px 10px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.profile-card .profile-meta { display: flex !important; flex-direction: column; min-width: 0; }
+.profile-card .pname { font-weight: 600; font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-card .prole { font-size: 0.78rem; color: var(--text-muted); text-transform: capitalize; }
+.avatar.avatar-lg { width: 44px; height: 44px; font-size: 0.95rem; flex-shrink: 0; }
+.profile-link { display: block; padding: 8px 10px; border-radius: 6px; color: var(--text); font-size: 0.88rem; }
+.profile-link:hover { background: var(--bg-soft); text-decoration: none; }
+.hamburger { width: 32px !important; height: 32px !important; border-radius: 8px; }
+.hamburger span { width: 14px; margin: 2px 0; }

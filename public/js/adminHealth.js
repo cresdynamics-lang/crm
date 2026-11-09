@@ -1,5 +1,5 @@
 /**
- * Admin — system + website + CRM health monitor. Live socket feed from the sampler.
+ * Admin — system + CRM health monitor. Live socket feed from the sampler.
  */
 const CresAdminHealth = (() => {
   let chart = null;
@@ -59,14 +59,8 @@ const CresAdminHealth = (() => {
       `Last sampled ${fmtTime(d.asOf)} (${d.timezone}) · sampler runs every ~60s · live socket feed active`;
 
     const sys = d.system || {};
-    const websiteOk = okFor(d.groups.website);
     const crmOk = okFor(d.groups.crm);
     el('health-cards').innerHTML = `
-      <div class="settings-section" style="max-width:none;margin:0;padding:14px;">
-        <div class="kpi-label">Website</div>
-        <div style="margin-top:4px;">${pill(websiteOk ? 'up' : 'degraded')}</div>
-        <div class="meta" style="margin-top:6px;">${(d.groups.website || []).length} endpoints probed</div>
-      </div>
       <div class="settings-section" style="max-width:none;margin:0;padding:14px;">
         <div class="kpi-label">CRM API</div>
         <div style="margin-top:4px;">${pill(crmOk ? 'up' : 'degraded')}</div>
@@ -76,15 +70,9 @@ const CresAdminHealth = (() => {
         <div class="kpi-label">Server load</div>
         <div style="margin-top:4px;"><strong>${fnum(sys.load1)}</strong> load · mem <strong>${fnum(sys.memUsedPct, 0)}%</strong> · disk <strong>${fnum(sys.diskUsedPct, 0)}%</strong></div>
         <div class="meta" style="margin-top:6px;">${fnum(sys.memUsedMb, 0)} / ${fnum(sys.memTotalMb, 0)} MB · ${esc(sys.hostname || '')} · up ${fmtUptime(sys.uptimeSec)}</div>
-      </div>
-      <div class="settings-section" style="max-width:none;margin:0;padding:14px;">
-        <div class="kpi-label">Website DB bridge</div>
-        <div style="margin-top:4px;">${d.websiteDb?.ok ? pill('up') : pill('down')}</div>
-        <div class="meta" style="margin-top:6px;">crm_reader → cresdynamics</div>
       </div>`;
 
     const series = [
-      ...(d.groups.website || []).map((e) => ({ ...e, group: 'website' })),
       ...(d.groups.crm || []).map((e) => ({ ...e, group: 'crm' })),
     ];
     el('health-entities').innerHTML = series.map((e) => `

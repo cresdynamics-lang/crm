@@ -8,7 +8,6 @@ const config = {
   env: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT) || 3000,
   databaseUrl: process.env.DATABASE_URL,
-  websiteDatabaseUrl: process.env.WEBSITE_DATABASE_URL || '',
   redisUrl: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
   jwt: {
     secret: process.env.JWT_SECRET || 'dev-insecure-secret',

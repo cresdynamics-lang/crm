@@ -19,6 +19,7 @@
   let me = null;
   let socket = null;
   let iceServers = [{ urls: ['stun:stun.l.google.com:19302'] }];
+  let relayAvailable = false;
   let meeting = null;
 
   // Local media state
@@ -58,6 +59,11 @@
     try {
       const cfg = await CresAPI.request('/api/meetings/config');
       if (cfg.data?.iceServers?.length) iceServers = cfg.data.iceServers;
+      relayAvailable = Boolean(cfg.data?.relay);
+      // Relay logins last 12 hours: refresh them for very long sessions
+      setInterval(() => CresAPI.request('/api/meetings/config', { noCache: true }).then((c) => {
+        if (c.data?.iceServers?.length) iceServers = c.data.iceServers;
+      }).catch(() => {}), 6 * 3600 * 1000);
     } catch {
       /* defaults */
     }
@@ -392,6 +398,7 @@
       setView('room');
       renderSelfTile();
       audioCtx?.resume?.();
+      watchMicEnded();
       meters.delete('self');
       watchLevel('self', localStream.getAudioTracks()[0]);
       setMinutesState(Boolean(ack.minutesEnabled));
@@ -428,17 +435,31 @@
   }
 
   function newPc(socketId) {
-    const pc = new RTCPeerConnection({ iceServers });
+    // After repeated failures to find a direct path, go through our relay only.
+    const forceRelay = relayAvailable && Boolean(peers.get(socketId)?.forceRelay);
+    const pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: forceRelay ? 'relay' : 'all' });
     pc.onicecandidate = (e) => {
       if (e.candidate) socket.emit('meeting:signal', { meetingId, to: socketId, data: { candidate: e.candidate } });
     };
     pc.ontrack = (e) => {
       const peer = peers.get(socketId);
       if (!peer) return;
+      // Replace any older track of the same kind (renegotiation / ICE rebuild)
+      peer.stream.getTracks().filter((t) => t.kind === e.track.kind && t !== e.track).forEach((t) => peer.stream.removeTrack(t));
       if (!peer.stream.getTracks().includes(e.track)) peer.stream.addTrack(e.track);
-      const v = peer.tile?.querySelector('video');
-      if (v && v.srcObject !== peer.stream) v.srcObject = peer.stream;
-      if (e.track.kind === 'audio') watchLevel(socketId, e.track);
+      if (e.track.kind === 'audio') {
+        attachPeerAudio(peer, e.track);
+        meters.delete(socketId);
+        watchLevel(socketId, e.track);
+        e.track.onunmute = () => attachPeerAudio(peer, e.track);
+      } else {
+        const v = peer.tile?.querySelector('video');
+        if (v) {
+          // Re-assign so Safari picks up tracks added after the first assignment
+          v.srcObject = new MediaStream(peer.stream.getVideoTracks());
+          v.play?.().catch(() => {});
+        }
+      }
       paintTile(socketId);
     };
     pc.onconnectionstatechange = () => {
@@ -547,6 +568,7 @@
       if (peer.restarts > 3) {
         peer.pc.close();
         peer.restarts = 0;
+        peer.forceRelay = true; // rebuild through the TURN relay
         return callPeer(socketId);
       }
       const offer = await peer.pc.createOffer({ iceRestart: true });
@@ -595,7 +617,7 @@
     peers.set(p.socketId, peer);
     peer.tile = makeTile(p.socketId, p.name, false);
     $('room-grid').appendChild(peer.tile);
-    peer.tile.querySelector('video').srcObject = peer.stream;
+    peer.tile.querySelector('video').srcObject = new MediaStream();
     paintTile(p.socketId);
     layoutGrid();
     applyBitrate();
@@ -607,6 +629,11 @@
     if (!peer) return;
     peer.pc?.close();
     peer.tile?.remove();
+    if (peer.audioEl) {
+      peer.audioEl.pause();
+      peer.audioEl.srcObject = null;
+      peer.audioEl.remove();
+    }
     meters.delete(socketId);
     if (pinned === socketId) pinned = null;
     clearTimeout(peer.restartTimer);
@@ -639,7 +666,9 @@
     const el = document.createElement('div');
     el.className = `mt-tile${self ? ' self' : ''}`;
     el.dataset.id = id;
-    el.innerHTML = `<video autoplay playsinline ${self ? 'muted' : ''}></video>
+    // Video is always muted: each person's sound plays through its own <audio>
+    // element (see attachPeerAudio), so it keeps playing when their camera is off.
+    el.innerHTML = `<video autoplay playsinline muted></video>
       <div class="mt-tile-off"><span class="mt-av">${esc(initials(name))}</span></div>
       ${self ? '<div class="mt-presenting">🖥 You are presenting your screen</div>' : ''}
       <div class="mt-level" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
@@ -679,7 +708,7 @@
     peer.tile.querySelector('.mt-hand').hidden = !peer.hand;
     // Enforcement on the receiving side: someone the host muted is silent here
     // even if their own browser kept sending sound.
-    peer.tile.querySelector('video').muted = Boolean(peer.locked);
+    if (peer.audioEl) peer.audioEl.muted = Boolean(peer.locked);
     peer.stream.getVideoTracks().forEach((t) => {
       t.onunmute = () => paintTile(socketId);
       t.onmute = () => paintTile(socketId);
@@ -709,6 +738,96 @@
 
   let audioCtx = null;
   const meters = new Map(); // tile id -> { analyser, data }
+
+  // ----- Hearing other people -----
+  // Each person gets a hidden <audio> element. Browsers may block sound that
+  // starts without a tap (autoplay rules, mostly Safari / iPhone); when that
+  // happens we ask once with a "Turn on sound" button.
+  let soundBlocked = false;
+  let soundPromptShown = false;
+  const speakerId = ''; // reserved: speaker/headphone picker (setSinkId)
+
+  function audioHost() {
+    let el = document.getElementById('mt-audio-host');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'mt-audio-host';
+      el.hidden = true;
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+
+  function attachPeerAudio(peer, track) {
+    if (!peer.audioEl) {
+      peer.audioEl = document.createElement('audio');
+      peer.audioEl.autoplay = true;
+      peer.audioEl.setAttribute('playsinline', '');
+      audioHost().appendChild(peer.audioEl);
+    }
+    peer.audioEl.srcObject = new MediaStream([track]);
+    peer.audioEl.muted = Boolean(peer.locked);
+    if (speakerId && peer.audioEl.setSinkId) peer.audioEl.setSinkId(speakerId).catch(() => {});
+    playPeerAudio(peer);
+  }
+
+  function playPeerAudio(peer) {
+    const p = peer.audioEl?.play?.();
+    if (!p || !p.catch) return;
+    p.then(() => {
+      if (soundBlocked && [...peers.values()].every((x) => !x.audioEl || !x.audioEl.paused)) soundBlocked = false;
+    }).catch((err) => {
+      if (err?.name !== 'NotAllowedError') return;
+      soundBlocked = true;
+      if (soundPromptShown) return;
+      soundPromptShown = true;
+      toast("Your browser paused other people's sound.", [{ label: '🔊 Turn on sound', onClick: unlockSound }], 0);
+    });
+  }
+
+  function unlockSound() {
+    soundPromptShown = false;
+    audioCtx?.resume?.();
+    for (const peer of peers.values()) playPeerAudio(peer);
+  }
+
+  // Any tap in the room retries blocked sound.
+  document.addEventListener('pointerdown', () => {
+    if (inRoom && soundBlocked) unlockSound();
+  });
+
+  /** The mic stopped (unplugged headset, Bluetooth switch, OS took it): get it back. */
+  async function recoverMic() {
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ audio: AUDIO, video: false });
+      const track = s.getAudioTracks()[0];
+      localStream.getAudioTracks().forEach((t) => {
+        t.onended = null;
+        localStream.removeTrack(t);
+      });
+      localStream.addTrack(track);
+      watchMicEnded();
+      applyLocalEnabled();
+      meters.delete('self');
+      watchLevel('self', track);
+      await afterMediaChange();
+      toast('Microphone reconnected.');
+    } catch {
+      toast('Your microphone disconnected. Check it is plugged in and allowed, then press Unmute.');
+    }
+  }
+
+  function watchMicEnded() {
+    const t = localStream.getAudioTracks()[0];
+    if (t) t.onended = () => { if (inRoom) recoverMic(); };
+  }
+
+  if (navigator.mediaDevices?.addEventListener) {
+    navigator.mediaDevices.addEventListener('devicechange', () => {
+      const t = localStream.getAudioTracks()[0];
+      if (inRoom && (!t || t.readyState === 'ended')) recoverMic();
+    });
+  }
 
   function watchLevel(id, track) {
     if (!track || typeof AudioContext === 'undefined') return;
@@ -756,8 +875,24 @@
     localStream.getAudioTracks().forEach((t) => (t.enabled = micOn));
   }
 
-  function toggleMic() {
-    if (!localStream.getAudioTracks().length) return toast('No microphone available.');
+  async function toggleMic() {
+    if (!localStream.getAudioTracks().length || localStream.getAudioTracks()[0].readyState === 'ended') {
+      // Joined without a mic (or it was unplugged): ask for it again now.
+      if (myLocked) return toast('The host has muted you. Raise your hand to ask to speak.', [{ label: '✋ Raise hand', onClick: () => setHand(true) }]);
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ audio: AUDIO, video: false });
+        localStream.getAudioTracks().forEach((t) => localStream.removeTrack(t));
+        localStream.addTrack(s.getAudioTracks()[0]);
+        watchMicEnded();
+        micOn = true;
+        applyLocalEnabled();
+        meters.delete('self');
+        watchLevel('self', localStream.getAudioTracks()[0]);
+        return afterMediaChange();
+      } catch {
+        return toast('No microphone is available. Allow microphone access in the browser (the lock icon by the address), then press Unmute again.');
+      }
+    }
     if (myLocked && !micOn) {
       return toast('The host has muted you. Raise your hand to ask to speak.', [{ label: '✋ Raise hand', onClick: () => setHand(true) }]);
     }
@@ -1212,7 +1347,7 @@
       el.appendChild(row);
     }
     $('toasts').appendChild(el);
-    setTimeout(() => el.remove(), ms);
+    if (ms > 0) setTimeout(() => el.remove(), ms); // ms = 0 stays until a button is pressed
   }
 
   bindList();

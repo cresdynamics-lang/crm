@@ -53,6 +53,76 @@ const CresMyWork = (() => {
     }
   }
 
+
+  const REPORT_GAP_HOURS = 12;
+
+  async function mountDelayBlock(me, latestReportAt) {
+    const block = document.getElementById('report-delay-block');
+    if (!block) return;
+    const isReporter = ['sales', 'developer'].includes(me.role);
+    block.hidden = !isReporter;
+    if (!isReporter) return;
+
+    const banner = document.getElementById('report-delay-banner');
+    const hours = latestReportAt
+      ? Math.floor((Date.now() - new Date(latestReportAt).getTime()) / 3600000)
+      : null;
+    if (banner) {
+      const late = hours === null || hours >= REPORT_GAP_HOURS;
+      banner.hidden = !late;
+      banner.textContent = hours === null
+        ? 'You have not sent a daily report yet. Send it above, or file why it is late below.'
+        : `No daily report from you in the last ${hours} hours. Send it above, or file why it is late below.`;
+    }
+
+    const hist = document.getElementById('report-delay-history');
+    if (hist) {
+      try {
+        const res = await CresAPI.request('/api/reports/delay-notes?mine=1');
+        const rows = (res.data || []).slice(0, 5);
+        hist.innerHTML = rows.length
+          ? `<div style="color:var(--text-muted);margin-bottom:4px;">Your recent delay reasons</div>` +
+            rows
+              .map(
+                (n) => `<div style="padding:6px 0;border-top:1px solid var(--border);">
+                  <span class="meta">${esc(CresFormat.datetime(n.created_at))}</span> · ${esc(n.reason)}${
+                  n.already_communicated ? ` <span class="meta">(told ${esc(n.communicated_to || '')})</span>` : ''
+                }</div>`
+              )
+              .join('')
+          : '';
+      } catch {
+        hist.innerHTML = '';
+      }
+    }
+  }
+
+  async function submitDelay(e) {
+    e.preventDefault();
+    const el = document.getElementById('report-delay-flash');
+    const show = (msg, ok = true) => {
+      if (!el) return;
+      el.textContent = msg;
+      el.className = `flash visible ${ok ? 'ok' : 'err'}`;
+      setTimeout(() => el.classList.remove('visible'), 3600);
+    };
+    const reason = document.getElementById('report-delay-reason').value.trim();
+    const told = document.getElementById('report-delay-told').checked;
+    const who = document.getElementById('report-delay-who')?.value.trim();
+    try {
+      await CresAPI.request('/api/reports/delay-notes', {
+        method: 'POST',
+        body: { reason, already_communicated: told, communicated_to: told ? who : null },
+      });
+      e.target.reset();
+      document.getElementById('report-delay-who-wrap').hidden = true;
+      show('Delay reason filed. The Director has it and it stays on record.');
+      await mountReports(CresAPI.getUser());
+    } catch (err) {
+      show(err.message, false);
+    }
+  }
+
   async function mountReports(me) {
     const list = document.getElementById('reports-list');
     const section = document.getElementById('work-report-section');
@@ -69,6 +139,10 @@ const CresMyWork = (() => {
       const qs = ['sales', 'developer'].includes(me.role) ? '' : '?mine=1';
       const res = await CresAPI.request(`/api/reports${qs}`);
       const rows = res.data || [];
+      const mineLatest = rows
+        .filter((r) => !r.user_id || r.user_id === me.id)
+        .reduce((max, r) => (!max || new Date(r.created_at) > new Date(max) ? r.created_at : max), null);
+      mountDelayBlock(me, mineLatest).catch(() => {});
       list.innerHTML = rows.length
         ? rows
             .map((r) => {
@@ -185,6 +259,17 @@ const CresMyWork = (() => {
     if (form && !form.dataset.workBound) {
       form.dataset.workBound = '1';
       form.addEventListener('submit', (e) => submitReport(e).catch((err) => flash(err.message, false)));
+    }
+    const delayForm = document.getElementById('report-delay-form');
+    if (delayForm && !delayForm.dataset.workBound) {
+      delayForm.dataset.workBound = '1';
+      delayForm.addEventListener('submit', submitDelay);
+      document.getElementById('report-delay-told')?.addEventListener('change', (ev) => {
+        const wrap = document.getElementById('report-delay-who-wrap');
+        if (wrap) wrap.hidden = !ev.target.checked;
+        const who = document.getElementById('report-delay-who');
+        if (who) who.required = ev.target.checked;
+      });
     }
     const btnNewReport = document.getElementById('btn-new-report');
     const reportForm = document.getElementById('report-form');

@@ -1,0 +1,69 @@
+/* ---- Pop-up notifications (CresToast) ---- */
+.cres-toasts {
+  position: fixed;
+  right: 16px;
+  top: calc(var(--topbar-h, 56px) + 12px);
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(380px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.cres-toast {
+  pointer-events: auto;
+  display: grid;
+  grid-template-columns: 22px 1fr 24px;
+  gap: 10px;
+  align-items: start;
+  padding: 12px 12px 12px 14px;
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: 0.88rem;
+  line-height: 1.4;
+  animation: cres-toast-in 0.22s ease-out;
+}
+.cres-toast.success { border-left-color: var(--success); }
+.cres-toast.error { border-left-color: var(--danger); }
+.cres-toast.warning { border-left-color: var(--warning); }
+.cres-toast.leaving { opacity: 0; transform: translateY(-6px); transition: opacity 0.2s, transform 0.2s; }
+.cres-toast-icon { width: 20px; height: 20px; margin-top: 1px; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke: var(--accent); }
+.cres-toast.success .cres-toast-icon { stroke: var(--success); }
+.cres-toast.error .cres-toast-icon { stroke: var(--danger); }
+.cres-toast.warning .cres-toast-icon { stroke: var(--warning); }
+.cres-toast-title { font-weight: 600; }
+.cres-toast-detail { color: var(--text-muted); margin-top: 2px; overflow-wrap: anywhere; white-space: pre-line; }
+.cres-toast-action {
+  margin-top: 8px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.cres-toast-action:hover { border-color: var(--accent); }
+.cres-toast-close {
+  background: none;
+  border: 0;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.cres-toast-close:hover { color: var(--text); }
+button.is-busy { opacity: 0.7; cursor: progress; }
+@keyframes cres-toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+@media (max-width: 600px) {
+  .cres-toasts { right: 12px; left: 12px; top: calc(var(--topbar-h, 56px) + 8px); width: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cres-toast { animation: none; }
+}

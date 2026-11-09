@@ -391,14 +391,14 @@ const CresDirector = (() => {
             micBtn.textContent = '\uD83C\uDF99 Speak';
             micBtn.classList.remove('btn-danger');
             const blob = await new Promise((res) => {
-              rRec.onstop = () => { rStream?.getTracks().forEach((t) => t.stop()); res(new Blob(rChunks, { type: 'audio/webm' })); };
+              rRec.onstop = () => { rStream?.getTracks().forEach((t) => t.stop()); res(new Blob(rChunks, { type: CresAudio.blobType(rRec) })); };
               rRec.stop();
             });
             rChunks = [];
             if (!blob || blob.size < 500) return;
             micBtn.disabled = true; micBtn.textContent = '...';
             try {
-              const fd = new FormData(); fd.append('audio', blob, `remark-${Date.now()}.webm`);
+              const fd = new FormData(); fd.append('audio', blob, `remark-${Date.now()}.${CresAudio.ext(blob.type)}`);
               const r = await CresAPI.request('/api/reports/voice-capture', { method: 'POST', body: fd });
               if (r.ok && r.data?.content) ta.value = (ta.value ? ta.value + '\n' : '') + r.data.content;
             } catch { /* ignore */ }
@@ -406,9 +406,9 @@ const CresDirector = (() => {
             return;
           }
           try {
-            rStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            rStream = await CresAudio.mic();
             rChunks = [];
-            rRec = new MediaRecorder(rStream, { mimeType: 'audio/webm;codecs=opus' });
+            rRec = CresAudio.recorder(rStream);
             rRec.ondataavailable = (e) => { if (e.data.size > 0) rChunks.push(e.data); };
             rRec.start();
             micBtn.textContent = '\u23F9 Stop'; micBtn.classList.add('btn-danger');

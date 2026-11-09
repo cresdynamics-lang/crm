@@ -156,8 +156,8 @@
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+      const stream = await CresAudio.mic();
+      const recorder = CresAudio.recorder(stream);
       const chunks = [];
       recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
 
@@ -168,13 +168,13 @@
 
       recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const blob = new Blob(chunks, { type: CresAudio.blobType(recorder) });
         if (blob.size < 500) { flash(flashEl, 'Recording too short', false); return; }
 
         const title = document.getElementById('ingest-title')?.value.trim() || `Voice note — ${CresFormat.date(new Date())}`;
         const category = document.getElementById('ingest-category')?.value || 'general';
         const fd = new FormData();
-        fd.append('audio', blob, `voice-${Date.now()}.webm`);
+        fd.append('audio', blob, `voice-${Date.now()}.${CresAudio.ext(blob.type)}`);
         fd.append('title', title);
         fd.append('category', category);
 

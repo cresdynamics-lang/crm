@@ -24,7 +24,13 @@ router.get(
       `SELECT * FROM notifications ${where} ORDER BY created_at DESC LIMIT 100`,
       params
     );
-    res.json({ ok: true, data: rows });
+    // The real unread total (the list is capped at 100, the count is not)
+    const { rows: c } = await query(
+      `SELECT COUNT(*)::int AS unread FROM notifications WHERE user_id = $1 AND read_at IS NULL`,
+      [req.user.id]
+    );
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ ok: true, data: rows, meta: { unread: c[0].unread } });
   })
 );
 

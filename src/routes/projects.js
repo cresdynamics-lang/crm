@@ -18,6 +18,7 @@ const {
   progressPercent,
   newlyCompletedMilestones,
   MS_STATUSES,
+  describeMilestoneChanges,
 } = require('../services/milestones');
 const { transcribeAudio } = require('../services/voiceLeads');
 const { groqChat } = require('../services/groq');
@@ -907,37 +908,56 @@ router.patch(
           meta: { projectId: project.id, milestones: titles },
         });
       }
+    }
 
+    // Any client-visible milestone change -> email the client (one email per save)
+    const msChanges = nextMilestones !== undefined
+      ? describeMilestoneChanges(before.milestones, after.milestones)
+      : [];
+    if (msChanges.length) {
       const client = await loadClient(project.client_id);
       if (client?.email) {
-        const subject = `Milestone update: ${project.name}`;
+        const pct = progressPercent(after.milestones);
+        const subject = msChanges.length === 1 && msChanges[0].kind === 'completed'
+          ? `Milestone completed: ${project.name}`
+          : `Project update: ${project.name}`;
         const body = [
           `Hello${client.name ? ` ${client.name}` : ''},`,
           '',
-          msg,
+          `There is an update on your project "${project.name}":`,
           '',
-          'Please review the progress in your client portal when convenient.',
+          ...msChanges.map((c) => `- ${c.text}`),
           '',
-          '— Cres Dynamics',
+          `Overall progress: ${pct}% of milestones completed.`,
+          '',
+          'You can follow progress in your client portal. Reply to this email if you have any questions.',
+          '',
+          '- Cres Dynamics',
         ].join('\n');
-        const { rows: emailRows } = await query(
-          `INSERT INTO outbound_emails (sent_by, client_id, to_email, subject, body, status)
-           VALUES ($1, $2, $3, $4, $5, 'queued')
-           RETURNING id`,
-          [req.user.id, project.client_id, client.email, subject, body]
-        );
-        await queueOutboundClientEmail({
-          emailId: emailRows[0].id,
-          to: client.email,
-          subject,
-          body,
-        });
-        await queueNotification({
-          userId: project.created_by,
-          type: 'milestone_client_emailed',
-          content: `Client emailed about completed milestone(s) on "${project.name}"`,
-          meta: { projectId: project.id, emailId: emailRows[0].id },
-        }).catch(() => {});
+        try {
+          const { rows: emailRows } = await query(
+            `INSERT INTO outbound_emails (sent_by, client_id, to_email, subject, body, status)
+             VALUES ($1, $2, $3, $4, $5, 'queued')
+             RETURNING id`,
+            [req.user.id, project.client_id, client.email, subject, body]
+          );
+          await queueOutboundClientEmail({
+            emailId: emailRows[0].id,
+            to: client.email,
+            subject,
+            body,
+          });
+          if (project.created_by) {
+            await queueNotification({
+              userId: project.created_by,
+              type: 'milestone_client_emailed',
+              content: `Client emailed about ${msChanges.length} milestone change(s) on "${project.name}"`,
+              meta: { projectId: project.id, emailId: emailRows[0].id },
+            }).catch(() => {});
+          }
+        } catch (err) {
+          console.warn('[projects] milestone client email failed to queue', err.message);
+        }
       }
     }
 

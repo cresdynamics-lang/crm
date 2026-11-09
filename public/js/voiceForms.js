@@ -73,9 +73,9 @@
   }
 
   async function startRecording() {
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaStream = await CresAudio.mic();
     audioChunks = [];
-    recorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm;codecs=opus' });
+    recorder = CresAudio.recorder(mediaStream);
     recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
     recorder.start();
     elapsed = 0;
@@ -92,7 +92,7 @@
       recorder.onstop = () => {
         clearInterval(timerInterval);
         if (mediaStream) { mediaStream.getTracks().forEach((t) => t.stop()); mediaStream = null; }
-        const blob = new Blob(audioChunks, { type: 'audio/webm' });
+        const blob = new Blob(audioChunks, { type: CresAudio.blobType(recorder) });
         audioChunks = [];
         resolve(blob);
       };
@@ -102,7 +102,7 @@
 
   async function transcribeAndParse(blob) {
     const fd = new FormData();
-    fd.append('audio', blob, `voice-form-${Date.now()}.webm`);
+    fd.append('audio', blob, `voice-form-${Date.now()}.${CresAudio.ext(blob.type)}`);
     const res = await withTimeout(
       CresAPI.request(currentEndpoint(), {
         method: 'POST',

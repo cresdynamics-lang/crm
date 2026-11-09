@@ -412,6 +412,119 @@ async function alertStaleLeads() {
   return { flagged: rows.length, notifications: sent };
 }
 
+/**
+ * Sales + developers who have not sent a daily report in the last 12 hours get
+ * an in-app reminder and an email, at most once every 12 hours, during working
+ * hours (Mon-Sat, 08:00-20:00 Nairobi). The reminder asks them to send the report,
+ * or to file why it is late (and whether they already told their PM / Director).
+ */
+const REPORT_GAP_HOURS = 12;
+
+function nairobiClock(now = new Date()) {
+  const nrb = new Date(now.getTime() + 3 * 3600 * 1000);
+  return { hour: nrb.getUTCHours(), weekday: nrb.getUTCDay() };
+}
+
+function reportReminderWindowOpen(now = new Date()) {
+  const { hour, weekday } = nairobiClock(now);
+  return weekday !== 0 && hour >= 8 && hour < 20;
+}
+
+async function remindMissingReports({ now = new Date(), force = false } = {}) {
+  if (!force && !reportReminderWindowOpen(now)) return { skipped: 'outside_hours' };
+
+  const { rows } = await query(
+    `SELECT u.id, u.name, u.email, r.name AS role,
+            lr.last_report_at,
+            FLOOR(EXTRACT(EPOCH FROM (NOW() - COALESCE(lr.last_report_at, u.created_at))) / 3600)::int AS hours_since
+       FROM users u
+       JOIN roles r ON r.id = u.role_id
+       LEFT JOIN LATERAL (
+         SELECT MAX(d.created_at) AS last_report_at FROM daily_reports d WHERE d.user_id = u.id
+       ) lr ON TRUE
+      WHERE r.name IN ('sales', 'developer')
+        AND u.status = 'active'
+        AND COALESCE(lr.last_report_at, u.created_at) < NOW() - make_interval(hours => $1)
+        AND NOT EXISTS (
+          SELECT 1 FROM report_reminder_log l
+           WHERE l.user_id = u.id AND l.sent_at > NOW() - make_interval(hours => $1)
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM leave_requests lv
+            JOIN employees e ON e.id = lv.employee_id
+           WHERE e.user_id = u.id AND lv.status = 'approved'
+             AND (NOW() AT TIME ZONE 'Africa/Nairobi')::date BETWEEN lv.start_date AND lv.end_date
+        )`,
+    [REPORT_GAP_HOURS]
+  );
+
+  const root = (process.env.PUBLIC_WEB_URL || 'https://cresos.cresdynamics.com').replace(/\/$/, '');
+  const link = `${root}/dashboard#/work`;
+  let reminded = 0;
+  let emailed = 0;
+
+  for (const u of rows) {
+    // Claim the slot first so two processes never double-send
+    const { rows: logRows } = await query(
+      `INSERT INTO report_reminder_log (user_id, last_report_at, hours_since)
+       SELECT $1, $2, $3
+        WHERE NOT EXISTS (
+          SELECT 1 FROM report_reminder_log l
+           WHERE l.user_id = $1 AND l.sent_at > NOW() - make_interval(hours => $4)
+        )
+       RETURNING id`,
+      [u.id, u.last_report_at, u.hours_since, REPORT_GAP_HOURS]
+    );
+    const reminderId = logRows[0]?.id;
+    if (!reminderId) continue;
+
+    const since = u.last_report_at
+      ? `in the last ${u.hours_since} hours`
+      : 'yet';
+    const content = `You have not sent a daily report ${since}. Send it now, or file why it is late (and say if you already told your PM or Director).`;
+
+    await queueNotification({
+      userId: u.id,
+      type: 'report_reminder',
+      content,
+      meta: { reminderId, hoursSince: u.hours_since, href: '#/work', action: 'Open My work to send your report or file the reason for the delay.' },
+    }).catch((e) => console.error('[ops] report reminder notify failed', e.message));
+    reminded += 1;
+
+    if (u.email) {
+      const first = String(u.name || '').trim().split(/\s+/)[0] || 'there';
+      const body = [
+        `Hi ${first},`,
+        '',
+        `CRES OS has no daily report from you ${since}.`,
+        '',
+        'Please do one of these now:',
+        '1. Send your daily report.',
+        '2. If you already told your PM or Director about the delay, file it in CRES OS so it is on record.',
+        '3. If you have not told anyone yet, explain the delay in CRES OS - it goes straight to the Director.',
+        '',
+        `Open My work: ${link}`,
+        '',
+        '- Cres Dynamics',
+      ].join('\n');
+      try {
+        const { enqueue } = require('../queues');
+        await enqueue('email', 'report.reminder', {
+          to: u.email,
+          subject: 'Reminder: your daily report is overdue',
+          body,
+          reminderId,
+        });
+        await query(`UPDATE report_reminder_log SET emailed = TRUE WHERE id = $1`, [reminderId]);
+        emailed += 1;
+      } catch (e) {
+        console.error('[ops] report reminder email failed', e.message);
+      }
+    }
+  }
+  return { candidates: rows.length, reminded, emailed };
+}
+
 async function runOpsJobs() {
   const overdue = await markOverdueInvoices().catch((e) => {
     console.error('[ops] overdue failed', e.message);
@@ -440,7 +553,11 @@ async function runOpsJobs() {
     console.error('[ops] stale leads failed', e.message);
     return { flagged: 0, error: e.message };
   });
-  return { overdue, penaltyCycle, followups, assignments, leadMails, stale, at: new Date().toISOString() };
+  const reportReminders = await remindMissingReports().catch((e) => {
+    console.error('[ops] report reminders failed', e.message);
+    return { reminded: 0, error: e.message };
+  });
+  return { overdue, penaltyCycle, followups, assignments, leadMails, stale, reportReminders, at: new Date().toISOString() };
 }
 
 function startOpsScheduler(intervalMs = 5 * 60 * 1000) {
@@ -476,6 +593,8 @@ function startOpsScheduler(intervalMs = 5 * 60 * 1000) {
 
 module.exports = {
   runOpsJobs,
+  remindMissingReports,
+  reportReminderWindowOpen,
   markOverdueInvoices,
   alertFollowUpsDue,
   sendDueLeadMessages,

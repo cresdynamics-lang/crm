@@ -43,14 +43,17 @@ const CresSettings = (() => {
   }
 
   function paintShellAvatar(user) {
-    const el = document.getElementById('profile-avatar');
-    if (!el || !user) return;
-    if (user.avatar_url) {
-      el.classList.add('has-photo');
-      el.innerHTML = `<img src="${escAttr(user.avatar_url)}" alt="" />`;
-    } else {
-      el.classList.remove('has-photo');
-      el.textContent = initials(user.name);
+    if (!user) return;
+    for (const id of ['profile-avatar', 'profile-card-avatar']) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      if (user.avatar_url) {
+        el.classList.add('has-photo');
+        el.innerHTML = `<img src="${escAttr(user.avatar_url)}" alt="" />`;
+      } else {
+        el.classList.remove('has-photo');
+        el.textContent = initials(user.name);
+      }
     }
   }
 

@@ -60,3 +60,84 @@
 .ib-list-pane, .ib-list { min-width: 0; overflow-x: hidden; }
 .ib-item, .ib-item-top { min-width: 0; }
 .ib-from { min-width: 0; flex: 1; }
+
+/* ---- Live inbox, bulk actions, scam (2026-11-09) ---- */
+.ib-tabs { flex-wrap: wrap; }
+.ib-tabs [data-count]:not(:empty) { margin-left: 2px; padding: 0 6px; border-radius: 999px; background: var(--bg-soft); font-size: 0.66rem; }
+.ib-toolbar2 { gap: 8px; padding: 8px 12px; }
+.ib-toolbar2 input[type="search"] { flex: 1; min-width: 0; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 0.8rem; }
+.ib-live { display: inline-flex; align-items: center; gap: 5px; font-size: 0.7rem; color: var(--text-muted); white-space: nowrap; }
+.ib-live i { width: 8px; height: 8px; border-radius: 50%; background: var(--live-off, #8b9aab); }
+.ib-live.on i { background: var(--success, #3cb371); box-shadow: 0 0 0 3px rgba(60, 179, 113, 0.2); }
+.ib-bulk { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 0.78rem; }
+.ib-check-all { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text-muted); }
+.ib-bulk-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.ib-bulk-actions[hidden] { display: none; }
+.ib-item { grid-template-columns: 22px minmax(0, 1fr); column-gap: 6px; }
+.ib-item > .ib-pick { grid-row: 1 / span 4; padding-top: 2px; }
+.ib-item > :not(.ib-pick) { grid-column: 2; }
+.ib-item.picked { background: var(--accent-soft); }
+.ib-item.scam .ib-subj::before { content: '⚠ '; color: var(--warning, #f5a623); }
+.ib-chip.scam { background: rgba(245, 166, 35, 0.16); color: var(--warning, #f5a623); }
+.ib-chip.declined { color: var(--warning, #f5a623); }
+.ib-chip.deleted { color: var(--danger, #e05a5a); }
+.mt-btn.danger { color: var(--danger, #e05a5a); }
+.ib-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-bottom: 10px; }
+.ib-actions [hidden] { display: none; }
+.ib-scam { margin-bottom: 12px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(245, 166, 35, 0.5); background: rgba(245, 166, 35, 0.1); font-size: 0.8rem; }
+.ib-scam[hidden] { display: none; }
+.ib-scam ul { margin: 6px 0 0; padding-left: 18px; }
+.ib-buttons { flex-wrap: wrap; }
+.ib-buttons [hidden] { display: none; }
+.ib-grow { flex: 1; }
+.ib-back { display: none; margin-bottom: 8px; }
+.ib-reply.declining { border-color: rgba(245, 166, 35, 0.6); }
+@media (max-width: 820px) {
+  .ib-back { display: inline-flex; }
+  .ib-main.reading .ib-list-pane { display: none; }
+  .ib-main:not(.reading) .ib-detail { display: none; }
+  .ib-list-pane { max-height: none; }
+  .ib-detail { padding: 14px 12px 40px; }
+  .ib-tabs button { padding: 4px 7px; }
+}
+
+/* ---- Forward dialog (shared with Team mail) ---- */
+.fw-backdrop { position: fixed; inset: 0; z-index: 9000; background: rgba(0, 0, 0, 0.55); display: grid; place-items: center; padding: 16px; }
+.fw-modal { width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 14px; padding: 16px; display: grid; gap: 8px; }
+.fw-head { display: flex; justify-content: space-between; align-items: center; }
+.fw-head h3 { margin: 0; font-size: 1rem; }
+.fw-hint { margin: 0; font-size: 0.78rem; color: var(--text-muted); }
+.fw-label { font-size: 0.74rem; color: var(--text-muted); margin-top: 4px; }
+.fw-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.fw-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 0.8rem; cursor: pointer; }
+.fw-chip span, .fw-people span { color: var(--text-muted); font-size: 0.72rem; text-transform: capitalize; }
+.fw-people { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 4px 10px; max-height: 140px; overflow: auto; font-size: 0.82rem; }
+.fw-people label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.fw-modal input[type="text"], .fw-modal input[type="email"], .fw-modal textarea { width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit; font-size: 0.85rem; }
+.fw-modal textarea { resize: vertical; min-height: 120px; max-height: 40vh; }
+.fw-actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; margin-top: 6px; }
+.fw-err { flex: 1; color: var(--danger, #e05a5a); font-size: 0.8rem; }
+
+/* ---- Compact reading: the email and the draft each scroll in their own box ---- */
+.ib-detail { display: flex; flex-direction: column; }
+.ib-body { max-height: 34vh; min-height: 80px; overflow: auto; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); margin: 12px 0; }
+.ib-attach { max-height: 22vh; overflow: auto; }
+#ib-draft-body, .ml-draft { min-height: 140px; height: 200px; max-height: 38vh; overflow: auto; resize: vertical; }
+.ib-sent { max-height: 30vh; overflow: auto; }
+.ib-summary { max-height: 12vh; overflow: auto; }
+.ib-att { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.ib-att .mt-muted { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ib-att button { flex-shrink: 0; }
+.ib-routed { font-size: 0.74rem; color: var(--accent); }
+
+/* ---- Team mail page ---- */
+.ml-explain { margin: 0; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.ml-from { font-style: italic; }
+.fw-backdrop[hidden] { display: none; }
+.ib-item .ib-chip.auto { background: var(--accent-soft); color: var(--accent); }
+.ml-page .ib-item { grid-template-columns: minmax(0, 1fr); }
+.ml-page .ib-item > :not(.ib-pick) { grid-column: 1; }
+@media (max-width: 600px) {
+  #ml-identity, #ib-mailbox { display: none; }
+  .mt-brand span { white-space: nowrap; font-size: 0.9rem; }
+}

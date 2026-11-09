@@ -93,6 +93,9 @@ router.post(
         buffer: req.file.buffer,
         filename: req.file.originalname,
         mimetype: req.file.mimetype,
+        prompt:
+          'Kenyan sales agent narrating a list of business leads. ' +
+          'Contains business names, phone numbers like 0712 345 678 or 254712345678, and business descriptions.',
       });
       transcript = result.text;
       whisperModel = result.model;
