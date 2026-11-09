@@ -87,23 +87,25 @@ function addresses(list) {
   return list.value.map((a) => a.address).filter(Boolean);
 }
 
-async function syncAdminInbox({ limit = 20 } = {}) {
+/**
+ * Sync new mail into the inbox. Pass `client` (the live watcher's open
+ * connection) to reuse it: the mail provider closes an existing connection
+ * when a second one logs in, so the watcher must never open a second one.
+ */
+async function syncAdminInbox({ limit = 20, client: shared = null } = {}) {
   const { host, port, user, password, secure } = config.imap;
   if (!host || !user || !password) {
     throw new Error('IMAP is not configured (IMAP_HOST / IMAP_USER / IMAP_PASSWORD)');
   }
 
-  const client = new ImapFlow({
-    host,
-    port,
-    secure,
-    auth: { user, pass: password },
-    logger: false,
-  });
+  const ownConnection = !(shared && shared.usable);
+  const client = ownConnection
+    ? new ImapFlow({ host, port, secure, auth: { user, pass: password }, logger: false })
+    : shared;
 
   // Download first, process after: the slow part (PDF summaries) happens with
-  // the mailbox connection already closed, so the server cannot time it out.
-  await client.connect();
+  // the mailbox connection already released, so the server cannot time it out.
+  if (ownConnection) await client.connect();
   const fresh = [];
   try {
     const lock = await client.getMailboxLock('INBOX');
@@ -126,7 +128,7 @@ async function syncAdminInbox({ limit = 20 } = {}) {
       lock.release();
     }
   } finally {
-    await client.logout().catch(() => {});
+    if (ownConnection) await client.logout().catch(() => {});
   }
 
   let synced = 0;
@@ -145,6 +147,9 @@ async function syncAdminInbox({ limit = 20 } = {}) {
       const attachmentSummaries = await summarizeAttachments(parsed);
       const bodyText = parsed.text || parsed.html?.replace(/<[^>]+>/g, ' ') || '';
       const replyTo = parsed.replyTo?.value?.[0]?.address || null;
+      const inReplyTo = parsed.inReplyTo ? String(parsed.inReplyTo).slice(0, 500) : null;
+      const refIds = (Array.isArray(parsed.references) ? parsed.references : parsed.references ? [parsed.references] : [])
+        .map((r) => String(r).slice(0, 500)).slice(0, 30);
       const scam = assessScam({
         fromEmail,
         fromName,
@@ -159,8 +164,8 @@ async function syncAdminInbox({ limit = 20 } = {}) {
            (imap_uid, message_id, from_email, from_name, to_emails, cc_emails,
             subject, body_text, body_html, received_at, has_attachments,
             attachment_summaries, status, ai_draft, ai_summary,
-            reply_to_email, scam_score, scam_reasons, is_scam)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16,$17,$18::jsonb,$19)
+            reply_to_email, scam_score, scam_reasons, is_scam, in_reply_to, reference_ids)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16,$17,$18::jsonb,$19,$20,$21)
          ON CONFLICT DO NOTHING
          RETURNING id, from_email, from_name, subject, is_scam, scam_score`,
         [
@@ -183,6 +188,8 @@ async function syncAdminInbox({ limit = 20 } = {}) {
           scam.score,
           JSON.stringify(scam.reasons),
           scam.likely,
+          inReplyTo,
+          refIds,
         ]
       );
       if (ins[0]) {

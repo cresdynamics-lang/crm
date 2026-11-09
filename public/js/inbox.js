@@ -214,7 +214,7 @@
       <span class="mt-muted"> · ${esc(new Date(m.received_at || m.created_at).toLocaleString())}</span>
       ${m.reply_to_email && m.reply_to_email !== m.from_email ? `<div class="mt-muted small">Reply-To: ${esc(m.reply_to_email)}</div>` : ''}
       ${cc ? `<div class="mt-muted small">Cc: ${esc(cc)}</div>` : ''}
-      ${m.routed_to ? '<div class="ib-routed">↪ Also routed to the staff member who emailed this person</div>' : ''}`;
+      ${m.routed_to ? `<div class="ib-routed">↪ Auto-forwarded to ${esc(m.routed_to_name || 'the staff member who emailed this person')}${m.routed_by === 'header' ? ' (matched the email thread)' : m.routed_by === 'reference' ? ' (matched the Ref code)' : m.routed_by === 'sender' ? ' (matched the sender)' : ''}</div>` : ''}`;
 
     const reasons = Array.isArray(m.scam_reasons) ? m.scam_reasons : [];
     $('ib-scam').hidden = !(m.is_scam || m.scam_score >= 40);

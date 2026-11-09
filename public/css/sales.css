@@ -398,6 +398,25 @@ body.modal-open {
   white-space: pre-wrap;
 }
 
+/* Daily reports hub: preview wraps; full text opens in the modal */
+.reports-table td.report-cell,
+.reports-table td.remarks-cell {
+  white-space: normal;
+  max-width: 280px;
+  vertical-align: top;
+}
+.reports-table .report-preview {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.reports-table tbody tr[data-open-report] {
+  cursor: pointer;
+}
+
 .empty-state {
   padding: 28px;
   text-align: center;

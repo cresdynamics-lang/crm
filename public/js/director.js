@@ -5,6 +5,18 @@ const CresDirector = (() => {
   let chart;
   let analyticsChart = null;
   let approvalId = null;
+  let directorReportCache = [];
+  let viewingReportId = null;
+
+  const REPORT_QUESTIONS = [
+    { key: 'work_done', fallback: 'content', label: 'Done today' },
+    { key: 'blockers_text', label: 'Blocked by' },
+    { key: 'needs_attention', label: "Tomorrow's top 3" },
+    { key: 'hard_today', label: 'What was hard this week' },
+    { key: 'easy_today', label: 'What was easy this week' },
+    { key: 'happiness', label: 'What made you feel part of the team' },
+    { key: 'concerns', label: 'Anything on your mind' },
+  ];
 
   function esc(str) {
     return String(str ?? '')
@@ -272,6 +284,68 @@ const CresDirector = (() => {
     // handled by CresTasks.bind()
   }
 
+  function reportAnswer(r, q) {
+    return String(r[q.key] || (q.fallback ? r[q.fallback] : '') || '').trim();
+  }
+
+  function reportPreviewText(r) {
+    const primary = reportAnswer(r, REPORT_QUESTIONS[0]) || String(r.content || '').trim();
+    return primary.replace(/\s+/g, ' ').slice(0, 180);
+  }
+
+  function openDirectorReport(id) {
+    const r = directorReportCache.find((x) => x.id === id);
+    const modal = document.getElementById('director-report-view-modal');
+    const body = document.getElementById('director-report-view-body');
+    const title = document.getElementById('director-report-view-title');
+    const remarksBlock = document.getElementById('director-report-remarks-block');
+    const remarksInput = document.getElementById('director-report-remarks');
+    if (!r || !modal || !body) return;
+    viewingReportId = id;
+    if (title) title.textContent = `${r.author_name || 'Report'} · ${r.author_role || ''}`;
+
+    const qa = REPORT_QUESTIONS.map((q) => {
+      const val = reportAnswer(r, q);
+      if (!val) return '';
+      return `<dt>${esc(q.label)}</dt><dd>${esc(val)}</dd>`;
+    }).join('');
+
+    body.innerHTML = `
+      <div class="meta" style="margin-bottom:8px;">
+        ${CresFormat.datetime(r.created_at)}
+        ${r.project_name ? ` · ${esc(r.project_name)}` : ''}
+        · ${statusPill(r.routing_status || '')}
+      </div>
+      <dl class="report-qa">${qa || `<dt>Done today</dt><dd>${esc(r.content || '—')}</dd>`}</dl>
+      ${
+        r.pm_note
+          ? `<div class="meta" style="margin-top:12px;">PM note: ${esc(r.pm_note)}</div>`
+          : ''
+      }
+      ${
+        r.admin_director_note
+          ? `<div style="margin-top:12px;padding:8px;border-left:3px solid var(--accent);background:rgba(0,168,197,0.06);border-radius:0 6px 6px 0;">
+               <div class="meta" style="margin-bottom:2px;">Admin note (private · Director only)</div>
+               <div>${esc(r.admin_director_note)}</div>
+               <div class="meta">${esc(r.admin_director_note_by_name || 'Admin')}${
+                 r.admin_director_note_at ? ` · ${CresFormat.datetime(r.admin_director_note_at)}` : ''
+               }</div>
+             </div>`
+          : ''
+      }
+      ${
+        r.remarks
+          ? `<div class="rejection-banner" style="margin-top:12px;">Current remarks: ${esc(r.remarks)}</div>`
+          : ''
+      }`;
+
+    if (remarksBlock) {
+      remarksBlock.hidden = !r.can_remark;
+      if (remarksInput) remarksInput.value = r.remarks || '';
+    }
+    modal.classList.add('open');
+  }
+
   async function mountReportsHub() {
     const role = document.getElementById('reports-role')?.value;
     const from = document.getElementById('reports-from')?.value;
@@ -308,113 +382,47 @@ const CresDirector = (() => {
     if (routing) params.set('routing_status', routing);
 
     const reports = await CresAPI.request(`/api/reports?${params}`);
+    directorReportCache = reports.data || [];
 
     const list = document.getElementById('director-reports-list');
-    list.innerHTML = reports.data.length
-      ? reports.data
+    list.innerHTML = directorReportCache.length
+      ? directorReportCache
           .map((r) => {
-            const remarkBox = r.can_remark
-              ? `<div class="toolbar" style="margin-top:6px;gap:6px;align-items:flex-start;">
-                   <textarea data-remark-input="${esc(r.id)}" rows="2" placeholder="Ask for clarity…" style="flex:1;min-width:160px;"></textarea>
-                   <button type="button" class="btn btn-primary btn-sm" data-remark="${esc(r.id)}">Save remarks</button>
-                 </div>`
-              : '';
-            const aiReviewBtn = r.can_remark
-              ? `<button type="button" class="btn btn-ghost btn-sm" data-ai-review="${esc(r.id)}" data-author="${esc(r.author_name)}" style="font-size:0.78rem;margin-top:4px;">AI Review</button>`
-              : '';
-            return `<tr>
+            const preview = esc(reportPreviewText(r) || '—');
+            const remarksPreview = r.remarks
+              ? esc(String(r.remarks).replace(/\s+/g, ' ').slice(0, 100))
+              : '<span class="meta">No remarks yet</span>';
+            return `<tr class="clickable-row" data-open-report="${esc(r.id)}" title="Open full report">
               <td>${CresFormat.datetime(r.created_at)}</td>
               <td><div class="report-author">${typeof CresSettings !== 'undefined' ? CresSettings.avatarHtml({ name: r.author_name, avatar_url: r.author_avatar_url }, 'avatar avatar-sm') : ''}<span>${esc(r.author_name)} · ${esc(r.author_role)}</span></div></td>
               <td>${statusPill(r.routing_status || 'pending_pm')}</td>
-              <td>${esc(r.content)}${r.project_name ? `<div class="meta">${esc(r.project_name)}</div>` : ''}${r.pm_note ? `<div class="meta">PM: ${esc(r.pm_note)}</div>` : ''}</td>
-              <td>
-                ${r.remarks ? `<div class="rejection-banner" style="margin:0 0 6px;">${esc(r.remarks)}</div>` : '<span class="meta">No remarks yet</span>'}
-                ${
-                  r.admin_director_note
-                    ? `<div style="margin-top:8px;padding:8px;border-left:3px solid var(--accent);background:rgba(0,168,197,0.06);border-radius:0 6px 6px 0;">
-                         <div class="meta" style="margin-bottom:2px;">Admin note (private · Director only)</div>
-                         <div>${esc(r.admin_director_note)}</div>
-                         <div class="meta">${esc(r.admin_director_note_by_name || 'Admin')}${
-                           r.admin_director_note_at ? ` · ${CresFormat.datetime(r.admin_director_note_at)}` : ''
-                         }</div>
-                       </div>`
-                    : ''
-                }
-                ${remarkBox}
-              </td>
-              <td>${aiReviewBtn}</td>
+              <td class="report-cell"><div class="report-preview">${preview}</div>${
+                r.project_name ? `<div class="meta">${esc(r.project_name)}</div>` : ''
+              }<div class="meta">Click to open full report</div></td>
+              <td class="remarks-cell">${remarksPreview}${
+                r.admin_director_note ? `<div class="meta" style="margin-top:4px;">Admin note on file</div>` : ''
+              }</td>
+              <td><button type="button" class="btn btn-ghost btn-sm" data-open-report-btn="${esc(r.id)}">Open</button></td>
             </tr>`;
           })
           .join('')
-      : `<tr><td colspan="6" class="empty-state">No reports match these filters.</td></tr>`;
+      : `<tr><td colspan="6" class="empty-state">${
+          role || person || from || to || (routing && routing !== 'all')
+            ? 'No reports match these filters.'
+            : 'No daily reports yet. Sales and developers submit from their Reports tab — they land here for the Director.'
+        }</td></tr>`;
 
-    // Save remarks
-    list.querySelectorAll('[data-remark]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const id = btn.dataset.remark;
-        const input = list.querySelector(`[data-remark-input="${id}"]`);
-        const remarks = input?.value?.trim();
-        if (!remarks) return;
-        try {
-          await CresAPI.request(`/api/reports/${id}/remarks`, {
-            method: 'POST',
-            body: { remarks },
-          });
-          await mountReportsHub();
-        } catch (err) {
-          alert(err.message);
-        }
+    list.querySelectorAll('[data-open-report]').forEach((tr) => {
+      tr.addEventListener('click', (e) => {
+        if (e.target.closest('button, a, textarea, input, select, label')) return;
+        openDirectorReport(tr.dataset.openReport);
       });
     });
-
-    // AI Review buttons
-    list.querySelectorAll('[data-ai-review]').forEach((btn) => {
-      btn.addEventListener('click', () => openAiReview(btn.dataset.aiReview, btn.dataset.author));
-    });
-
-    // Add voice remark mic to each remarks textarea
-    list.querySelectorAll('[data-remark-input]').forEach((ta) => {
-      CresVoiceReport?.initRemarkMic(null, null);
-      // Re-init using the actual element
-      if (window.CresVoiceReport && !ta.dataset.micBound) {
-        ta.dataset.micBound = '1';
-        const micBtn = document.createElement('button');
-        micBtn.type = 'button';
-        micBtn.className = 'btn btn-ghost btn-sm';
-        micBtn.style.cssText = 'padding:3px 10px;font-size:0.78rem;vertical-align:middle;margin-left:6px;';
-        micBtn.textContent = '\uD83C\uDF99 Speak';
-        ta.parentNode.insertBefore(micBtn, ta.nextSibling);
-
-        let rStream = null, rRec = null, rChunks = [];
-        micBtn.addEventListener('click', async () => {
-          if (rRec && rRec.state === 'recording') {
-            micBtn.textContent = '\uD83C\uDF99 Speak';
-            micBtn.classList.remove('btn-danger');
-            const blob = await new Promise((res) => {
-              rRec.onstop = () => { rStream?.getTracks().forEach((t) => t.stop()); res(new Blob(rChunks, { type: CresAudio.blobType(rRec) })); };
-              rRec.stop();
-            });
-            rChunks = [];
-            if (!blob || blob.size < 500) return;
-            micBtn.disabled = true; micBtn.textContent = '...';
-            try {
-              const fd = new FormData(); fd.append('audio', blob, `remark-${Date.now()}.${CresAudio.ext(blob.type)}`);
-              const r = await CresAPI.request('/api/reports/voice-capture', { method: 'POST', body: fd });
-              if (r.ok && r.data?.content) ta.value = (ta.value ? ta.value + '\n' : '') + r.data.content;
-            } catch { /* ignore */ }
-            micBtn.disabled = false; micBtn.textContent = '\uD83C\uDF99 Speak';
-            return;
-          }
-          try {
-            rStream = await CresAudio.mic();
-            rChunks = [];
-            rRec = CresAudio.recorder(rStream);
-            rRec.ondataavailable = (e) => { if (e.data.size > 0) rChunks.push(e.data); };
-            rRec.start();
-            micBtn.textContent = '\u23F9 Stop'; micBtn.classList.add('btn-danger');
-          } catch { /* mic denied */ }
-        });
-      }
+    list.querySelectorAll('[data-open-report-btn]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openDirectorReport(btn.dataset.openReportBtn);
+      });
     });
   }
 
@@ -615,6 +623,34 @@ const CresDirector = (() => {
       document.getElementById(id)?.addEventListener('change', () =>
         mountReportsHub().catch(console.error)
       );
+    });
+
+    document.getElementById('director-report-remarks-send')?.addEventListener('click', async () => {
+      if (!viewingReportId) return;
+      const remarks = document.getElementById('director-report-remarks')?.value?.trim();
+      const flashEl = document.getElementById('director-report-view-flash');
+      if (!remarks) {
+        flash(flashEl, 'Write a remark first', false);
+        return;
+      }
+      try {
+        await CresAPI.request(`/api/reports/${viewingReportId}/remarks`, {
+          method: 'POST',
+          body: { remarks },
+        });
+        flash(flashEl, 'Remarks saved');
+        document.getElementById('director-report-view-modal')?.classList.remove('open');
+        await mountReportsHub();
+      } catch (err) {
+        flash(flashEl, err.message, false);
+      }
+    });
+
+    document.getElementById('director-report-ai-review')?.addEventListener('click', () => {
+      if (!viewingReportId) return;
+      const r = directorReportCache.find((x) => x.id === viewingReportId);
+      document.getElementById('director-report-view-modal')?.classList.remove('open');
+      openAiReview(viewingReportId, r?.author_name || 'Author');
     });
   }
 

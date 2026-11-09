@@ -46,16 +46,30 @@ function displayName(user) {
   return team === 'Director' ? `${name} - Director, ${COMPANY}` : `${name} - ${team}, ${COMPANY}`;
 }
 
-function signature(user) {
+/** Unique, readable reference for one outgoing email, e.g. CR-7K3F9Q (no 0/O/1/I). */
+function newRefCode() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = require('crypto').randomBytes(6);
+  return `CR-${[...bytes].map((b) => alphabet[b % alphabet.length]).join('')}`;
+}
+const REF_RE = /\bCR-[A-HJ-NP-Z2-9]{6}\b/g;
+
+function signature(user, ref = null) {
   const team = teamLabel(user.role);
-  return ['', '--', user.name, team === 'Director' ? `Director, ${COMPANY}` : `${team}, ${COMPANY}`, `${replyToAddress()} | www.cresdynamics.com`].join('\n');
+  return [
+    '', '--', user.name,
+    team === 'Director' ? `Director, ${COMPANY}` : `${team}, ${COMPANY}`,
+    `${replyToAddress()} | www.cresdynamics.com`,
+    ref ? `Ref ${ref} - please keep this line when you reply` : null,
+  ].filter((l) => l !== null).join('\n');
 }
 
-function withSignature(body, user) {
+function withSignature(body, user, ref = null) {
   const b = String(body || '').trimEnd();
-  // Don't add it twice if the writer (or Jarvis) already signed with the team line
-  if (b.includes(`${teamLabel(user.role)}, ${COMPANY}`) || b.includes(`Director, ${COMPANY}`)) return b;
-  return b + '\n' + signature(user);
+  const signed = b.includes(`${teamLabel(user.role)}, ${COMPANY}`) || b.includes(`Director, ${COMPANY}`);
+  // Jarvis (or the writer) already signed: only add the reference line
+  if (signed) return ref ? `${b}\nRef ${ref} - please keep this line when you reply` : b;
+  return b + '\n' + signature(user, ref);
 }
 
 async function notifyRecipient(row, fromName) {
@@ -170,7 +184,22 @@ async function sendOutside({ by, to, cc, subject, body, teamMailId = null }) {
   if (text.length < 2) throw new AppError('Write the message', 400, 'VALIDATION');
 
   const { sendWithFailover } = require('./emailService');
-  const finalBody = withSignature(text, by);
+  // Tracking: a unique reference in the signature + our own Message-ID, so the reply
+  // can be routed back to this person automatically (see routeReplies).
+  const ref = newRefCode();
+  const domain = (sendingAddress().split('@')[1] || 'cresdynamics.com').toLowerCase();
+  const messageId = `<${ref.toLowerCase()}.${require('crypto').randomUUID()}@${domain}>`;
+  const headers = { 'Message-ID': messageId, 'X-Cres-Ref': ref };
+  if (teamMailId) {
+    // Replying inside a thread: keep it threaded in the client's mail app
+    const { rows: t } = await query(`SELECT reply_message_id FROM team_mail WHERE id = $1`, [teamMailId]);
+    const parentId = t[0]?.reply_message_id;
+    if (parentId) {
+      headers['In-Reply-To'] = parentId;
+      headers.References = parentId;
+    }
+  }
+  const finalBody = withSignature(text, by, ref);
   const label = teamLabel(by.role);
   let result;
   try {
@@ -181,57 +210,99 @@ async function sendOutside({ by, to, cc, subject, body, teamMailId = null }) {
       body: finalBody,
       from: `${displayName(by)} <${sendingAddress()}>`,
       replyTo: replyToAddress(),
-      meta: { type: 'team_mail', fromRole: by.role, userId: by.id },
+      headers,
+      meta: { type: 'team_mail', fromRole: by.role, userId: by.id, ref },
     });
   } catch (err) {
     await query(
-      `INSERT INTO team_mail_sent (team_mail_id, user_id, team_label, to_email, cc, subject, body, status, error)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'failed',$8)`,
-      [teamMailId, by.id, label, addr, ccList, subj, finalBody, err.message]
+      `INSERT INTO team_mail_sent (team_mail_id, user_id, team_label, to_email, cc, subject, body, status, error, ref_code, message_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'failed',$8,$9,$10)`,
+      [teamMailId, by.id, label, addr, ccList, subj, finalBody, err.message, ref, messageId]
     ).catch(() => {});
     throw new AppError(`The email did not send: ${err.message}`, 502, 'EMAIL_FAILED');
   }
   const { rows } = await query(
-    `INSERT INTO team_mail_sent (team_mail_id, user_id, team_label, to_email, cc, subject, body, provider, message_ref)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-    [teamMailId, by.id, label, addr, ccList, subj, finalBody, result?.provider || null, result?.messageId || null]
+    `INSERT INTO team_mail_sent (team_mail_id, user_id, team_label, to_email, cc, subject, body, provider, message_ref, ref_code, message_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+    [teamMailId, by.id, label, addr, ccList, subj, finalBody, result?.provider || null, result?.messageId || null, ref, messageId]
   );
   if (teamMailId) await query(`UPDATE team_mail SET status = 'done' WHERE id = $1 AND to_user_id = $2`, [teamMailId, by.id]);
   return { ...rows[0], from: displayName(by), replyTo: replyToAddress(), skipped: Boolean(result?.skipped) };
 }
 
 /**
- * New mail in the company inbox from someone a staff member emailed recently:
- * route a copy to that staff member's Team Mail automatically (admin still sees it).
+ * Which staff email is this incoming message a reply to? Most reliable first:
+ *  1. header   - In-Reply-To / References carry the Message-ID we sent
+ *  2. reference - the "Ref CR-XXXXXX" line from our signature is in the reply
+ *  3. sender   - the person we emailed most recently from that address (60 days)
+ */
+async function findSentFor(msg) {
+  const ids = [msg.in_reply_to, ...(msg.reference_ids || [])].filter(Boolean);
+  if (ids.length) {
+    const { rows } = await query(
+      `SELECT s.* FROM team_mail_sent s JOIN users u ON u.id = s.user_id
+        WHERE s.message_id = ANY($1::text[]) AND s.status = 'sent' AND u.status = 'active'
+        ORDER BY s.created_at DESC LIMIT 1`,
+      [ids]
+    );
+    if (rows[0]) return { sent: rows[0], by: 'header' };
+  }
+  const refs = [...new Set(`${msg.subject || ''}\n${msg.body_text || ''}`.match(REF_RE) || [])];
+  if (refs.length) {
+    const { rows } = await query(
+      `SELECT s.* FROM team_mail_sent s JOIN users u ON u.id = s.user_id
+        WHERE s.ref_code = ANY($1::text[]) AND s.status = 'sent' AND u.status = 'active'
+        ORDER BY s.created_at DESC LIMIT 1`,
+      [refs]
+    );
+    if (rows[0]) return { sent: rows[0], by: 'reference' };
+  }
+  const { rows } = await query(
+    `SELECT s.* FROM team_mail_sent s JOIN users u ON u.id = s.user_id
+      WHERE LOWER(s.to_email) = LOWER($1) AND s.status = 'sent' AND s.created_at > NOW() - INTERVAL '60 days' AND u.status = 'active'
+      ORDER BY s.created_at DESC LIMIT 1`,
+    [msg.from_email]
+  );
+  return rows[0] ? { sent: rows[0], by: 'sender' } : null;
+}
+
+/**
+ * New mail in the company inbox that answers an email a staff member sent:
+ * forward it to that person's Team mail automatically (no admin needed).
+ * The admin still sees it, marked "auto-forwarded". Returns the routed ids.
  */
 async function routeReplies(inboxRows) {
   const own = new Set([replyToAddress(), sendingAddress(), process.env.IMAP_USER].filter(Boolean).map((a) => a.toLowerCase()));
+  const routed = [];
   for (const m of inboxRows) {
-    if (m.is_scam || own.has(String(m.from_email || '').toLowerCase())) continue; // our own mailbox is never "a client reply"
-    const { rows } = await query(
-      `SELECT s.user_id, u.name FROM team_mail_sent s JOIN users u ON u.id = s.user_id
-        WHERE LOWER(s.to_email) = LOWER($1) AND s.status = 'sent' AND s.created_at > NOW() - INTERVAL '60 days' AND u.status = 'active'
-        ORDER BY s.created_at DESC LIMIT 1`,
-      [m.from_email]
-    );
-    if (!rows[0]) continue;
+    if (m.is_scam || own.has(String(m.from_email || '').toLowerCase())) continue; // never our own mailbox
     const { rows: full } = await query(`SELECT * FROM admin_inbox_messages WHERE id = $1`, [m.id]);
     const msg = full[0];
-    if (!msg) continue;
+    if (!msg || msg.routed_to) continue;
+    const hit = await findSentFor(msg);
+    if (!hit) continue;
+    const { sent, by } = hit;
     const { rows: ins } = await query(
-      `INSERT INTO team_mail (inbox_message_id, to_user_id, subject, body, original_from_email, original_from_name,
-                              original_subject, original_received_at, attachments, auto_routed, note)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,TRUE,$10) RETURNING *`,
+      `INSERT INTO team_mail (inbox_message_id, parent_id, to_user_id, subject, body, original_from_email, original_from_name,
+                              original_subject, original_received_at, attachments, auto_routed, note, sent_ref_id, reply_message_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,TRUE,$11,$12,$13) RETURNING *`,
       [
-        msg.id, rows[0].user_id, msg.subject || '(no subject)', msg.body_text || '', msg.from_email, msg.from_name,
-        msg.subject, msg.received_at || msg.created_at,
+        msg.id, sent.team_mail_id, sent.user_id, msg.subject || '(no subject)', msg.body_text || '',
+        msg.reply_to_email || msg.from_email, msg.from_name, msg.subject, msg.received_at || msg.created_at,
         JSON.stringify((msg.attachment_summaries || []).map((a, i) => ({ name: a.name, mime: a.mime, size: a.size, index: i }))),
-        'Reply to an email you sent. It also stays in the company inbox.',
+        `Reply to your email "${sent.subject}"${sent.ref_code ? ` (Ref ${sent.ref_code})` : ''}. Forwarded to you automatically.`,
+        sent.id,
+        msg.message_id && !String(msg.message_id).startsWith('uid-') ? msg.message_id : null,
       ]
     );
-    await query(`UPDATE admin_inbox_messages SET routed_to = $1 WHERE id = $2`, [rows[0].user_id, msg.id]);
+    await query(
+      `UPDATE admin_inbox_messages SET routed_to = $1, routed_by = $2, is_read = TRUE, updated_at = NOW() WHERE id = $3`,
+      [sent.user_id, by, msg.id]
+    );
     await notifyRecipient(ins[0], 'CRES OS');
+    routed.push(msg.id);
   }
+  return routed;
 }
 
-module.exports = { TEAMS, STAFF_ROLES, teamLabel, displayName, signature, withSignature, forward, sendOutside, routeReplies, replyToAddress, sendingAddress };
+module.exports = { newRefCode, findSentFor, TEAMS, STAFF_ROLES, teamLabel, displayName, signature, withSignature, forward, sendOutside, routeReplies, replyToAddress, sendingAddress };

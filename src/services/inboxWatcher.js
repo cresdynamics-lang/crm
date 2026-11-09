@@ -36,7 +36,8 @@ function createWatcher() {
     syncing = (async () => {
       try {
         const { syncAdminInbox } = require('./adminInbox');
-        const res = await syncAdminInbox({ limit: 30 });
+        // Reuse the watcher's connection; a second login makes the provider drop this one
+        const res = await syncAdminInbox({ limit: 30, client: client && client.usable ? client : null });
         if (res.synced) console.log(`[inbox-watch] ${res.synced} new email(s) (${reason})`);
       } catch (e) {
         console.warn(`[inbox-watch] sync failed (${reason}): ${e.message}`);

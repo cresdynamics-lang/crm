@@ -133,6 +133,7 @@ async function sendViaSmtp({ to, subject, body, html, from, replyTo, cc, meta, a
     to: Array.isArray(to) ? to : [to],
     cc: cc?.length ? cc : undefined,
     replyTo: replyTo || undefined,
+    messageId: headers?.['Message-ID'],
     inReplyTo: headers?.['In-Reply-To'],
     references: headers?.References,
     subject,

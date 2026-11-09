@@ -927,19 +927,6 @@ CREATE TABLE IF NOT EXISTS health_snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_health_snapshots ON health_snapshots (category, checked_at DESC);
 
--- Website payer contact log (finance email trigger, CRM-side only)
-CREATE TABLE IF NOT EXISTS website_payer_emails (
-  id BIGSERIAL PRIMARY KEY,
-  reservation_id INTEGER NOT NULL,
-  payer_email TEXT NOT NULL,
-  payer_name TEXT,
-  send_by TEXT,
-  status TEXT NOT NULL DEFAULT 'sent',
-  detail TEXT,
-  sent_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_website_payer_emails_res ON website_payer_emails (reservation_id, sent_at DESC);
-
 -- AI report review + attendance + partial salary payments (migration 012)
 ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS ai_analysis JSONB;
 ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS remarks_reply TEXT;

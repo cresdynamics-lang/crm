@@ -177,6 +177,10 @@ router.get(
       msg = rows[0];
       live('inbox:updated', { ids: [msg.id], action: 'read' });
     }
+    if (msg.routed_to) {
+      const { rows } = await query(`SELECT name FROM users WHERE id = $1`, [msg.routed_to]);
+      msg.routed_to_name = rows[0]?.name || null;
+    }
     res.json({ ok: true, data: msg });
   })
 );

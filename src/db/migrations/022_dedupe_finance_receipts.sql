@@ -40,14 +40,19 @@ WHERE a.ctid > b.ctid
   AND a.created_at::date = b.created_at::date
   AND a.type LIKE 'invoice_%';
 
-DELETE FROM website_payer_emails a
-USING website_payer_emails b
-WHERE a.ctid > b.ctid
-  AND a.reservation_id = b.reservation_id
-  AND lower(a.payer_email) = lower(b.payer_email);
-
-CREATE UNIQUE INDEX IF NOT EXISTS website_payer_emails_once
-  ON website_payer_emails (reservation_id, lower(payer_email));
+-- (website_payer_emails was removed with the website integration; skip when absent)
+DO $$
+BEGIN
+  IF to_regclass('public.website_payer_emails') IS NOT NULL THEN
+    DELETE FROM website_payer_emails a
+    USING website_payer_emails b
+    WHERE a.ctid > b.ctid
+      AND a.reservation_id = b.reservation_id
+      AND lower(a.payer_email) = lower(b.payer_email);
+    CREATE UNIQUE INDEX IF NOT EXISTS website_payer_emails_once
+      ON website_payer_emails (reservation_id, lower(payer_email));
+  END IF;
+END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS payments_bank_reference_key
   ON payments (lower(btrim(bank_reference)))

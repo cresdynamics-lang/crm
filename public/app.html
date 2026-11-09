@@ -1561,6 +1561,28 @@
     </div>
   </div>
 
+  <div class="modal-backdrop" id="director-report-view-modal">
+    <div class="modal-card wide">
+      <header>
+        <h3 id="director-report-view-title">Daily report</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body">
+        <div id="director-report-view-body"></div>
+        <div id="director-report-remarks-block" class="settings-section" style="margin-top:16px;max-width:none;" hidden>
+          <h3 style="margin:0 0 8px;font-size:0.9rem;">Remarks to author</h3>
+          <p class="meta" style="margin:0 0 8px;">Visible to the person who filed this report.</p>
+          <textarea id="director-report-remarks" rows="3" placeholder="Ask for clarity…" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);"></textarea>
+          <div class="form-actions" style="margin-top:8px;gap:8px;">
+            <button type="button" class="btn btn-primary" id="director-report-remarks-send">Save remarks</button>
+            <button type="button" class="btn btn-ghost" id="director-report-ai-review">AI Review</button>
+          </div>
+        </div>
+        <div id="director-report-view-flash" class="flash"></div>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="new-client-modal">
     <div class="modal-card">
       <header>

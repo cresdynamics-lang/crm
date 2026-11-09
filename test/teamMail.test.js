@@ -107,3 +107,55 @@ test('bad input is rejected cleanly', async () => {
   const r3 = await call(users.client || null, '/api/mail');
   assert.ok([401, 403].includes(r3.status));
 });
+
+test('replies are matched to the sender by header, then Ref code, then address', async () => {
+  const { query } = require('../src/config/database');
+  const tm = require('../src/services/teamMail');
+  const sender = users.developer || users.admin;
+  const ref = tm.newRefCode();
+  assert.match(ref, /^CR-[A-HJ-NP-Z2-9]{6}$/);
+  const mid = `<${ref.toLowerCase()}.test@cresdynamics.com>`;
+  const { rows: sent } = await query(
+    `INSERT INTO team_mail_sent (user_id, team_label, to_email, subject, body, ref_code, message_id)
+     VALUES ($1,'Developer Team','tracked@example.invalid','Proposal','Body',$2,$3) RETURNING id`,
+    [sender, ref, mid]
+  );
+  const mk = async (extra) => {
+    const { rows } = await query(
+      `INSERT INTO admin_inbox_messages (message_id, from_email, from_name, subject, body_text, status, in_reply_to, reference_ids)
+       VALUES ($1, $2, 'Someone', $3, $4, 'pending', $5, $6) RETURNING id, from_email, is_scam`,
+      [`<tr-${Math.random()}@example.invalid>`, extra.from, extra.subject, extra.body, extra.inReplyTo || null, extra.refs || []]
+    );
+    cleanup.inbox.push(rows[0].id);
+    return rows[0];
+  };
+  // 1) header match works even from a different address (e.g. a colleague replies)
+  const a = await mk({ from: 'colleague@other.invalid', subject: 'Re: Proposal', body: 'ok', inReplyTo: mid });
+  // 2) Ref code in the body works when the mail client dropped the headers
+  const b = await mk({ from: 'someone-else@other.invalid', subject: 'Question', body: `Thanks!\n\nRef ${ref} - please keep this line when you reply` });
+  // 3) unrelated mail from a stranger is not routed
+  const c = await mk({ from: 'stranger@nowhere.invalid', subject: 'Hello', body: 'Hi' });
+  const routed = await tm.routeReplies([a, b, c]);
+  assert.deepEqual(new Set(routed), new Set([a.id, b.id]));
+  const { rows } = await query(`SELECT id, routed_to, routed_by FROM admin_inbox_messages WHERE id = ANY($1::uuid[])`, [[a.id, b.id, c.id]]);
+  const by = Object.fromEntries(rows.map((r) => [r.id, r]));
+  assert.equal(by[a.id].routed_by, 'header');
+  assert.equal(by[b.id].routed_by, 'reference');
+  assert.equal(by[c.id].routed_to, null);
+  assert.equal(by[a.id].routed_to, sender);
+  // routing twice does not duplicate
+  assert.deepEqual(await tm.routeReplies([a]), []);
+  await query(`DELETE FROM team_mail WHERE sent_ref_id = $1`, [sent[0].id]);
+  await query(`DELETE FROM team_mail_sent WHERE id = $1`, [sent[0].id]);
+});
+
+test('every outgoing email carries a unique Ref line and Message-ID', async () => {
+  const { query } = require('../src/config/database');
+  const r1 = await call(users.developer || users.admin, '/api/mail/send', { method: 'POST', body: { to: 'a@example.invalid', subject: 'One', body: 'First' } });
+  const r2 = await call(users.developer || users.admin, '/api/mail/send', { method: 'POST', body: { to: 'a@example.invalid', subject: 'Two', body: 'Second' } });
+  assert.equal(r1.status, 201);
+  assert.match(r1.body.data.body, /Ref CR-[A-HJ-NP-Z2-9]{6}/);
+  assert.notEqual(r1.body.data.ref_code, r2.body.data.ref_code);
+  assert.match(r1.body.data.message_id, /^<cr-[a-z0-9]{6}\..+@.+>$/);
+  await query(`DELETE FROM team_mail_sent WHERE id = ANY($1::uuid[])`, [[r1.body.data.id, r2.body.data.id]]);
+});
