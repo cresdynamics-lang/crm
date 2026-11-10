@@ -106,3 +106,28 @@ test('progress follows the milestones automatically: 1 of 2 done = 50%', async (
   assert.equal((await setStatuses('in_progress', 'completed')).status, 200);
   assert.equal(await readDetail(), 50, 'it goes back down if one is re-opened');
 });
+
+test('Director can assign an existing active project to a developer; Finance cannot', async () => {
+  if (!users.director || !users.developer) return;
+  const created = await create('director');
+  assert.equal(created.status, 201);
+  const id = created.body.data.id;
+  const body = { project_id: id, developer_id: users.developer, note: 'Please take this' };
+  const ok = await call(users.director, '/api/assignments', { method: 'POST', body, headers: { 'Idempotency-Key': `as-${Date.now()}` } });
+  assert.equal(ok.status, 201, JSON.stringify(ok.body).slice(0, 200));
+  assert.equal(ok.body.data.developer_id, users.developer);
+  assert.equal(ok.body.data.status, 'pending');
+  if (users.finance) {
+    const no = await call(users.finance, '/api/assignments', { method: 'POST', body, headers: { 'Idempotency-Key': `as2-${Date.now()}` } });
+    assert.equal(no.status, 403);
+  }
+  const { query } = require('../src/config/database');
+  await query(`DELETE FROM project_assignments WHERE project_id = $1`, [id]);
+});
+
+test('activating a project does not email the client an invoice', async () => {
+  const fs = require('fs');
+  const src = fs.readFileSync(require('path').join(__dirname, '../src/queues/workers.js'), 'utf8');
+  const block = src.slice(src.indexOf("case 'invoice.create-on-approval'"), src.indexOf("case 'payment.sync-dashboards'"));
+  assert.ok(!/queueInvoiceEmail|invoice\.send/.test(block), 'project activation must not queue a client invoice email');
+});

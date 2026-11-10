@@ -72,7 +72,7 @@
             <button type="button" class="mt-btn primary" id="ml-draft">✦ Draft with Jarvis</button>
           </div>
           <textarea id="ml-draft-body" class="ml-draft" rows="10" placeholder="Write your reply. Your name and team are added at the bottom."></textarea>
-          <div class="ib-send-row"><input type="text" id="ml-cc" placeholder="CC (optional, comma separated)" /></div>
+          <div class="ib-send-row"><input type="text" id="ml-cc" placeholder="CC (optional): emails, or type @ to CC a colleague" autocomplete="off" /></div>
           <div class="ib-send-row ib-buttons"><span class="mt-muted small ml-from" id="ml-from"></span><span class="ib-grow"></span><button type="button" class="mt-btn primary" id="ml-send">Send reply</button></div>
         </div>
       </article>
@@ -89,9 +89,9 @@
       <div class="fw-head"><h3 id="ml-compose-title">New email</h3><button type="button" class="mt-btn sm" data-close-compose>Close</button></div>
       <p class="fw-hint" id="ml-compose-from"></p>
       <label class="fw-label" for="mc-to">To</label>
-      <input id="mc-to" type="email" placeholder="client@company.com" autocomplete="email" />
+      <input id="mc-to" type="text" placeholder="client@company.com, or @name for a colleague" autocomplete="off" />
       <label class="fw-label" for="mc-cc">CC (optional)</label>
-      <input id="mc-cc" type="text" placeholder="Comma separated" />
+      <input id="mc-cc" type="text" placeholder="Emails, or type @ to CC a colleague inside CRES OS" autocomplete="off" />
       <label class="fw-label" for="mc-subject">Subject</label>
       <input id="mc-subject" type="text" />
       <label class="fw-label" for="mc-body">Message</label>
@@ -110,7 +110,7 @@
   <script src="/js/toast.js?v=20261109a"></script>
   <script src="/js/api.js?v=20261110a"></script>
   <script src="/js/forwardDialog.js?v=20261109a"></script>
-  <script src="/js/mail.js?v=20261109a"></script>
+  <script src="/js/mail.js?v=20261110a"></script>
   <script src="/js/nav.js?v=20261109b"></script>
   <script src="/js/miniShell.js?v=20261109a"></script>
   <script src="/js/pwa.js?v=20261109a"></script>

@@ -108,7 +108,7 @@ router.post(
   '/send',
   asyncHandler(async (req, res) => {
     staffOnly(req);
-    const out = await tm.sendOutside({ by: req.user, to: req.body?.to, cc: req.body?.cc, subject: req.body?.subject, body: req.body?.body });
+    const out = await tm.sendOutside({ by: req.user, to: req.body?.to, cc: req.body?.cc, ccUserIds: req.body?.cc_user_ids || [], subject: req.body?.subject, body: req.body?.body });
     res.status(201).json({ ok: true, data: out });
   })
 );
@@ -138,7 +138,7 @@ router.post(
     const mail = await myMail(req, req.params.id);
     if (!mail.original_from_email) throw new AppError('This email has no outside sender to reply to', 400, 'VALIDATION');
     const subject = req.body?.subject || (/^re:/i.test(mail.original_subject || '') ? mail.original_subject : `Re: ${mail.original_subject || mail.subject}`);
-    const out = await tm.sendOutside({ by: req.user, to: req.body?.to || mail.original_from_email, cc: req.body?.cc, subject, body: req.body?.body, teamMailId: mail.id });
+    const out = await tm.sendOutside({ by: req.user, to: req.body?.to || mail.original_from_email, cc: req.body?.cc, ccUserIds: req.body?.cc_user_ids || [], subject, body: req.body?.body, teamMailId: mail.id });
     res.status(201).json({ ok: true, data: out });
   })
 );

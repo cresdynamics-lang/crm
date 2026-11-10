@@ -690,7 +690,8 @@ const CresDirector = (() => {
           <td>
             ${
               canEdit
-                ? `<button type="button" class="btn btn-ghost btn-sm" data-edit-project="${esc(p.id)}" style="padding:6px 10px;font-size:0.8rem;">Edit</button>`
+                ? `<button type="button" class="btn btn-ghost btn-sm" data-edit-project="${esc(p.id)}" style="padding:6px 10px;font-size:0.8rem;">Edit</button>
+            <button type="button" class="btn btn-primary btn-sm" data-assign-dev="${esc(p.id)}" style="padding:6px 10px;font-size:0.8rem;">${p.developer_name ? 'Reassign' : 'Assign developer'}</button>`
                 : ''
             }
             <button type="button" class="btn btn-ghost btn-sm" data-delete-project="${esc(p.id)}" data-name="${esc(p.name)}" style="padding:6px 10px;font-size:0.8rem;color:#ffb4b4;">Delete</button>
@@ -709,13 +710,19 @@ const CresDirector = (() => {
 
     tbody.querySelectorAll('tr[data-id]').forEach((tr) => {
       tr.addEventListener('click', (e) => {
-        if (e.target.closest('[data-edit-project], [data-open-project], [data-delete-project]')) return;
+        if (e.target.closest('[data-edit-project], [data-open-project], [data-delete-project], [data-assign-dev]')) return;
         openProject(tr.dataset.id, e);
       });
     });
     tbody.querySelectorAll('[data-open-project], [data-edit-project]').forEach((el) => {
       el.addEventListener('click', (e) => {
         openProject(el.dataset.openProject || el.dataset.editProject, e);
+      });
+    });
+    tbody.querySelectorAll('[data-assign-dev]').forEach((b) => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        reassignProject(b.dataset.assignDev).catch((err) => alert(err.message));
       });
     });
     tbody.querySelectorAll('[data-delete-project]').forEach((btn) => {

@@ -1,7 +1,7 @@
 const { query } = require('../config/database');
 const { logInvoiceEmail } = require('../lib/invoiceEmailLog');
 const { sendWithFailover } = require('../services/emailService');
-const { queueInvoiceEmail, queueNotification, queueNotificationDigestEmail } = require('./jobs');
+const { queueNotification, queueNotificationDigestEmail } = require('./jobs');
 const { Worker, QUEUE_NAMES, connection, moveToDeadLetter, defaultJobOpts } = require('./index');
 const { resolveDelivery } = require('../services/notificationPrefs');
 const { isEmailAutomationOn, getEmailTemplates, fillTemplate } = require('../services/orgSettings');
@@ -68,9 +68,9 @@ async function handleSideEffect(job) {
       const invoice = rows[0];
       if (!invoice) return { skipped: true };
 
-      if (invoice.client_email) {
-        await queueInvoiceEmail(invoice.id, invoice.client_email);
-      }
+      // The client is NOT emailed here. An invoice reaches the client only when
+      // Finance creates/issues it (POST /api/invoices); the project's draft invoice
+      // just alerts Finance below.
 
       // Notify all finance users (respects notification prefs via queue)
       const { rows: financeUsers } = await query(

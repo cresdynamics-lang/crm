@@ -12,6 +12,7 @@
 
   let box = 'inbox';
   let items = [];
+  let people = [];
   let current = null;
   let me = { from: '', replyTo: 'info@cresdynamics.com' };
 
@@ -38,6 +39,7 @@
     $('ml-main').hidden = false;
     bind();
     live();
+    CresAPI.request('/api/mail/people').then((r) => { people = r.data?.people || []; }).catch(() => {});
     await loadList();
     setInterval(() => document.visibilityState === 'visible' && loadList({ quiet: true }), 60000);
   }
@@ -231,7 +233,43 @@
     }
   }
 
+  /** Type @ in a recipient box to pick a colleague; they get a copy and every reply is shared with them. */
+  function setupMentions(id) {
+    const input = $(id);
+    if (!input) return;
+    const box = document.createElement('div');
+    box.className = 'ml-mentions';
+    box.style.cssText = 'position:absolute;z-index:50;background:var(--surface,#fff);color:var(--text,#111);border:1px solid var(--border,#ccd);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.25);max-height:200px;overflow:auto;display:none;min-width:240px;';
+    input.parentElement.style.position ||= 'relative';
+    input.after(box);
+    const handle = (n) => String(n).toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '');
+    const hide = () => { box.style.display = 'none'; };
+    input.addEventListener('input', () => {
+      const m = input.value.slice(0, input.selectionStart).match(/(?:^|[\s,;])@([\w.\-]*)$/);
+      if (!m) return hide();
+      const q = m[1].toLowerCase().replace(/[^a-z0-9]/g, '');
+      const hits = (people || []).filter((p) => !q || p.name.toLowerCase().replace(/[^a-z0-9]/g, '').includes(q)).slice(0, 8);
+      if (!hits.length) return hide();
+      box.innerHTML = hits.map((p) => `<div data-h="${esc(handle(p.name))}" style="padding:8px 12px;cursor:pointer;"><b>${esc(p.name)}</b> <span style="opacity:.6;font-size:.85em">${esc(p.role)}</span></div>`).join('');
+      box.style.top = `${input.offsetTop + input.offsetHeight + 2}px`;
+      box.style.left = `${input.offsetLeft}px`;
+      box.style.display = 'block';
+    });
+    box.addEventListener('mousedown', (e) => {
+      const el = e.target.closest('[data-h]');
+      if (!el) return;
+      e.preventDefault();
+      const pos = input.selectionStart;
+      const before = input.value.slice(0, pos).replace(/@[\w.\-]*$/, `@${el.dataset.h}, `);
+      input.value = before + input.value.slice(pos);
+      hide();
+      input.focus();
+    });
+    input.addEventListener('blur', () => setTimeout(hide, 150));
+  }
+
   function bind() {
+    ['mc-to', 'mc-cc', 'ml-cc'].forEach(setupMentions);
     $('ml-list').addEventListener('click', (e) => {
       const li = e.target.closest('.ib-item');
       if (li) open(li.dataset.id);

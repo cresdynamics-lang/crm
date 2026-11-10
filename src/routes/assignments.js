@@ -60,7 +60,7 @@ router.post(
   requireAnyPermission([['projects', 'create'], ['projects', 'edit']]),
   idempotency,
   asyncHandler(async (req, res) => {
-    if (!['sales', 'admin', 'pm'].includes(req.user.role)) {
+    if (!['sales', 'admin', 'pm', 'director'].includes(req.user.role)) {
       throw new AppError('Forbidden', 403, 'FORBIDDEN');
     }
     const { project_id, developer_id, note } = req.body || {};

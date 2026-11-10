@@ -173,15 +173,84 @@ async function forward({ by, source, userIds, teams, subject, body, note }) {
   return created;
 }
 
+
+const EMAIL_RE = /[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+/g;
+
+/** Split "a@x.com, @nelson.ochieng, b@y.com" into outside addresses and @mentions. */
+function parseRecipients(input) {
+  const raw = Array.isArray(input) ? input.join(', ') : String(input || '');
+  const emails = [...new Set((raw.match(EMAIL_RE) || []).map((e) => e.trim()))];
+  const rest = raw.replace(EMAIL_RE, ' ');
+  const mentions = [...new Set([...rest.matchAll(/(?:^|[\s,;])@([\w.\-]+)/g)].map((m) => m[1].toLowerCase()))];
+  return { emails, mentions };
+}
+
+const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/** Turn @mentions (and explicit ids) into active staff. Unknown or ambiguous names are rejected. */
+async function resolveMentions({ mentions = [], userIds = [], excludeId }) {
+  if (!mentions.length && !userIds.length) return [];
+  const { rows } = await query(
+    `SELECT u.id, u.name, r.name AS role FROM users u JOIN roles r ON r.id = u.role_id
+      WHERE u.status = 'active' AND r.name = ANY($1::text[]) AND u.id <> $2`,
+    [STAFF_ROLES, excludeId]
+  );
+  const out = new Map();
+  for (const id of userIds.map(String)) {
+    const u = rows.find((x) => x.id === id);
+    if (u) out.set(u.id, u);
+  }
+  for (const m of mentions) {
+    const key = norm(m);
+    let hits = rows.filter((u) => norm(u.name) === key);
+    if (!hits.length) hits = rows.filter((u) => norm(String(u.name).split(/\s+/)[0]) === key);
+    if (!hits.length) throw new AppError(`No one in CRES OS matches @${m}`, 400, 'VALIDATION');
+    if (hits.length > 1) throw new AppError(`@${m} matches more than one person - use the full name, e.g. @${norm(hits[0].name)}`, 400, 'VALIDATION');
+    out.set(hits[0].id, hits[0]);
+  }
+  return [...out.values()];
+}
+
+/** Put a copy of an email in a colleague's Team mail (CC or direct, inside CRES OS). */
+async function deliverInternalCopy({ by, user, sentId, subject, body, replyTo, toLabel, role }) {
+  const { rows } = await query(
+    `INSERT INTO team_mail (from_user_id, to_user_id, subject, body, note, original_from_email, original_from_name,
+                            original_subject, original_received_at, attachments, sent_ref_id, is_cc)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW(),'[]'::jsonb,$9,$10) RETURNING *`,
+    [
+      by.id, user.id, subject, body,
+      role === 'cc' ? `${by.name} CC'd you${toLabel ? ` on an email to ${toLabel}` : ''}. Replies will be shared with you here.` : `${by.name} sent you this inside CRES OS.`,
+      replyTo || null, replyTo ? toLabel : null, subject, sentId || null, role === 'cc',
+    ]
+  );
+  await notifyRecipient({ ...rows[0], to_user_id: user.id }, by.name);
+  return rows[0];
+}
+
 /** Send an email to someone outside, as "<Name> - <Team>, Cres Dynamics Ltd"; replies go to info@. */
-async function sendOutside({ by, to, cc, subject, body, teamMailId = null }) {
-  const addr = String(to || '').trim();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) throw new AppError('Enter a valid email address', 400, 'VALIDATION');
-  const ccList = String(cc || '').split(/[,;\s]+/).map((e) => e.trim()).filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)).slice(0, 10);
+async function sendOutside({ by, to, cc, ccUserIds = [], subject, body, teamMailId = null }) {
+  const toP = parseRecipients(to);
+  const ccP = parseRecipients(cc);
+  const toStaff = await resolveMentions({ mentions: toP.mentions, excludeId: by.id });
+  const ccStaff = (await resolveMentions({ mentions: ccP.mentions, userIds: ccUserIds, excludeId: by.id }))
+    .filter((u) => !toStaff.some((t) => t.id === u.id));
+  const outside = [...toP.emails];
+  const addr = outside[0] || '';
+  const ccList = [...new Set([...outside.slice(1), ...ccP.emails])].filter((e) => e.toLowerCase() !== addr.toLowerCase()).slice(0, 10);
   const subj = String(subject || '').trim();
   const text = String(body || '').trim();
+  if (!addr && !toStaff.length) throw new AppError('Add who it is for: an email address or an @name', 400, 'VALIDATION');
   if (!subj) throw new AppError('Add a subject', 400, 'VALIDATION');
   if (text.length < 2) throw new AppError('Write the message', 400, 'VALIDATION');
+
+  // Inside CRES OS only: no outside address, so nothing leaves the system.
+  if (!addr) {
+    const out = [];
+    for (const u of [...toStaff, ...ccStaff]) {
+      out.push(await deliverInternalCopy({ by, user: u, sentId: null, subject: subj, body: withSignature(text, by), replyTo: null, toLabel: null, role: toStaff.includes(u) ? 'to' : 'cc' }));
+    }
+    return { internalOnly: true, delivered: out.length, to: [...toStaff, ...ccStaff].map((u) => u.name), from: displayName(by) };
+  }
 
   const { sendWithFailover } = require('./emailService');
   // Tracking: a unique reference in the signature + our own Message-ID, so the reply
@@ -222,12 +291,16 @@ async function sendOutside({ by, to, cc, subject, body, teamMailId = null }) {
     throw new AppError(`The email did not send: ${err.message}`, 502, 'EMAIL_FAILED');
   }
   const { rows } = await query(
-    `INSERT INTO team_mail_sent (team_mail_id, user_id, team_label, to_email, cc, subject, body, provider, message_ref, ref_code, message_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-    [teamMailId, by.id, label, addr, ccList, subj, finalBody, result?.provider || null, result?.messageId || null, ref, messageId]
+    `INSERT INTO team_mail_sent (team_mail_id, user_id, team_label, to_email, cc, subject, body, provider, message_ref, ref_code, message_id, cc_user_ids)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::uuid[]) RETURNING *`,
+    [teamMailId, by.id, label, addr, ccList, subj, finalBody, result?.provider || null, result?.messageId || null, ref, messageId, ccStaff.map((u) => u.id)]
   );
+  // Colleagues named with @ get their copy now; later replies are shared with them (see routeReplies)
+  for (const u of [...toStaff, ...ccStaff]) {
+    await deliverInternalCopy({ by, user: u, sentId: rows[0].id, subject: subj, body: finalBody, replyTo: addr, toLabel: addr, role: toStaff.includes(u) ? 'to' : 'cc' }).catch((e) => console.warn('[mail] internal copy failed', e.message));
+  }
   if (teamMailId) await query(`UPDATE team_mail SET status = 'done' WHERE id = $1 AND to_user_id = $2`, [teamMailId, by.id]);
-  return { ...rows[0], from: displayName(by), replyTo: replyToAddress(), skipped: Boolean(result?.skipped) };
+  return { ...rows[0], from: displayName(by), replyTo: replyToAddress(), skipped: Boolean(result?.skipped), internal: [...toStaff, ...ccStaff].map((u) => u.name) };
 }
 
 /**
@@ -300,9 +373,25 @@ async function routeReplies(inboxRows) {
       [sent.user_id, by, msg.id]
     );
     await notifyRecipient(ins[0], 'CRES OS');
+    // Share the reply with everyone CC'd inside CRES OS on the original email
+    for (const ccId of sent.cc_user_ids || []) {
+      if (ccId === sent.user_id) continue;
+      const { rows: cc } = await query(
+        `INSERT INTO team_mail (inbox_message_id, parent_id, to_user_id, from_user_id, subject, body, original_from_email, original_from_name,
+                                original_subject, original_received_at, attachments, auto_routed, is_cc, note, sent_ref_id, reply_message_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,TRUE,TRUE,$12,$13,$14) RETURNING *`,
+        [
+          msg.id, sent.team_mail_id, ccId, sent.user_id, ins[0].subject, ins[0].body, ins[0].original_from_email, ins[0].original_from_name,
+          ins[0].original_subject, ins[0].original_received_at, JSON.stringify(ins[0].attachments || []),
+          `Reply to an email you were CC'd on ("${sent.subject}"). Shared with you automatically.`,
+          sent.id, ins[0].reply_message_id,
+        ]
+      ).catch((e) => { console.warn('[mail] cc share failed', e.message); return { rows: [] }; });
+      if (cc[0]) await notifyRecipient(cc[0], 'CRES OS');
+    }
     routed.push(msg.id);
   }
   return routed;
 }
 
-module.exports = { newRefCode, findSentFor, TEAMS, STAFF_ROLES, teamLabel, displayName, signature, withSignature, forward, sendOutside, routeReplies, replyToAddress, sendingAddress };
+module.exports = { parseRecipients, resolveMentions, newRefCode, findSentFor, TEAMS, STAFF_ROLES, teamLabel, displayName, signature, withSignature, forward, sendOutside, routeReplies, replyToAddress, sendingAddress };
