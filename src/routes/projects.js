@@ -276,13 +276,63 @@ router.get(
         : null;
       const shaped = shapeProject(row, req.user.role, client);
       shaped.developer_name = row.developer_name || null;
-      shaped.progress_percent = progressPercent(row.milestones);
+      shaped.progress_percent = progressPercent(row.milestones, row.status);
       data.push(shaped);
     }
 
     res.json({ ok: true, data });
   })
 );
+
+/** Roles whose new projects are active at once. Only Sales projects wait for Director approval. */
+const AUTO_ACTIVE_ROLES = ['director', 'admin', 'pm'];
+
+/** Raise the invoice for a newly approved project (balance of its value not yet invoiced). */
+async function invoiceForApprovedProject(tx, project) {
+  if (project.value_amount == null) return null;
+  const paid = await tx.query(
+    `SELECT COALESCE(SUM(amount),0)::float AS total FROM invoices WHERE project_id = $1`,
+    [project.id]
+  );
+  const remaining = Math.round((Number(project.value_amount) - Number(paid.rows[0].total || 0)) * 100) / 100;
+  if (!(remaining > 0)) return null;
+  const inv = await tx.query(
+    `INSERT INTO invoices (project_id, client_id, amount, status, due_date, amount_paid)
+     VALUES ($1, $2, $3, 'issued', CURRENT_DATE + INTERVAL '14 days', 0)
+     RETURNING *`,
+    [project.id, project.client_id, remaining]
+  );
+  return inv.rows[0];
+}
+
+/** Everything that follows a project becoming active: invoice side-effects, developer invite, audit. */
+async function afterProjectActivated({ project, invoice, actor, how }) {
+  if (invoice) await queueInvoiceOnProjectApproval(project.id, invoice.id);
+  if (project.assigned_developer_id) {
+    try {
+      const { assignDeveloper } = require('../services/assignments');
+      await assignDeveloper({
+        projectId: project.id,
+        developerId: project.assigned_developer_id,
+        assignedBy: project.created_by || actor.id,
+        actorRole: 'system',
+        note: how === 'created' ? 'Invitation on project creation' : 'Invitation after Director approval',
+      });
+    } catch (e) {
+      console.error('[project] assignment invite failed', e.message);
+    }
+  }
+  const { recordAction } = require('../services/actionAudit');
+  await recordAction({
+    actorId: actor.id,
+    actorRole: actor.role,
+    action: how === 'created' ? 'project.create' : 'project.approve',
+    resourceType: 'project',
+    resourceId: project.id,
+    summary: how === 'created' ? `Created project "${project.name}" (active)` : `Approved project "${project.name}"`,
+    after: { status: 'approved' },
+  });
+}
 
 router.post(
   '/',
@@ -301,25 +351,43 @@ router.post(
     const overview = (description || summary || '').trim() || null;
     const normalizedMs = normalizeMilestones(milestones || []);
 
-    const { rows } = await query(
-      `INSERT INTO projects
-        (name, client_id, description, milestones, summary, assigned_developer_id, created_by, value_amount, due_date, status)
-       VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$9,'pending_approval')
-       RETURNING *`,
-      [
-        name,
-        client_id || null,
-        overview,
-        JSON.stringify(normalizedMs),
-        overview,
-        assigned_developer_id || null,
-        req.user.id,
-        value_amount || null,
-        due_date || null,
-      ]
-    );
+    const autoActive = AUTO_ACTIVE_ROLES.includes(req.user.role);
 
-    // Async: notify directors
+    const created = await withTransaction(async (tx) => {
+      const { rows } = await tx.query(
+        `INSERT INTO projects
+          (name, client_id, description, milestones, summary, assigned_developer_id, created_by, value_amount, due_date,
+           status, approved_by, approved_at)
+         VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$9,$10,$11,$12)
+         RETURNING *`,
+        [
+          name,
+          client_id || null,
+          overview,
+          JSON.stringify(normalizedMs),
+          overview,
+          assigned_developer_id || null,
+          req.user.id,
+          value_amount || null,
+          due_date || null,
+          autoActive ? 'approved' : 'pending_approval',
+          autoActive ? req.user.id : null,
+          autoActive ? new Date() : null,
+        ]
+      );
+      const project = rows[0];
+      const invoice = autoActive ? await invoiceForApprovedProject(tx, project) : null;
+      return { project, invoice };
+    });
+    const rows = [created.project];
+
+    if (autoActive) {
+      // Active at once: same follow-ups as an approval, no waiting
+      await afterProjectActivated({ project: created.project, invoice: created.invoice, actor: req.user, how: 'created' });
+      return res.status(201).json({ ok: true, data: { ...created.project, auto_active: true, invoice: created.invoice || null } });
+    }
+
+    // Sales: waits for Director approval
     const { rows: directors } = await query(
       `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
        WHERE r.name IN ('director', 'admin') AND u.status = 'active'`
@@ -460,7 +528,7 @@ router.get(
         ...pendingHours(
           normalizeMilestones(Array.isArray(project.milestones) ? project.milestones : [])
         ),
-        progress_percent: progressPercent(project.milestones),
+        progress_percent: progressPercent(project.milestones, project.status),
       },
       meta: {
         canUpdateProgress: canUpdateProgress(req.user.role, project.status),
@@ -537,57 +605,12 @@ router.post(
       if (!project) throw new AppError('Project not pending approval', 409, 'INVALID_STATE');
 
       // Sync: create invoice row immediately (user-facing result)
-      let invoice = null;
-      if (project.value_amount != null) {
-        const paid = await tx.query(
-          `SELECT COALESCE(SUM(amount),0)::float AS total FROM invoices WHERE project_id = $1`,
-          [project.id]
-        );
-        const remaining = Math.round((Number(project.value_amount) - Number(paid.rows[0].total || 0)) * 100) / 100;
-        if (remaining > 0) {
-          const inv = await tx.query(
-            `INSERT INTO invoices (project_id, client_id, amount, status, due_date, amount_paid)
-             VALUES ($1, $2, $3, 'issued', CURRENT_DATE + INTERVAL '14 days', 0)
-             RETURNING *`,
-            [project.id, project.client_id, remaining]
-          );
-          invoice = inv.rows[0];
-        }
-      }
+      const invoice = await invoiceForApprovedProject(tx, project);
       return { project, invoice };
     });
 
-    // Async side-effects: email client, notify finance (queued + retried)
-    if (result.invoice) {
-      await queueInvoiceOnProjectApproval(result.project.id, result.invoice.id);
-    }
-
-    // Create pending developer invitation after approval
-    if (result.project.assigned_developer_id) {
-      try {
-        const { assignDeveloper } = require('../services/assignments');
-        await assignDeveloper({
-          projectId: result.project.id,
-          developerId: result.project.assigned_developer_id,
-          assignedBy: result.project.created_by || req.user.id,
-          actorRole: 'system',
-          note: 'Invitation after Director approval',
-        });
-      } catch (e) {
-        console.error('[approve] assignment invite failed', e.message);
-      }
-    }
-
-    const { recordAction } = require('../services/actionAudit');
-    await recordAction({
-      actorId: req.user.id,
-      actorRole: req.user.role,
-      action: 'project.approve',
-      resourceType: 'project',
-      resourceId: result.project.id,
-      summary: `Approved project "${result.project.name}"`,
-      after: { status: 'approved' },
-    });
+    // Async side-effects: email client, notify finance, invite the developer, audit
+    await afterProjectActivated({ project: result.project, invoice: result.invoice, actor: req.user, how: 'approved' });
 
     res.json({ ok: true, data: result });
   })
@@ -917,7 +940,7 @@ router.patch(
     if (msChanges.length) {
       const client = await loadClient(project.client_id);
       if (client?.email) {
-        const pct = progressPercent(after.milestones);
+        const pct = progressPercent(after.milestones, project.status);
         const subject = msChanges.length === 1 && msChanges[0].kind === 'completed'
           ? `Milestone completed: ${project.name}`
           : `Project update: ${project.name}`;

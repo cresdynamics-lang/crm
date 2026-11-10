@@ -68,8 +68,15 @@ function pendingHours(milestones) {
   return { pending_hours: hours, pending_tasks: tasks };
 }
 
-/** % complete from milestone statuses (developer-updated ceilings / milestones). */
-function progressPercent(milestones) {
+/**
+ * Project progress %, the one rule used on every screen, export and report:
+ *   completed milestones / all milestones  (1 of 2 done = 50%, 3 of 3 = 100%).
+ * A project marked "completed" is 100% whatever its milestone list says (older
+ * projects were closed without ticking milestones). No milestones yet = 0%.
+ * Recalculated every time it is read, so it can never go stale.
+ */
+function progressPercent(milestones, projectStatus) {
+  if (projectStatus === 'completed') return 100;
   const list = normalizeMilestones(Array.isArray(milestones) ? milestones : []);
   if (!list.length) return 0;
   const done = list.filter((m) => normalizeStatus(m.status) === 'completed').length;

@@ -5,14 +5,12 @@ const { requirePermission } = require('../middleware/rbac');
 const { asyncHandler, AppError } = require('../lib/errors');
 const { listForDeveloper } = require('../services/assignments');
 
+const { progressPercent } = require('../services/milestones');
 const router = express.Router();
 router.use(authenticate);
 
-function milestoneProgress(milestones) {
-  const list = Array.isArray(milestones) ? milestones : [];
-  if (!list.length) return 0;
-  const done = list.filter((m) => (m.status || '').toLowerCase() === 'completed').length;
-  return Math.round((done / list.length) * 100);
+function milestoneProgress(milestones, status) {
+  return progressPercent(milestones, status); // shared rule: services/milestones.js
 }
 
 /**
@@ -66,7 +64,7 @@ router.get(
       id: p.id,
       name: p.name,
       status: p.status,
-      progress_pct: milestoneProgress(p.milestones),
+      progress_pct: milestoneProgress(p.milestones, p.status),
     }));
 
     res.json({
@@ -82,7 +80,7 @@ router.get(
         perProject,
         chart: {
           labels: active.slice(0, 8).map((p) => p.name),
-          values: active.slice(0, 8).map((p) => milestoneProgress(p.milestones)),
+          values: active.slice(0, 8).map((p) => milestoneProgress(p.milestones, p.status)),
         },
         pendingInvitations: pending,
       },
@@ -121,7 +119,7 @@ router.get(
 
     const data = rows.map((p) => ({
       ...p,
-      progress_pct: milestoneProgress(p.milestones),
+      progress_pct: milestoneProgress(p.milestones, p.status),
     }));
 
     res.json({ ok: true, data });

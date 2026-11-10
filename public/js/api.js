@@ -143,7 +143,11 @@ const CresAPI = (() => {
     ['DELETE', /^\/api\/clients\/[^/]+$/, 'delete the client', 'Client deleted'],
     ['POST', /^\/api\/emails$/, 'send the email', 'Email queued to send'],
     // Projects
-    ['POST', /^\/api\/projects$/, 'create the project', 'Project submitted', () => 'It is waiting for Director approval.'],
+    ['POST', /^\/api\/projects$/, 'create the project',
+      (d) => (d?.data?.status === 'approved' ? 'Project created' : 'Project submitted'),
+      (d) => (d?.data?.status === 'approved'
+        ? `Active now${d.data.invoice ? '. The invoice was raised for Finance.' : '.'}`
+        : 'It is waiting for Director approval.')],
     ['DELETE', /^\/api\/projects\/[^/]+$/, 'delete the project', 'Project deleted'],
     ['POST', /^\/api\/projects\/[^/]+\/approve$/, 'approve the project', 'Project approved'],
     ['POST', /^\/api\/projects\/[^/]+\/reject$/, 'reject the project', 'Project sent back'],
@@ -274,11 +278,18 @@ const CresAPI = (() => {
     try {
       const data = await rawRequest(path, options, retry);
       if (info) {
-        const title = options.toastSuccess === false ? null : options.toastSuccess || info.title;
+        const plainBody = typeof FormData !== 'undefined' && options.body instanceof FormData ? null : options.body;
+        let title = options.toastSuccess;
+        if (title === undefined) {
+          try {
+            title = typeof info.title === 'function' ? info.title(data, plainBody) : info.title;
+          } catch {
+            title = 'Done';
+          }
+        }
         if (title) {
           let detail = null;
           try {
-            const plainBody = typeof FormData !== 'undefined' && options.body instanceof FormData ? null : options.body;
             detail = info.detail ? info.detail(data, plainBody) : null;
           } catch {
             detail = null;
