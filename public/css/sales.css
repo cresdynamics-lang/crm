@@ -751,3 +751,6 @@ body.modal-open {
   font-size: 0.75rem;
   margin-right: 4px;
 }
+
+/* The client card opens on top of the project window, never behind it */
+#client-card-modal { z-index: 80; }
