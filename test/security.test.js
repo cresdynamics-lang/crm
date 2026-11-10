@@ -95,3 +95,17 @@ test('reading payroll pages does not write payroll rows', async () => {
   if (users.developer) await call(users.developer, '/api/salaries/me');
   assert.equal(await count(), before);
 });
+
+test('rotating a forged X-Forwarded-For does not reset the sign-in limit', async () => {
+  const email = `spoof-${Date.now()}@example.invalid`;
+  let blocked = 0;
+  for (let i = 1; i <= 8; i++) {
+    const r = await call(null, '/api/auth/login', {
+      method: 'POST',
+      body: { email, password: 'wrong-password' },
+      headers: { 'X-Forwarded-For': `10.88.0.${i}`, 'X-Real-IP': '127.0.0.9' },
+    });
+    if (r.status === 429) blocked++;
+  }
+  assert.ok(blocked >= 1, 'limit still applies when X-Forwarded-For changes each time');
+});

@@ -14,8 +14,13 @@ const { getRedis } = require('../config/redis');
 const WINDOW_SEC = 15 * 60;
 const memory = new Map(); // key -> { count, until }
 
+/**
+ * The real client address. nginx sets X-Real-IP from the connection itself ($remote_addr),
+ * so it cannot be forged. X-Forwarded-For is NOT used: clients can send their own, and
+ * rotating it would reset every per-IP limit.
+ */
 function clientIp(req) {
-  return req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() || req.ip || 'unknown';
+  return req.headers['x-real-ip']?.toString().trim() || req.socket?.remoteAddress || req.ip || 'unknown';
 }
 
 function memoryCount(key) {
@@ -64,16 +69,17 @@ async function clear(key) {
  * Wrap an auth action. `limit` is the failures allowed per email+IP.
  * Only failed attempts count; success clears the email+IP counter.
  */
-function guardAuth(scope, { limit = 5, ipLimit = 30 } = {}) {
+function guardAuth(scope, { limit = 5, ipLimit = 30, emailLimit = 25 } = {}) {
   return async (req, _res, next) => {
     const email = String(req.body?.email || '').trim().toLowerCase();
     const ip = clientIp(req);
     req.authLimitKeys = {
       pair: `authlimit:${scope}:${email}:${ip}`,
       ip: `authlimit:${scope}:ip:${ip}`,
+      email: `authlimit:${scope}:email:${email}`, // one account guessed from many addresses
     };
-    const [pair, perIp] = await Promise.all([count(req.authLimitKeys.pair), count(req.authLimitKeys.ip)]);
-    if (pair >= limit || perIp >= ipLimit) {
+    const [pair, perIp, perEmail] = await Promise.all([count(req.authLimitKeys.pair), count(req.authLimitKeys.ip), count(req.authLimitKeys.email)]);
+    if (pair >= limit || perIp >= ipLimit || perEmail >= emailLimit) {
       return next(new AppError('Too many attempts. Wait 15 minutes and try again, or reset your password.', 429, 'TOO_MANY_ATTEMPTS'));
     }
     return next();
@@ -82,7 +88,7 @@ function guardAuth(scope, { limit = 5, ipLimit = 30 } = {}) {
 
 async function recordFailure(req) {
   if (!req.authLimitKeys) return;
-  await Promise.all([bump(req.authLimitKeys.pair), bump(req.authLimitKeys.ip)]);
+  await Promise.all([bump(req.authLimitKeys.pair), bump(req.authLimitKeys.ip), bump(req.authLimitKeys.email)]);
 }
 
 async function recordSuccess(req) {
