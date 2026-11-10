@@ -1,0 +1,22 @@
+/*
+ * Phones: the screen stays put.
+ *  - never slides left or right
+ *  - typing in a box does not zoom or shift the page (iPhone zooms any box under 16px)
+ *  - the visible area follows the on-screen keyboard (dvh) so Send is never pushed off
+ */
+html, body { max-width: 100%; overflow-x: hidden; overscroll-behavior-x: none; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+img, video, canvas, svg, iframe { max-width: 100%; }
+
+@media (max-width: 860px) {
+  input, select, textarea, button { font-size: 16px !important; }
+  input[type='checkbox'], input[type='radio'], input[type='range'] { font-size: inherit !important; }
+  .chat-composer input { font-size: 16px !important; }
+
+  /* Wide tables and grids scroll inside their own box instead of widening the page */
+  .main-content, .face, .card, .panel, .settings-section, .modal-card, .modal-body { min-width: 0; max-width: 100%; }
+  table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .kpi-grid, .form-grid { max-width: 100%; }
+  pre, code { white-space: pre-wrap; word-break: break-word; }
+  .main-content { overflow-x: hidden; }
+  .modal-card { width: calc(100vw - 24px) !important; max-width: calc(100vw - 24px) !important; }
+}

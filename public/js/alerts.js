@@ -5,6 +5,7 @@
  *  - Sounds are synthesised in the browser (no files), so they work offline.
  *  - Browsers only allow sound after the person has touched the page once; the first tap/click unlocks it.
  *  - When the tab is hidden a system notification is shown (laptop and phone) and the tab title counts up.
+ *  - There is no on-screen switch: the device's own notification and volume settings decide.
  *  - A phone can only ring while the app is open or in the background. Ringing with the app closed
  *    needs Web Push, which is a separate step.
  */
@@ -168,42 +169,26 @@ const CresAlerts = (() => {
     });
   }
 
-  /** Small bell in the corner: sound on/off, test, and allow system notifications. */
-  function mountControl() {
-    if (document.getElementById('cres-alerts-btn') || !document.body) return;
-    const btn = document.createElement('button');
-    btn.id = 'cres-alerts-btn';
-    btn.type = 'button';
-    btn.setAttribute('aria-label', 'Alert sounds');
-    btn.style.cssText = 'position:fixed;left:12px;bottom:12px;z-index:2147483000;width:40px;height:40px;border-radius:50%;border:1px solid rgba(128,128,128,.4);background:rgba(20,30,50,.85);color:#fff;font-size:18px;cursor:pointer;';
-    const pop = document.createElement('div');
-    pop.style.cssText = 'position:fixed;left:12px;bottom:60px;z-index:2147483000;display:none;min-width:230px;padding:12px;border-radius:10px;background:#16233b;color:#fff;border:1px solid rgba(128,128,128,.4);font:14px/1.4 system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.4);';
-    document.body.append(btn, pop);
-    const paint = () => {
-      const p = prefs();
-      const perm = typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
-      btn.textContent = p.sound ? '🔔' : '🔕';
-      pop.innerHTML = `
-        <label style="display:flex;gap:8px;align-items:center;margin-bottom:8px;"><input type="checkbox" id="ca-sound" ${p.sound ? 'checked' : ''}> Play sounds and ring</label>
-        <label style="display:block;margin-bottom:8px;">Volume <input type="range" id="ca-vol" min="0.1" max="1" step="0.1" value="${p.volume}" style="width:100%"></label>
-        <label style="display:flex;gap:8px;align-items:center;margin-bottom:8px;"><input type="checkbox" id="ca-desk" ${p.desktop ? 'checked' : ''}> Pop-up alerts when this tab is hidden</label>
-        ${perm === 'default' ? '<button type="button" id="ca-allow" style="width:100%;margin-bottom:8px;padding:8px;">Allow system notifications</button>' : ''}
-        ${perm === 'denied' ? '<div style="font-size:12px;opacity:.8;margin-bottom:8px;">System notifications are blocked in this browser. Allow them in the site settings.</div>' : ''}
-        <button type="button" id="ca-test" style="width:100%;padding:8px;">Test sound</button>`;
-      pop.querySelector('#ca-sound').onchange = (e) => { savePrefs({ ...prefs(), sound: e.target.checked }); paint(); };
-      pop.querySelector('#ca-vol').oninput = (e) => savePrefs({ ...prefs(), volume: Number(e.target.value) });
-      pop.querySelector('#ca-desk').onchange = (e) => savePrefs({ ...prefs(), desktop: e.target.checked });
-      pop.querySelector('#ca-test').onclick = () => { audio(); play('notify'); setTimeout(() => play('mail'), 700); };
-      const allow = pop.querySelector('#ca-allow');
-      if (allow) allow.onclick = async () => { await Notification.requestPermission().catch(() => {}); paint(); };
+  /**
+   * No in-app switches: sound and pop-ups follow the device. The first time the person touches the page
+   * after signing in, the browser or phone itself asks "Allow notifications?"; their answer (and the
+   * phone's own volume / silent / focus settings) decide the rest.
+   */
+  function askPermissionOnce() {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'default') return;
+    try { if (localStorage.getItem('cres.alerts.asked')) return; } catch { /* private mode: ask anyway */ }
+    const ask = () => {
+      ['pointerdown', 'keydown', 'touchend'].forEach((e) => window.removeEventListener(e, ask, true));
+      if (typeof CresAPI !== 'undefined' && !CresAPI.getAccess()) return;
+      try { localStorage.setItem('cres.alerts.asked', '1'); } catch { /* ignore */ }
+      Notification.requestPermission().catch(() => {});
     };
-    btn.onclick = () => { audio(); pop.style.display = pop.style.display === 'none' ? 'block' : 'none'; paint(); };
-    paint();
+    ['pointerdown', 'keydown', 'touchend'].forEach((e) => window.addEventListener(e, ask, true));
   }
 
   function init() {
     wire();
-    mountControl();
+    askPermissionOnce();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();

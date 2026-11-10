@@ -52,7 +52,9 @@ router.get(
     }
 
     const { rows } = await query(
-      `SELECT *
+      `SELECT c.*,
+              (SELECT COUNT(*)::int FROM messages m
+                WHERE m.conversation_id = c.id AND m.sender_id <> $1 AND m.read_at IS NULL AND m.deleted_at IS NULL) AS unread_count
        FROM (
          SELECT DISTINCT ON (id) *
          FROM conversations
@@ -60,7 +62,7 @@ router.get(
            AND NOT ($1 = ANY(archived_by))
          ORDER BY id
        ) c
-       ORDER BY updated_at DESC`,
+       ORDER BY c.updated_at DESC`,
       [req.user.id]
     );
     res.json({ ok: true, data: rows });

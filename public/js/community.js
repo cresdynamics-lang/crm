@@ -86,6 +86,9 @@ const CresCommunity = (() => {
    */
   function renderConversationList() {
     const list = document.getElementById('conv-list');
+    const totalUnread = conversations.reduce((n, c) => n + (c.id === activeId ? 0 : Number(c.unread_count || 0)), 0);
+    const h = document.querySelector('.conv-toolbar h3');
+    if (h) h.textContent = totalUnread ? `Chats (${totalUnread})` : 'Chats';
     const selfId = me().id;
     const q = (document.getElementById('conv-search')?.value || '').trim().toLowerCase();
     const match = (u) => !q || String(u.name || '').toLowerCase().includes(q) || String(u.role || '').toLowerCase().includes(q);
@@ -116,6 +119,7 @@ const CresCommunity = (() => {
             <div class="cname">${escapeHtml(peer.name)}</div>
             <div class="cpreview">${onlineIds.has(peer.id) ? 'online' : escapeHtml(peer.role || '')}</div>
           </div>
+          ${c.unread_count && c.id !== activeId ? `<span class="unread-badge">${c.unread_count > 99 ? '99+' : c.unread_count}</span>` : ''}
         </li>`);
     const peopleRows = people.map((u) => `<li class="conv-item person" data-user="${u.id}">
           <span class="avatar-wrap">${peerAvatar(u)}${dot(u.id)}</span>
@@ -145,6 +149,9 @@ const CresCommunity = (() => {
   async function openConversation(id) {
     if (activeId) CresRealtime.leaveConversation(activeId);
     activeId = id;
+    const mine = conversations.find((c) => c.id === id);
+    if (mine) mine.unread_count = 0;
+    document.getElementById('community-layout')?.classList.remove('show-list'); // phone: show the chat
     renderConversationList();
 
     document.getElementById('chat-empty').hidden = true;
@@ -606,6 +613,12 @@ const CresCommunity = (() => {
     document.addEventListener('click', () => {
       hideContextMenu();
       hideMsgMenu();
+    });
+    // Phone: start on the chat list; the back button returns to it
+    document.getElementById('community-layout')?.classList.add('show-list');
+    document.getElementById('chat-back')?.addEventListener('click', () => {
+      document.getElementById('community-layout')?.classList.add('show-list');
+      loadConversations().catch(() => {});
     });
     CresRealtime.on('message', onRealtimeMessage);
     CresRealtime.on('messageStatus', onMessageStatus);
