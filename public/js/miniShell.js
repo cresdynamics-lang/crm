@@ -41,20 +41,22 @@
   function renderList() {
     const list = document.getElementById('ms-notif-list');
     if (!list) return;
-    list.innerHTML = notifs.length
-      ? notifs
+    const unreadOnly = notifs.filter((n) => !n.read_at); // read ones live in Notifications on the dashboard
+    list.innerHTML = unreadOnly.length
+      ? unreadOnly
           .slice(0, 30)
           .map((n) => `<button type="button" class="ms-notif${n.read_at ? '' : ' unread'}" data-id="${esc(n.id)}">
               <span>${esc(n.content)}</span>
               <small>${esc(new Date(n.created_at).toLocaleString())}</small>
             </button>`)
           .join('')
-      : '<div class="ms-empty">No notifications yet.</div>';
+      : '<div class="ms-empty">You\'re all caught up.</div>';
+    list.insertAdjacentHTML('beforeend', '<a class="ms-all" href="/dashboard#/notifications" style="display:block;padding:10px;text-align:center;">See all notifications</a>');
   }
 
   async function load() {
     try {
-      const res = await CresAPI.request('/api/notifications', { noCache: true });
+      const res = await CresAPI.request('/api/notifications?filter=unread&limit=100', { noCache: true });
       notifs = res.data || [];
       unread = Number(res.meta?.unread ?? notifs.filter((n) => !n.read_at).length);
       paintBadge();
@@ -87,6 +89,20 @@
     btn.setAttribute('aria-label', 'Open menu');
     btn.innerHTML = '<span></span><span></span><span></span>';
     top.prepend(btn);
+
+    // Back: to where you came from inside CRES OS, else the dashboard
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.id = 'ms-back-btn';
+    back.className = 'ms-back';
+    back.setAttribute('aria-label', 'Back');
+    back.textContent = '‹';
+    back.addEventListener('click', () => {
+      const sameSite = document.referrer && new URL(document.referrer).origin === location.origin && !/\/login/.test(document.referrer);
+      if (sameSite && history.length > 1) history.back();
+      else location.href = '/dashboard';
+    });
+    top.prepend(back);
 
     const right = top.querySelector('.mt-top-right') || top;
     const bell = document.createElement('div');

@@ -7,13 +7,17 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { start, stop, roleUsers, tokenFor, call } = require('./helpers');
+const { start, stop, roleUsers, tokenFor, call, clearAuthLimits } = require('./helpers');
 
 let base;
 before(async () => {
   base = await start();
+  await clearAuthLimits();
 });
-after(stop);
+after(async () => {
+  await clearAuthLimits();
+  await stop();
+});
 
 test('uploaded files need a signed-in user', async () => {
   const dir = path.join(__dirname, '..', 'uploads', 'avatars');

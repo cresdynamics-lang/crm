@@ -388,7 +388,8 @@ async function alertStaleLeads() {
      WHERE r.name IN ('director', 'admin') AND u.status = 'active'`
   );
 
-  let sent = 0;
+  // One notification per person per day, listing their stale leads (it used to be one per lead per day: thousands)
+  const byUser = new Map();
   for (const row of rows) {
     const recipients = [row.owner_id, ...directors.map((d) => d.id)];
     for (const userId of [...new Set(recipients.filter(Boolean))]) {
@@ -400,14 +401,22 @@ async function alertStaleLeads() {
         [row.lead_id, userId]
       );
       if (!inserted.rows[0]) continue;
-      await queueNotification({
-        userId,
-        type: 'lead_stale',
-        content: `Stale lead (no contact 7+ days): ${row.lead_name}`,
-        meta: { leadId: row.lead_id, lastContactAt: row.last_contact_at },
-      });
-      sent += 1;
+      if (!byUser.has(userId)) byUser.set(userId, []);
+      byUser.get(userId).push(row);
     }
+  }
+  let sent = 0;
+  for (const [userId, leads] of byUser) {
+    const names = leads.slice(0, 3).map((l) => l.lead_name).join(', ');
+    await queueNotification({
+      userId,
+      type: 'lead_stale',
+      content: leads.length === 1
+        ? `Stale lead (no contact 7+ days): ${leads[0].lead_name}`
+        : `${leads.length} leads have had no contact for 7+ days: ${names}${leads.length > 3 ? ` and ${leads.length - 3} more` : ''}`,
+      meta: { leadId: leads[0].lead_id, count: leads.length, href: '#/pipeline' },
+    });
+    sent += 1;
   }
   return { flagged: rows.length, notifications: sent };
 }
@@ -561,6 +570,7 @@ async function runOpsJobs() {
     console.error('[ops] mail follow-ups failed', e.message);
     return { reminded: 0, error: e.message };
   });
+  await require('./credentialReveal').wipeExpired().catch((e) => console.error('[ops] reveal wipe failed', e.message));
   return { overdue, penaltyCycle, followups, assignments, leadMails, stale, reportReminders, mailFollowups, at: new Date().toISOString() };
 }
 

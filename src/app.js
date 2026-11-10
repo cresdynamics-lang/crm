@@ -109,6 +109,7 @@ function createApp() {
   // Per-domain API groups
   app.use('/api/health', healthRoutes);
   app.use('/api/auth', authRoutes);
+  app.use('/api/welcome', require('./routes/welcome'));
   app.use('/api/users', usersRoutes);
   app.use('/api/leads', leadsRoutes);
   app.use('/api/clients', clientsRoutes);
@@ -154,6 +155,11 @@ function createApp() {
   // Shared shell faces (Step 2)
   app.get('/', (_req, res) => res.redirect('/login'));
   app.get('/login', (_req, res) => res.sendFile(path.join(publicDir, 'login.html')));
+  app.get('/welcome/:token', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.sendFile(path.join(publicDir, 'welcome.html'));
+  });
   app.get('/dashboard', (_req, res) => res.sendFile(path.join(publicDir, 'app.html')));
   app.get(['/meetings', '/meeting/:id'], (_req, res) => res.sendFile(path.join(publicDir, 'meeting.html')));
   app.get('/inbox', (_req, res) => res.sendFile(path.join(publicDir, 'inbox.html')));

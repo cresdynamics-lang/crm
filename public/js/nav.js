@@ -18,6 +18,12 @@ const CresNav = (() => {
       icon: '✦',
     },
     {
+      id: 'notifications',
+      label: 'Notifications',
+      href: '#/notifications',
+      icon: '🔔',
+    },
+    {
       id: 'community',
       label: 'Community',
       href: '#/community',

@@ -66,22 +66,20 @@ test('milestone changes read clearly for clients', () => {
   assert.equal(describeMilestoneChanges(before, before).length, 0, 'no change -> no email');
 });
 
-test('credentials email carries sign-in link, email and password', () => {
+test('credentials email hides the password behind a click-to-reveal link', () => {
   const { buildCredentialsEmail } = require('../src/services/staffCredentials');
   const m = buildCredentialsEmail({
     name: 'Test Person',
-    email: 'test.person@example.invalid',
-    password: 'Temp-Pass-123',
+    password: 'Temp-Pass-123', // must never appear
     role: 'developer',
     createdByName: 'Nelson',
+    revealUrl: `https://cresos.example.invalid/welcome/${'a'.repeat(64)}`,
   });
-  assert.match(m.body, /\/login/);
-  assert.match(m.body, /test\.person@example\.invalid/);
-  assert.match(m.body, /Temp-Pass-123/);
+  assert.match(m.body, /\/welcome\/a{64}/);
+  assert.match(m.html, /Click to see your login password/);
   assert.match(m.body, /Developer/);
-  assert.match(m.html, /Temp-Pass-123/);
+  assert.ok(!m.body.includes('Temp-Pass-123') && !m.html.includes('Temp-Pass-123'), 'password is not in the email');
 });
-
 test('report reminders only go out in working hours', () => {
   const { reportReminderWindowOpen } = require('../src/services/opsJobs');
   // 2026-11-09 is a Monday. 06:00 UTC = 09:00 Nairobi.

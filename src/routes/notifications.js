@@ -15,13 +15,14 @@ router.use(requirePermission('notifications', 'view'));
 router.get(
   '/',
   asyncHandler(async (req, res) => {
-    const unreadOnly = req.query.unread === 'true';
+    const unreadOnly = req.query.unread === 'true' || req.query.filter === 'unread';
+    const limit = Math.min(300, Math.max(1, Number(req.query.limit) || 100));
     const params = [req.user.id];
     let where = 'WHERE user_id = $1';
     if (unreadOnly) where += ' AND read_at IS NULL';
 
     const { rows } = await query(
-      `SELECT * FROM notifications ${where} ORDER BY created_at DESC LIMIT 100`,
+      `SELECT * FROM notifications ${where} ORDER BY created_at DESC LIMIT ${limit}`,
       params
     );
     // The real unread total (the list is capped at 100, the count is not)

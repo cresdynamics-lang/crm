@@ -95,4 +95,29 @@ async function recordSuccess(req) {
   if (req.authLimitKeys) await clear(req.authLimitKeys.pair);
 }
 
-module.exports = { guardAuth, recordFailure, recordSuccess, clientIp };
+/**
+ * After a successful password reset the person must be able to sign in at once: lift every sign-in
+ * lock held against that email (any address), not just the one they reset from.
+ */
+async function clearForEmail(email, scope = 'login') {
+  const e = String(email || '').trim().toLowerCase();
+  if (!e) return;
+  const prefix = `authlimit:${scope}:${e}:`;
+  const own = `authlimit:${scope}:email:${e}`;
+  for (const k of [...memory.keys()]) if (k.startsWith(prefix) || k === own) memory.delete(k);
+  try {
+    const r = getRedis();
+    if (r.status !== 'ready') return;
+    await r.del(own);
+    let cursor = '0';
+    do {
+      const [next, keys] = await r.scan(cursor, 'MATCH', `${prefix}*`, 'COUNT', 200);
+      cursor = next;
+      if (keys.length) await r.del(...keys);
+    } while (cursor !== '0');
+  } catch {
+    /* memory already cleared */
+  }
+}
+
+module.exports = { guardAuth, recordFailure, recordSuccess, clientIp, clearForEmail };

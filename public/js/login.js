@@ -58,13 +58,49 @@
       }
     }
     bind();
+    // Arriving from the "see your password" page: remind them which email to type (a masked hint, never the full address)
+    const hint = params.get('hint') || '';
+    if (/^[\w.\-+]{1,3}\.{5}[\w.\-+]{0,3}@[\w.\-]+$/.test(hint)) {
+      const el = document.getElementById('email-hint');
+      el.textContent = `Enter your email. Hint: ${hint}`;
+      el.hidden = false;
+      document.getElementById('email').focus();
+    }
     if (inviteToken) {
       state.inviteToken = inviteToken;
       showPanel('invite');
     }
   }
 
+  let resendTimer = null;
+  function startResendCooldown(seconds = 45) {
+    const btn = document.getElementById('resend-code');
+    let left = seconds;
+    clearInterval(resendTimer);
+    btn.disabled = true;
+    const tick = () => {
+      btn.textContent = left > 0 ? `Resend code (${left}s)` : 'Resend code';
+      if (left <= 0) { clearInterval(resendTimer); btn.disabled = false; }
+      left -= 1;
+    };
+    tick();
+    resendTimer = setInterval(tick, 1000);
+  }
+
   function bind() {
+    document.getElementById('resend-code').addEventListener('click', async () => {
+      const btn = document.getElementById('resend-code');
+      btn.disabled = true;
+      try {
+        await CresAPI.request('/api/auth/forgot-password', { method: 'POST', body: { email: state.email } }, false);
+        showOk('A new code is on its way. The old one no longer works.');
+        startResendCooldown();
+      } catch (err) {
+        showError(err.message);
+        btn.disabled = false;
+      }
+    });
+
     document.getElementById('goto-forgot').addEventListener('click', () => {
       const email = document.getElementById('email').value.trim();
       if (email) document.getElementById('forgot-email').value = email;
@@ -133,9 +169,10 @@
           body: { email: state.email },
         }, false);
         document.getElementById('verify-email-label').textContent = state.email;
-        showOk('If that email is registered, a code is on its way.');
         showPanel('verify');
-        showOk('Check your email for a 6-digit code.');
+        showOk('If that email is registered, a 6-digit code is on its way. It can take a minute.');
+        startResendCooldown();
+        document.getElementById('otp-code').focus();
       } catch (err) {
         showError(err.message);
       } finally {
@@ -184,9 +221,16 @@
             newPassword: pw,
           },
         }, false);
-        showPanel('login');
-        showOk('Password updated. Sign in with your new password.');
-        document.getElementById('email').value = state.email;
+        // Straight into the system with the new password
+        try {
+          await CresAPI.login(state.email, pw);
+          location.href = nextPath();
+          return;
+        } catch {
+          showPanel('login');
+          showOk('Password updated. Sign in with your new password.');
+          document.getElementById('email').value = state.email;
+        }
       } catch (err) {
         showError(err.message);
       } finally {

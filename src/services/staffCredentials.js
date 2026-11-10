@@ -1,8 +1,8 @@
 /**
  * Email a new staff member their CRES OS sign-in details.
  *
- * Sent directly (not through the BullMQ queue) so the first-time password is
- * never written to Redis job data or to failed_jobs. Retries a few times in the
+ * Sent directly (not through the BullMQ queue). The email carries a private reveal link, never the
+ * password; the password is stored encrypted and erased after it is seen. Retries a few times in the
  * background; if every attempt fails, the person who created the account gets an
  * in-app notice so they can hand the details over another way.
  */
@@ -32,37 +32,39 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
-function buildCredentialsEmail({ name, email, password, role, createdByName }) {
+/**
+ * The email never contains the password. It carries a private "Click to see your login password" link:
+ * the page shows the password after a click, then a Login button that opens the sign-in page with a hint
+ * about which email to type.
+ */
+function buildCredentialsEmail({ name, role, createdByName, revealUrl }) {
   const roleLabel = ROLE_LABELS[role] || role || 'Staff';
-  const url = loginUrl();
   const first = String(name || '').trim().split(/\s+/)[0] || 'there';
-  const subject = 'Your CRES OS account is ready';
+  const subject = 'Your CRES OS account is ready - tap to see your login';
   const body = [
     `Hi ${first},`,
     '',
-    `${createdByName ? `${createdByName} has` : 'An account has been'} created your CRES OS account at Cres Dynamics.`,
+    `${createdByName ? `${createdByName} has` : 'An account has been'} created your CRES OS account at Cres Dynamics (${roleLabel}).`,
     '',
-    `Sign in: ${url}`,
-    `Email: ${email}`,
-    `Temporary password: ${password}`,
-    `Role: ${roleLabel}`,
+    'Your login password is hidden for your safety.',
+    `Click here to see it: ${revealUrl}`,
     '',
-    'After you sign in, change this password under Settings > Password.',
-    'Do not share it with anyone. If you did not expect this email, tell your manager.',
+    'The page shows your password once, then a Login button. Sign in with the email address this message was sent to.',
+    'The link works for 7 days. After you sign in, change the password under Settings > Password.',
+    'If you did not expect this email, tell your manager.',
     '',
-    '— Cres Dynamics',
+    '- Cres Dynamics',
   ].join('\n');
   const html = `
   <p>Hi ${escapeHtml(first)},</p>
-  <p>${createdByName ? `${escapeHtml(createdByName)} has` : 'An account has been'} created your <strong>CRES OS</strong> account at Cres Dynamics.</p>
-  <table style="border-collapse:collapse;margin:12px 0;font-size:14px;">
-    <tr><td style="padding:6px 12px 6px 0;color:#5b6b80;">Sign in</td><td style="padding:6px 0;"><a href="${escapeHtml(url)}">${escapeHtml(url)}</a></td></tr>
-    <tr><td style="padding:6px 12px 6px 0;color:#5b6b80;">Email</td><td style="padding:6px 0;">${escapeHtml(email)}</td></tr>
-    <tr><td style="padding:6px 12px 6px 0;color:#5b6b80;">Temporary password</td><td style="padding:6px 0;font-family:monospace;font-size:15px;"><strong>${escapeHtml(password)}</strong></td></tr>
-    <tr><td style="padding:6px 12px 6px 0;color:#5b6b80;">Role</td><td style="padding:6px 0;">${escapeHtml(roleLabel)}</td></tr>
-  </table>
-  <p><a href="${escapeHtml(url)}" style="display:inline-block;background:#00a8c5;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;">Sign in to CRES OS</a></p>
-  <p>After you sign in, change this password under <strong>Settings &rsaquo; Password</strong>. Do not share it with anyone.</p>
+  <p>${createdByName ? `${escapeHtml(createdByName)} has` : 'An account has been'} created your <strong>CRES OS</strong> account at Cres Dynamics as <strong>${escapeHtml(roleLabel)}</strong>.</p>
+  <div style="margin:18px 0;padding:18px;border:1px dashed #00a8c5;border-radius:10px;background:#f3fbfd;text-align:center;">
+    <div style="font-size:13px;color:#5b6b80;margin-bottom:6px;">Your login password is hidden for your safety</div>
+    <div style="font-family:monospace;font-size:20px;letter-spacing:4px;color:#1b2a4a;margin-bottom:12px;">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</div>
+    <a href="${escapeHtml(revealUrl)}" style="display:inline-block;background:#00a8c5;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:bold;">Click to see your login password</a>
+  </div>
+  <p style="font-size:14px;">The page shows your password once, then a <strong>Login</strong> button. Sign in with the email address this message was sent to. The link works for 7 days.</p>
+  <p style="font-size:14px;">After you sign in, change the password under <strong>Settings &rsaquo; Password</strong>.</p>
   <p style="color:#5b6b80;font-size:13px;">If you did not expect this email, tell your manager.</p>`;
   return { subject, body, html };
 }
@@ -70,7 +72,9 @@ function buildCredentialsEmail({ name, email, password, role, createdByName }) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function deliver(details, { attempts = 3, backoffMs = 5000 } = {}) {
-  const msg = buildCredentialsEmail(details);
+  const { createReveal } = require('./credentialReveal');
+  const { url } = await createReveal({ userId: details.userId, password: details.password });
+  const msg = buildCredentialsEmail({ ...details, revealUrl: url });
   let lastErr;
   for (let i = 0; i < attempts; i++) {
     try {

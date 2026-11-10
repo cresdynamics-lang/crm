@@ -17,12 +17,12 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/tokens.css?v=20261023" />
-  <link rel="stylesheet" href="/css/shell.css?v=20261109e" />
+  <link rel="stylesheet" href="/css/shell.css?v=20261110a" />
   <link rel="stylesheet" href="/css/toast.css?v=20261109c" />
   <link rel="stylesheet" href="/css/community.css?v=20261110c" />
   <link rel="stylesheet" href="/css/sales.css?v=20261110a" />
   <link rel="stylesheet" href="/css/jarvis.css?v=20261023f" />
-  <link rel="stylesheet" href="/css/mobile.css?v=20261110a" />
+  <link rel="stylesheet" href="/css/mobile.css?v=20261110c" />
 </head>
 <body class="shell-page">
   <div class="app-shell" id="app-shell">
@@ -39,6 +39,7 @@
         <button type="button" class="hamburger" id="hamburger" aria-label="Open menu">
           <span></span><span></span><span></span>
         </button>
+        <button type="button" class="nav-back" id="nav-back" aria-label="Back" title="Back" hidden>‹</button>
         <h1 class="page-title" id="page-title">Home</h1>
         <div class="live-indicator" id="live-indicator" title="Realtime connection" hidden>
           <span class="dot"></span>
@@ -1048,6 +1049,22 @@
             <tbody id="employees-tbody"></tbody>
           </table>
         </div>
+      </section>
+
+      <section class="face" id="face-notifications" data-title="Notifications">
+        <div class="face-hero">
+          <h2>Notifications</h2>
+          <p>Everything that has happened for you. Each one has a button that takes you straight to it. The bell in the top bar only keeps what you have not read.</p>
+        </div>
+        <div class="toolbar">
+          <div class="ib-tabs" id="notif-page-tabs" style="display:flex;gap:6px;">
+            <button type="button" class="btn btn-ghost btn-sm on" data-filter="unread">Unread</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-filter="all">All</button>
+          </div>
+          <div class="spacer"></div>
+          <button type="button" class="btn btn-ghost btn-sm" id="notif-page-readall">Mark all read</button>
+        </div>
+        <div id="notif-page-list"></div>
       </section>
 
       <section class="face" id="face-leave" data-title="Leave">
@@ -2153,9 +2170,10 @@
   <script src="/js/jarvis.js?v=20261023g"></script>
   <script src="/js/format.js?v=20261021e"></script>
   <script src="/js/receipts.js?v=20260815g"></script>
-  <script src="/js/nav.js?v=20261109b"></script>
+  <script src="/js/nav.js?v=20261110a"></script>
   <script src="/js/socket.js?v=20261029f"></script>
   <script src="/js/alerts.js?v=20261110b"></script>
+  <script src="/js/notifActions.js?v=20261110a"></script>
   <script src="/js/calls.js?v=20261023i"></script>
   <script src="/js/settings.js?v=20261109a"></script>
   <script src="/js/tasks.js?v=20261021b"></script>
@@ -2177,7 +2195,7 @@
   <script src="/js/admin.js?v=20261109a"></script>
   <script src="/js/client.js?v=20261021d"></script>
   <script src="/js/adminHealth.js?v=20261109b"></script>
-  <script src="/js/shell.js?v=20261109c"></script>
+  <script src="/js/shell.js?v=20261110b"></script>
   <script src="/js/pwa.js?v=20261109a"></script>
 </body>
 </html>

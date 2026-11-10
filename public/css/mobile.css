@@ -20,3 +20,46 @@ img, video, canvas, svg, iframe { max-width: 100%; }
   .main-content { overflow-x: hidden; }
   .modal-card { width: calc(100vw - 24px) !important; max-width: calc(100vw - 24px) !important; }
 }
+
+/* ---------- Phone top bar: clear of the status bar, easy to tap ---------- */
+@media (max-width: 860px) {
+  :root { --topbar-h: calc(52px + env(safe-area-inset-top, 0px)); }
+  .app-shell { grid-template-rows: var(--topbar-h) minmax(0, 1fr); }
+  .topbar { padding-top: env(safe-area-inset-top, 0px); padding-left: max(10px, env(safe-area-inset-left, 0px)); padding-right: max(10px, env(safe-area-inset-right, 0px)); z-index: 40; }
+  .mt-top { padding-top: calc(env(safe-area-inset-top, 0px) + 6px); }
+  /* 44px is the smallest comfortable thumb target */
+  .hamburger, .nav-back, .icon-btn, .profile-btn, .ms-menu-btn, .ms-bell, .ms-back { min-width: 44px; min-height: 44px; }
+  .hamburger { width: 44px !important; height: 44px !important; display: grid !important; place-items: center; touch-action: manipulation; }
+  .hamburger span { width: 18px !important; margin: 2.5px 0 !important; }
+  .page-title { font-size: 1rem; }
+  button, a, [role='button'] { touch-action: manipulation; }
+}
+
+/* ---------- Phone content: moderate, not stretched ---------- */
+@media (max-width: 600px) {
+  .main-content { padding: 12px 12px 20px !important; }
+  .face-hero { margin-bottom: 12px; }
+  .face-hero h2 { font-size: 1.25rem; }
+  .face-hero p { font-size: 0.88rem; }
+  .kpi-grid { gap: 8px; margin-bottom: 12px; }
+  .kpi-card { padding: 10px 12px; }
+  .kpi-card .kpi-label { font-size: 0.66rem; }
+  .kpi-card .kpi-value { font-size: 1.3rem; margin-top: 4px; }
+  .chart-panel, .settings-section { padding: 12px; margin-bottom: 12px; }
+  .toolbar { gap: 8px; flex-wrap: wrap; }
+  h3 { font-size: 1rem; }
+}
+
+/* ---------- Back button ---------- */
+.nav-back { display: inline-flex; align-items: center; justify-content: center; font-size: 1.6rem; line-height: 1; padding: 0 8px; border: 1px solid var(--border); background: transparent; color: inherit; border-radius: 10px; cursor: pointer; flex: 0 0 auto; }
+.nav-back[hidden] { display: none; }
+.ms-back { display: inline-flex; align-items: center; justify-content: center; font-size: 1.5rem; line-height: 1; padding: 0 10px; border: 1px solid var(--border); background: transparent; color: inherit; border-radius: 10px; cursor: pointer; flex: 0 0 auto; }
+@media (max-width: 860px) {
+  .sidebar { padding-top: env(safe-area-inset-top, 0px); overflow-y: auto; -webkit-overflow-scrolling: touch; }
+}
+@media (max-width: 860px) {
+  /* The menu drawer: small logo, compact rows, so the whole menu fits without scrolling */
+  .sidebar-brand { padding: 8px 12px; }
+  .sidebar-brand .brand-logo { max-height: 40px; width: auto; }
+  .nav-list a { padding-top: 9px; padding-bottom: 9px; }
+}

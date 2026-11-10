@@ -225,6 +225,20 @@
   };
 
   const shell = document.getElementById('app-shell');
+  document.getElementById('nav-back')?.addEventListener('click', () => {
+    let target = '#/';
+    try {
+      const trail = JSON.parse(sessionStorage.getItem('cres_trail') || '[]');
+      trail.pop(); // where I am now
+      target = trail.pop() || '#/';
+      sessionStorage.setItem('cres_trail', JSON.stringify(trail));
+    } catch { /* go home */ }
+    // A modal (project, client card...) is the first thing "back" should close
+    const open = document.querySelector('.modal-backdrop.open');
+    if (open) { open.classList.remove('open'); return; }
+    location.hash = target;
+  });
+
   document.getElementById('hamburger')?.addEventListener('click', (e) => {
     e.stopPropagation();
     shell.classList.toggle('nav-open');
@@ -245,6 +259,16 @@
     const faceParam = segments[1] || null;
     const path = faceId === 'home' ? '/' : `/${faceId}`;
     const face = document.getElementById(`face-${faceId}`);
+
+    // Back button: remember where you have been inside the system (not the sign-in page)
+    try {
+      const trail = JSON.parse(sessionStorage.getItem('cres_trail') || '[]');
+      const here = location.hash || '#/';
+      if (trail[trail.length - 1] !== here) trail.push(here);
+      sessionStorage.setItem('cres_trail', JSON.stringify(trail.slice(-30)));
+    } catch { /* private mode: back goes home */ }
+    const backBtn = document.getElementById('nav-back');
+    if (backBtn) backBtn.hidden = faceId === 'home' && !faceParam;
 
     if (faceId === 'community' && user.role === 'client') {
       location.hash = '#/';
@@ -535,6 +559,9 @@
 
     if (faceId === 'settings') {
       await safeMount('CresSettings', () => CresSettings.load());
+    }
+    if (faceId === 'notifications') {
+      await safeMount('CresNotifActions', () => CresNotifActions.mount(user));
     }
     if (faceId === 'email' && user.role === 'admin') {
       const heading = document.getElementById('email-heading');
@@ -835,10 +862,13 @@
   });
   searchDrop?.addEventListener('click', (e) => e.stopPropagation());
 
+  // The Notifications section changed something (marked read): refresh the bell
+  window.addEventListener('cres:notifs-changed', () => loadNotifications());
+
   // Notifications
   async function loadNotifications({ greet = false } = {}) {
     try {
-      const res = await CresAPI.request('/api/notifications', { noCache: true });
+      const res = await CresAPI.request('/api/notifications?filter=unread&limit=100', { noCache: true });
       state.notifs = res.data || [];
       state.unreadTotal = Number(res.meta?.unread ?? state.notifs.filter((n) => !n.read_at).length);
       updateBadge();
@@ -906,29 +936,7 @@
   }
 
   function hrefForNotification(n) {
-    const meta = parseNotifMeta(n);
-    if (meta.href) return meta.href;
-    const type = String(n.type || '').toLowerCase();
-    if (meta.conversationId || type.includes('message')) return '#/community';
-    if (meta.taskId || type.includes('task')) return '#/work';
-    if (meta.leaveId || type.includes('leave')) return '#/leave?mine=1';
-    if (meta.fundingId || type.includes('salary_funding') || type.includes('funding')) {
-      return '#/salary-funding';
-    }
-    if (meta.expenseId || type.includes('expense')) return '#/expenses';
-    if (meta.followupId || type.includes('followup')) return '#/followups';
-    if (meta.invoiceId || type.includes('invoice') || type.includes('payment')) {
-      return '#/invoices';
-    }
-    if (meta.projectId) return `#/projects/${meta.projectId}`;
-    if (type.includes('approval') || type.includes('project') || type.includes('milestone')) {
-      return user.role === 'director' || user.role === 'admin' ? '#/approvals' : '#/projects';
-    }
-    if (type.includes('report')) {
-      return ['admin', 'director', 'pm', 'finance'].includes(user.role) ? '#/reports' : '#/work';
-    }
-    if (type.includes('assign')) return '#/projects';
-    return null;
+    return CresNotifActions.action(n, user).href;
   }
 
   function actionHintForNotification(n) {
@@ -984,49 +992,41 @@
 
   function renderNotifs() {
     const list = document.getElementById('notif-list');
-    if (!state.notifs.length) {
-      list.innerHTML = `<div class="notif-empty">No notifications yet.${
-        user.role === 'finance' ? ' Your system feed will appear here.' : ''
-      }</div>`;
+    // The bell only holds what you have not read. Read ones live in the Notifications section.
+    const unread = state.notifs.filter((n) => !n.read_at);
+    if (!unread.length) {
+      list.innerHTML = `<div class="notif-empty">You're all caught up.</div>
+        <a class="notif-all" href="#/notifications">See all notifications</a>`;
+      list.querySelector('.notif-all').addEventListener('click', () => document.getElementById('notif-dropdown')?.classList.remove('open'));
       return;
     }
-    list.innerHTML = state.notifs
-      .slice(0, 40)
+    list.innerHTML = unread
+      .slice(0, 30)
       .map((n) => {
-        const unread = n.read_at ? '' : 'unread';
         const when = CresFormat.datetime(n.created_at);
-        const href = hrefForNotification(n);
-        return `<button type="button" class="notif-item ${unread}" data-id="${escapeHtml(n.id)}" data-has-href="${href ? '1' : '0'}">
+        const act = CresNotifActions.action(n, user);
+        return `<button type="button" class="notif-item unread" data-id="${escapeHtml(n.id)}">
           <span>${escapeHtml(n.content)}</span>
-          <span class="ntime">${escapeHtml(n.type)} · ${when}${href ? ' · Open →' : ''}</span>
+          <span class="ntime">${escapeHtml(String(n.type || '').replace(/_/g, ' '))} · ${when} · <b>${escapeHtml(act.label)} →</b></span>
         </button>`;
       })
-      .join('');
+      .join('') + `<a class="notif-all" href="#/notifications">See all notifications</a>`;
+    list.querySelector('.notif-all').addEventListener('click', () => document.getElementById('notif-dropdown')?.classList.remove('open'));
 
     list.querySelectorAll('.notif-item').forEach((el) => {
       el.addEventListener('click', async () => {
         const n = state.notifs.find((x) => x.id === el.dataset.id);
-        try {
-          if (n && !n.read_at) {
-            n.read_at = new Date().toISOString(); // marked read the moment it's opened
-            state.unreadTotal = Math.max(0, Number(state.unreadTotal || 0) - 1);
-            updateBadge();
-            el.classList.remove('unread');
-          }
-          await CresAPI.request(`/api/notifications/${el.dataset.id}/read`, { method: 'POST', toast: false });
-        } catch {
-          // ignore
+        if (n && !n.read_at) {
+          n.read_at = new Date().toISOString(); // read: it leaves the bell now
+          state.unreadTotal = Math.max(0, Number(state.unreadTotal || 0) - 1);
+          updateBadge();
+          el.remove();
+          if (!list.querySelector('.notif-item')) renderNotifs();
         }
+        CresAPI.request(`/api/notifications/${el.dataset.id}/read`, { method: 'POST', toast: false }).catch(() => {});
+        window.dispatchEvent(new Event('cres:notifs-changed-local'));
         document.getElementById('notif-dropdown')?.classList.remove('open');
-        if (!n) return;
-        const href = hrefForNotification(n);
-        if (href) {
-          // Full page links (e.g. /meeting/<id>) leave the dashboard; the rest are in-app routes.
-          if (href.startsWith('/')) location.href = href;
-          else location.hash = href;
-        } else {
-          openNotificationDetail(n);
-        }
+        if (n) CresNotifActions.go(hrefForNotification(n));
       });
     });
   }
