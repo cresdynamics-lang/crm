@@ -557,7 +557,11 @@ async function runOpsJobs() {
     console.error('[ops] report reminders failed', e.message);
     return { reminded: 0, error: e.message };
   });
-  return { overdue, penaltyCycle, followups, assignments, leadMails, stale, reportReminders, at: new Date().toISOString() };
+  const mailFollowups = await require('./mailFollowups').remindMailFollowups().catch((e) => {
+    console.error('[ops] mail follow-ups failed', e.message);
+    return { reminded: 0, error: e.message };
+  });
+  return { overdue, penaltyCycle, followups, assignments, leadMails, stale, reportReminders, mailFollowups, at: new Date().toISOString() };
 }
 
 function startOpsScheduler(intervalMs = 5 * 60 * 1000) {

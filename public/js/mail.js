@@ -12,6 +12,7 @@
 
   let box = 'inbox';
   let items = [];
+  let followupData = { waiting: [], unanswered: [] };
   let people = [];
   let projects = [];
   let current = null;
@@ -38,6 +39,12 @@
       return;
     }
     $('ml-main').hidden = false;
+    const wanted = new URLSearchParams(location.search).get('box');
+    if (['inbox', 'done', 'sent', 'followups'].includes(wanted)) {
+      box = wanted;
+      $('ml-tabs').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x.dataset.box === box));
+      $('ml-search-wrap').hidden = box !== 'sent';
+    }
     bind();
     live();
     CresAPI.request('/api/mail/people').then((r) => { people = r.data?.people || []; }).catch(() => {});
@@ -58,19 +65,66 @@
 
   async function loadList({ quiet = false } = {}) {
     try {
-      const res = await CresAPI.request(`/api/mail?box=${box}`, { noCache: true });
-      items = res.data || [];
+      const q = box === 'sent' ? $('ml-search').value.trim() : '';
+      const res = await CresAPI.request(`/api/mail?box=${box}${q ? `&q=${encodeURIComponent(q)}` : ''}`, { noCache: true });
+      followupData = box === 'followups' ? res.data || { waiting: [], unanswered: [] } : followupData;
+      items = box === 'followups' ? [...followupData.waiting, ...followupData.unanswered] : res.data || [];
       if (res.meta?.me) me = res.meta.me;
       $('ml-identity').textContent = me.from ? `You send as: ${me.from}` : '';
       const c = res.meta?.counts;
-      if (c) document.querySelector('[data-count="inbox"]').textContent = c.unread ? String(c.unread) : '';
+      if (c) {
+        document.querySelector('[data-count="inbox"]').textContent = c.unread ? String(c.unread) : '';
+        document.querySelector('[data-count="followups"]').textContent = c.followups ? String(c.followups) : '';
+      }
       render();
     } catch (err) {
       if (!quiet) $('ml-list').innerHTML = `<li class="mt-muted small ib-empty">${esc(err.message)}</li>`;
     }
   }
 
+  function renderFollowups() {
+    const row = (f) => `<li class="ib-item" data-fid="${esc(f.id)}" data-kind="${f.kind}">
+        <div class="ib-item-top"><span class="ib-from">${f.kind === 'waiting' ? `No reply from ${esc(f.to)}` : `You haven't answered ${esc(f.from)}`}</span><span class="ib-when">${f.days} day${f.days === 1 ? '' : 's'}</span></div>
+        <div class="ib-subj">${esc(f.subject)}</div><div class="ib-snip">${esc(f.snippet || '')}</div>
+        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
+          <button type="button" class="mt-btn sm primary" data-fu="draft">✦ Draft follow-up with Jarvis</button>
+          ${f.kind === 'unanswered' ? '<button type="button" class="mt-btn sm" data-fu="open">Open</button>' : ''}
+          <button type="button" class="mt-btn sm" data-fu="dismiss">Stop reminding</button>
+        </div></li>`;
+    const w = followupData.waiting.map(row).join('');
+    const u = followupData.unanswered.map(row).join('');
+    $('ml-list').innerHTML = (w ? `<li class="mt-muted small" style="padding:8px 12px;"><b>Waiting for their reply (2+ days)</b></li>${w}` : '')
+      + (u ? `<li class="mt-muted small" style="padding:8px 12px;"><b>Waiting for your reply (2+ days)</b></li>${u}` : '')
+      || '<li class="mt-muted small ib-empty">Nothing to follow up. Emails with no answer after 2 days appear here, and Jarvis can draft the follow-up.</li>';
+  }
+
+  async function followupAction(li, action) {
+    const f = [...followupData.waiting, ...followupData.unanswered].find((x) => x.id === li.dataset.fid);
+    if (!f) return;
+    if (action === 'dismiss') {
+      await CresAPI.request('/api/mail/followups/dismiss', { method: 'POST', body: { kind: f.kind, id: f.id }, toast: false });
+      return loadList();
+    }
+    if (action === 'open') { box = 'inbox'; $('ml-tabs').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x.dataset.box === 'inbox')); await loadList(); return open(f.id); }
+    const btn = li.querySelector('[data-fu="draft"]');
+    btn.disabled = true; btn.textContent = 'Jarvis is writing…';
+    try {
+      const res = await CresAPI.request('/api/mail/followups/draft', { method: 'POST', body: { kind: f.kind, id: f.id }, timeoutMs: 60000, toast: false });
+      openCompose();
+      $('mc-to').value = f.kind === 'waiting' ? f.compose_to : f.from;
+      $('mc-subject').value = res.data.subject || '';
+      $('mc-body').value = res.data.draft || '';
+      paintCount();
+      $('mc-body').focus();
+    } catch (err) {
+      T().error('Jarvis could not write the follow-up', { detail: `${err.message}. Write it yourself or try again in a minute.` });
+    } finally {
+      btn.disabled = false; btn.textContent = '✦ Draft follow-up with Jarvis';
+    }
+  }
+
   function render() {
+    if (box === 'followups') return renderFollowups();
     if (!items.length) {
       $('ml-list').innerHTML = `<li class="mt-muted small ib-empty">${box === 'sent' ? 'You have not sent any emails yet.' : box === 'done' ? 'Nothing marked done.' : 'No team mail. Emails forwarded to you appear here.'}</li>`;
       return;
@@ -79,7 +133,7 @@
       .map((m) => {
         if (box === 'sent') {
           return `<li class="ib-item" data-id="${esc(m.id)}"><div class="ib-item-top"><span class="ib-from">To ${esc(m.to_email)}</span><span class="ib-when">${when(m.created_at)}</span></div>
-            <div class="ib-subj">${esc(m.subject)}</div><div class="ib-snip">${esc(m.body)}</div>${m.status === 'failed' ? '<span class="ib-chip scam">Not sent</span>' : ''}</li>`;
+            <div class="ib-subj">${esc(m.subject)}</div><div class="ib-snip">${esc(String(m.body || '').slice(0, 200))}</div>${m.status === 'failed' ? '<span class="ib-chip scam">Not sent</span>' : ''}${m.replied ? '<span class="ib-chip auto">Replied</span>' : ''}</li>`;
         }
         const who = m.auto_routed ? `${m.original_from_name || m.original_from_email}` : `${m.from_user_name || 'CRES OS'} → you${m.to_team ? ' (team)' : ''}`;
         return `<li class="ib-item${m.status === 'unread' ? ' unread' : ''}${current?.id === m.id ? ' on' : ''}" data-id="${esc(m.id)}">
@@ -197,6 +251,17 @@
     }
   }
 
+  const EMAIL_RE = /[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+/g;
+  function countRecipients() {
+    const raw = `${$('mc-to').value} ${$('mc-cc').value}`;
+    return new Set((raw.match(EMAIL_RE) || []).map((e) => e.toLowerCase())).size;
+  }
+  function paintCount() {
+    const n = countRecipients();
+    $('mc-count').textContent = n ? `${n} outside recipient${n === 1 ? '' : 's'}` : '';
+    $('mc-ind-wrap').style.display = n > 1 ? 'flex' : 'none';
+  }
+
   function openCompose() {
     $('ml-compose-from').textContent = `Sends as “${me.from}”. Replies come back to ${me.replyTo} and are routed to you here.`;
     $('mc-err').textContent = '';
@@ -221,13 +286,22 @@
     const btn = $('mc-send');
     btn.disabled = true;
     try {
-      await CresAPI.request('/api/mail/send', {
+      const n = countRecipients();
+      const res = await CresAPI.request('/api/mail/send', {
         method: 'POST',
-        body: { to, cc: $('mc-cc').value.trim(), subject, body },
-        timeoutMs: 60000,
-        toastSuccess: `Email sent to ${to}`,
+        body: { to, cc: $('mc-cc').value.trim(), subject, body, individually: $('mc-ind').checked && n > 1 },
+        timeoutMs: Math.max(60000, n * 2500),
       });
+      const b = res.data?.bulk || (res.data?.mode ? res.data : null);
+      if (b && b.failed?.length) {
+        T().warning(`Sent ${b.sent} of ${b.total}`, { detail: `Not sent: ${b.failed.slice(0, 5).map((f) => f.to).join(', ')}${b.failed.length > 5 ? '…' : ''}` });
+      } else if (b) {
+        T().success(`Sent to ${b.total} ${b.total === 1 ? 'person' : 'people'}`);
+      } else {
+        T().success('Email sent');
+      }
       ['mc-to', 'mc-cc', 'mc-subject', 'mc-body'].forEach((id) => ($(id).value = ''));
+      paintCount();
       closeCompose();
       if (box === 'sent') loadList();
     } catch (err) {
@@ -295,14 +369,20 @@
 
   function bind() {
     ['mc-to', 'mc-cc', 'ml-cc'].forEach(setupMentions);
+    ['mc-to', 'mc-cc'].forEach((id) => $(id).addEventListener('input', paintCount));
     $('ml-list').addEventListener('click', (e) => {
+      const fu = e.target.closest('[data-fu]');
+      if (fu) { followupAction(fu.closest('.ib-item'), fu.dataset.fu).catch((err) => T().error('Could not do that', { detail: err.message })); return; }
       const li = e.target.closest('.ib-item');
-      if (li) open(li.dataset.id);
+      if (li && li.dataset.id) open(li.dataset.id);
     });
+    let searchTimer = null;
+    $('ml-search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => loadList(), 350); });
     $('ml-tabs').addEventListener('click', (e) => {
       const b = e.target.closest('button[data-box]');
       if (!b) return;
       box = b.dataset.box;
+      $('ml-search-wrap').hidden = box !== 'sent';
       $('ml-tabs').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
       closeView();
       loadList();

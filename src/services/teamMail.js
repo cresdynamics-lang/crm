@@ -308,7 +308,7 @@ function maskForDeveloper(user, row) {
 }
 
 /** Send an email to someone outside, as "<Name> - <Team>, Cres Dynamics Ltd"; replies go to info@. */
-async function sendOutside({ by, to, cc, ccUserIds = [], subject, body, teamMailId = null, projectId = null }) {
+async function sendOutside({ by, to, cc, ccUserIds = [], subject, body, teamMailId = null, projectId = null, quietInternal = false }) {
   const toP = parseRecipients(to);
   const ccP = parseRecipients(cc);
   const toStaff = await resolveMentions({ mentions: toP.mentions, excludeId: by.id });
@@ -330,7 +330,7 @@ async function sendOutside({ by, to, cc, ccUserIds = [], subject, body, teamMail
     }
   }
   const addr = outside[0] || '';
-  const ccList = [...new Set([...outside.slice(1), ...ccP.emails])].filter((e) => e.toLowerCase() !== addr.toLowerCase()).slice(0, 10);
+  const ccList = [...new Set([...outside.slice(1), ...ccP.emails])].filter((e) => e.toLowerCase() !== addr.toLowerCase()).slice(0, MAX_BULK - 1);
   let subj = String(subject || '').trim();
   if (project && subj && !subj.toLowerCase().includes(project.name.toLowerCase())) subj = `[${project.name}] ${subj}`;
   const text = String(body || '').trim();
@@ -391,11 +391,60 @@ async function sendOutside({ by, to, cc, ccUserIds = [], subject, body, teamMail
     [teamMailId, by.id, label, addr, ccList, subj, finalBody, result?.provider || null, result?.messageId || null, ref, messageId, ccStaff.map((u) => u.id), project?.id || null]
   );
   // Colleagues named with @ get their copy now; later replies are shared with them (see routeReplies)
-  for (const u of [...toStaff, ...ccStaff]) {
+  for (const u of quietInternal ? [] : [...toStaff, ...ccStaff]) {
     await deliverInternalCopy({ by, user: u, sentId: rows[0].id, subject: subj, body: finalBody, replyTo: addr, toLabel: addr, role: toStaff.includes(u) ? 'to' : 'cc', projectId: project?.id || null }).catch((e) => console.warn('[mail] internal copy failed', e.message));
   }
   if (teamMailId) await query(`UPDATE team_mail SET status = 'done' WHERE id = $1 AND to_user_id = $2`, [teamMailId, by.id]);
   return { ...rows[0], project_name: project?.name || null, from: displayName(by), replyTo: replyToAddress(), skipped: Boolean(result?.skipped), internal: [...toStaff, ...ccStaff].map((u) => u.name) };
+}
+
+
+const MAX_BULK = 50; // one email can carry up to 50 recipients; a mailing goes to up to 50 people
+const BULK_ROLES = ['sales', 'director', 'admin'];
+const SMALL_LIMIT = 10;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Send to many people. Sales, Director and Admin may address up to 50 outside recipients; everyone else
+ * keeps the 10 they had. individually=true gives every person their own email (nobody sees the others, and
+ * each reply is tracked and routed back); false sends one email with everyone on it.
+ */
+async function sendMany({ by, to, cc, ccUserIds = [], subject, body, individually = false }) {
+  const toP = parseRecipients(to);
+  const ccP = parseRecipients(cc);
+  const outside = [...new Set([...toP.emails, ...ccP.emails].map((e) => e.toLowerCase()))];
+  if (outside.length > SMALL_LIMIT && !BULK_ROLES.includes(by.role)) {
+    throw new AppError(`Sending to more than ${SMALL_LIMIT} people is for Sales, Director and Admin`, 403, 'FORBIDDEN');
+  }
+  if (outside.length > MAX_BULK) throw new AppError(`At most ${MAX_BULK} recipients per send (you added ${outside.length})`, 400, 'VALIDATION');
+
+  const addresses = [...new Set(toP.emails.map((e) => e.toLowerCase()))];
+  if (!individually || addresses.length <= 1) {
+    const one = await sendOutside({ by, to, cc, ccUserIds, subject, body });
+    return { mode: 'shared', total: outside.length, sent: 1, failed: [], first: one };
+  }
+
+  // One email each. cc (people inside CRES OS and any CC addresses) ride on every send so replies reach them too.
+  const staffTokens = [...toP.mentions, ...ccP.mentions].map((m) => `@${m}`).join(', ');
+  const ccText = [ccP.emails.join(', '), staffTokens].filter(Boolean).join(', ');
+  const results = [];
+  let first = true;
+  for (const addr of addresses) {
+    try {
+      await sendOutside({ by, to: addr, cc: ccText, ccUserIds, subject, body, quietInternal: !first });
+      results.push({ to: addr, ok: true });
+    } catch (err) {
+      // Resend allows ~2 requests a second: wait and try once more before giving up on someone
+      if (/rate|too many|429/i.test(err.message || '')) {
+        await sleep(1500);
+        try { await sendOutside({ by, to: addr, cc: ccText, ccUserIds, subject, body, quietInternal: !first }); results.push({ to: addr, ok: true }); first = false; continue; } catch (e2) { err = e2; }
+      }
+      results.push({ to: addr, ok: false, error: String(err.message || 'not sent').replace(/^The email did not send: /, '').slice(0, 200) });
+    }
+    first = false;
+    await sleep(550);
+  }
+  return { mode: 'individual', total: addresses.length, sent: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok) };
 }
 
 /**
@@ -468,6 +517,7 @@ async function routeReplies(inboxRows) {
       `UPDATE admin_inbox_messages SET routed_to = $1, routed_by = $2, is_read = TRUE, updated_at = NOW() WHERE id = $3`,
       [sent.user_id, by, msg.id]
     );
+    await query(`UPDATE team_mail_sent SET replied_at = COALESCE(replied_at, NOW()) WHERE id = $1`, [sent.id]);
     await notifyRecipient(ins[0], 'CRES OS');
     // Share the reply with everyone CC'd inside CRES OS on the original email
     for (const ccId of sent.cc_user_ids || []) {
@@ -490,4 +540,4 @@ async function routeReplies(inboxRows) {
   return routed;
 }
 
-module.exports = { maskForDeveloper, hideAddresses, mailableProjects, projectHandle, resolveProjectTags, parseRecipients, resolveMentions, newRefCode, findSentFor, TEAMS, STAFF_ROLES, teamLabel, displayName, signature, withSignature, forward, sendOutside, routeReplies, replyToAddress, sendingAddress };
+module.exports = { sendMany, maskForDeveloper, hideAddresses, mailableProjects, projectHandle, resolveProjectTags, parseRecipients, resolveMentions, newRefCode, findSentFor, TEAMS, STAFF_ROLES, teamLabel, displayName, signature, withSignature, forward, sendOutside, routeReplies, replyToAddress, sendingAddress };

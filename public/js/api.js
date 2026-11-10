@@ -67,6 +67,14 @@ const CresAPI = (() => {
       if (err?.name === 'AbortError') {
         throw new Error('Request timed out');
       }
+      // A dropped connection ("Load failed" on iPhone, "Failed to fetch" elsewhere) is often a blip or a
+      // server restart: try again twice, quietly. Only for reads and sign-in, which are safe to repeat.
+      const safeToRepeat = String(options.method || 'GET').toUpperCase() === 'GET' || /^\/api\/auth\/(login|refresh)$/.test(path);
+      if (err instanceof TypeError && safeToRepeat && (options.__net || 0) < 2) {
+        await new Promise((r) => setTimeout(r, 1200 * ((options.__net || 0) + 1)));
+        return rawRequest(path, { ...options, __net: (options.__net || 0) + 1 }, retry);
+      }
+      if (err instanceof TypeError) throw new Error('Could not reach the server. Check your connection and try again.');
       throw err;
     } finally {
       if (timer) clearTimeout(timer);

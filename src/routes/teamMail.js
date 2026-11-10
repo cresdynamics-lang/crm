@@ -9,6 +9,7 @@ const { query } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 const { asyncHandler, AppError } = require('../lib/errors');
 const tm = require('../services/teamMail');
+const followups = require('../services/mailFollowups');
 
 const router = express.Router();
 router.use(authenticate);
@@ -59,14 +60,26 @@ router.get(
     staffOnly(req);
     const box = String(req.query.box || 'inbox');
     if (box === 'sent') {
+      const q = String(req.query.q || '').trim();
+      const params = [req.user.id];
+      let filter = '';
+      if (q) { params.push(`%${q.replace(/[%_]/g, '')}%`); filter = `WHERE x.subject ILIKE $2 OR x.body ILIKE $2 OR x.to_email ILIKE $2`; }
       const { rows } = await query(
-        `SELECT s.id, s.to_email, s.cc, s.subject, LEFT(s.body, 300) AS body, s.status, s.error, s.team_label, s.created_at,
-                s.project_id, pr.name AS project_name
-           FROM team_mail_sent s LEFT JOIN projects pr ON pr.id = s.project_id
-          WHERE s.user_id = $1 ORDER BY s.created_at DESC LIMIT 100`,
-        [req.user.id]
+        `SELECT x.*, pr.name AS project_name FROM (
+           SELECT s.id, s.to_email, s.cc, s.subject, LEFT(s.body, 20000) AS body, s.status, s.error, s.team_label, s.created_at, s.project_id, 'team' AS src,
+                  (s.replied_at IS NOT NULL) AS replied
+             FROM team_mail_sent s WHERE s.user_id = $1
+           UNION ALL
+           SELECT o.id, o.to_email, '{}'::text[], o.subject, LEFT(o.body, 20000), o.status, NULL, 'Client email', o.created_at, NULL::uuid, 'client', FALSE
+             FROM outbound_emails o WHERE o.sent_by = $1
+         ) x LEFT JOIN projects pr ON pr.id = x.project_id ${filter}
+         ORDER BY x.created_at DESC LIMIT 200`,
+        params
       );
       return res.json({ ok: true, data: rows.map((r) => tm.maskForDeveloper(req.user, r)) });
+    }
+    if (box === 'followups') {
+      return res.json({ ok: true, data: await followups.listFollowups(req.user) });
     }
     const statusSql = box === 'done' ? `t.status = 'done'` : `t.status <> 'done'`;
     const { rows } = await query(
@@ -83,6 +96,8 @@ router.get(
          FROM team_mail WHERE to_user_id = $1`,
       [req.user.id]
     );
+    const fu = await followups.listFollowups(req.user).catch(() => ({ waiting: [], unanswered: [] }));
+    c[0].followups = fu.waiting.length + fu.unanswered.length;
     res.json({ ok: true, data: rows.map((r) => tm.maskForDeveloper(req.user, r)), meta: { counts: c[0], me: { from: tm.displayName(req.user), replyTo: tm.replyToAddress() } } });
   })
 );
@@ -111,8 +126,35 @@ router.post(
   '/send',
   asyncHandler(async (req, res) => {
     staffOnly(req);
-    const out = await tm.sendOutside({ by: req.user, to: req.body?.to, cc: req.body?.cc, ccUserIds: req.body?.cc_user_ids || [], subject: req.body?.subject, body: req.body?.body });
+    const b = req.body || {};
+    const many = tm.parseRecipients(b.to).emails.length + tm.parseRecipients(b.cc).emails.length > 1;
+    if (many) {
+      const out = await tm.sendMany({ by: req.user, to: b.to, cc: b.cc, ccUserIds: b.cc_user_ids || [], subject: b.subject, body: b.body, individually: Boolean(b.individually) });
+      return res.status(201).json({ ok: true, data: out.mode === 'shared' ? { ...tm.maskForDeveloper(req.user, out.first), bulk: out } : out });
+    }
+    const out = await tm.sendOutside({ by: req.user, to: b.to, cc: b.cc, ccUserIds: b.cc_user_ids || [], subject: b.subject, body: b.body });
     res.status(201).json({ ok: true, data: tm.maskForDeveloper(req.user, out) });
+  })
+);
+
+/** Jarvis drafts a follow-up (an email you sent that got no answer) or a late reply. { kind: waiting|unanswered, id } */
+router.post(
+  '/followups/draft',
+  asyncHandler(async (req, res) => {
+    staffOnly(req);
+    const kind = req.body?.kind === 'unanswered' ? 'unanswered' : 'waiting';
+    if (!UUID.test(String(req.body?.id || ''))) throw new AppError('Email not found', 404, 'NOT_FOUND');
+    res.json({ ok: true, data: await followups.draftFollowup(req.user, { kind, id: req.body.id }) });
+  })
+);
+
+router.post(
+  '/followups/dismiss',
+  asyncHandler(async (req, res) => {
+    staffOnly(req);
+    if (!UUID.test(String(req.body?.id || ''))) throw new AppError('Email not found', 404, 'NOT_FOUND');
+    await followups.dismiss(req.user, { kind: req.body?.kind === 'unanswered' ? 'unanswered' : 'waiting', id: req.body.id });
+    res.json({ ok: true, data: { dismissed: true } });
   })
 );
 
