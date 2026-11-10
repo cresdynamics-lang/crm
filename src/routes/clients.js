@@ -170,9 +170,15 @@ router.patch(
     const allowed = ['name', 'business_name', 'email', 'phone'];
     const sets = [];
     const params = [];
+    if (req.body?.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(req.body.email).trim())) {
+      throw new AppError('Enter a valid email address', 400, 'VALIDATION');
+    }
+    if (req.body?.name !== undefined && !String(req.body.name || '').trim()) {
+      throw new AppError('Client name cannot be empty', 400, 'VALIDATION');
+    }
     for (const key of allowed) {
       if (req.body?.[key] !== undefined) {
-        params.push(req.body[key] || null);
+        params.push(typeof req.body[key] === 'string' ? req.body[key].trim() || null : req.body[key] || null);
         sets.push(`${key} = $${params.length}`);
       }
     }
