@@ -65,6 +65,7 @@
     socket.on('disconnect', () => setLive(false));
     socket.on('inbox:new', (p) => {
       T().info(`${p.count} new email${p.count === 1 ? '' : 's'}`, { detail: 'Jarvis is drafting replies.' });
+      if (typeof CresAlerts !== 'undefined') CresAlerts.notify({ id: `inbox-${Date.now()}`, kind: 'mail', title: 'Company inbox', body: `${p.count} new email${p.count === 1 ? '' : 's'}`, href: '/inbox' });
       scheduleReload();
     });
     socket.on('inbox:updated', (p) => {

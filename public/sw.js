@@ -6,7 +6,7 @@
  *  - Pages, scripts and styles: network first, cached copy if offline.
  *  - Icons, fonts, images: cache first.
  */
-const VERSION = 'cres-os-20261109d';
+const VERSION = 'cres-os-20261110a';
 const SHELL = ['/login', '/dashboard', '/css/tokens.css', '/icons/cres-os-192.png', '/brand/logo.png', '/offline.html'];
 
 self.addEventListener('install', (event) => {
@@ -64,3 +64,15 @@ async function networkFirst(req) {
     return Response.error();
   }
 }
+
+// Tapping a system notification opens (or focuses) CRES OS at the right page
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const href = event.notification.data?.href || '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      for (const c of list) if ('focus' in c) { c.navigate?.(href).catch(() => {}); return c.focus(); }
+      return self.clients.openWindow(href);
+    })
+  );
+});

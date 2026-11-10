@@ -51,6 +51,7 @@
     const socket = io({ path: '/socket.io', auth: (cb) => cb({ token: CresAPI.getAccess() }), transports: ['websocket', 'polling'] });
     socket.on('mail:new', (p) => {
       T().info('New team mail', { detail: p.subject || '' });
+      if (typeof CresAlerts !== 'undefined') CresAlerts.notify({ id: `mail-${p.id}`, kind: 'mail', title: 'New team mail', body: p.subject || '', href: '/mail' });
       loadList({ quiet: true });
     });
   }
