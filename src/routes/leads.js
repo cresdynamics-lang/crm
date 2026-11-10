@@ -542,7 +542,7 @@ router.post(
         [
           projectName,
           clientRow.id,
-          description || `Won from lead ${lead.name}`,
+          `${description || `Won from lead ${lead.name}`}${deposit > 0 ? `\n\nDeposit requested: KES ${deposit.toLocaleString('en-KE')} (Finance to invoice)` : ''}`,
           assigned_developer_id || null,
           req.user.id,
           value || null,
@@ -550,16 +550,8 @@ router.post(
         ]
       );
 
-      let invoice = null;
-      if (deposit > 0) {
-        const inv = await tx.query(
-          `INSERT INTO invoices (project_id, client_id, amount, status, due_date, amount_paid)
-           VALUES ($1, $2, $3, 'issued', COALESCE($4::date, CURRENT_DATE + INTERVAL '7 days'), 0)
-           RETURNING *`,
-          [project.rows[0].id, clientRow.id, deposit, due_date || null]
-        );
-        invoice = inv.rows[0];
-      }
+      // No invoice is created here. The requested deposit is kept on the project for Finance to invoice.
+      const invoice = null;
 
       return { client: clientRow, project: project.rows[0], invoice };
     });

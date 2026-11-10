@@ -6,7 +6,6 @@ const { requirePermission } = require('../middleware/rbac');
 const { asyncHandler, AppError } = require('../lib/errors');
 const { idempotency } = require('../middleware/idempotency');
 const {
-  queueInvoiceOnProjectApproval,
   queueNotification,
   queueOutboundClientEmail,
 } = require('../queues/jobs');
@@ -288,27 +287,24 @@ router.get(
 /** Roles whose new projects are active at once. Only Sales projects wait for Director approval. */
 const AUTO_ACTIVE_ROLES = ['director', 'admin', 'pm'];
 
-/** Raise the invoice for a newly approved project (balance of its value not yet invoiced). */
-async function invoiceForApprovedProject(tx, project) {
-  if (project.value_amount == null) return null;
-  const paid = await tx.query(
-    `SELECT COALESCE(SUM(amount),0)::float AS total FROM invoices WHERE project_id = $1`,
-    [project.id]
-  );
-  const remaining = Math.round((Number(project.value_amount) - Number(paid.rows[0].total || 0)) * 100) / 100;
-  if (!(remaining > 0)) return null;
-  const inv = await tx.query(
-    `INSERT INTO invoices (project_id, client_id, amount, status, due_date, amount_paid)
-     VALUES ($1, $2, $3, 'issued', CURRENT_DATE + INTERVAL '14 days', 0)
-     RETURNING *`,
-    [project.id, project.client_id, remaining]
-  );
-  return inv.rows[0];
-}
-
 /** Everything that follows a project becoming active: invoice side-effects, developer invite, audit. */
 async function afterProjectActivated({ project, invoice, actor, how }) {
-  if (invoice) await queueInvoiceOnProjectApproval(project.id, invoice.id);
+  // No invoice is created or sent automatically. Tell Finance the project is live so they raise it.
+  try {
+    const { rows: financeUsers } = await query(
+      `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE r.name = 'finance' AND u.status = 'active'`
+    );
+    for (const fu of financeUsers) {
+      await queueNotification({
+        userId: fu.id,
+        type: 'project_needs_invoice',
+        content: `Project "${project.name}" is active. Create its invoice when ready.`,
+        meta: { projectId: project.id, href: '#/invoices' },
+      });
+    }
+  } catch (err) {
+    console.warn('[projects] finance notice failed', err.message);
+  }
   if (project.assigned_developer_id) {
     try {
       const { assignDeveloper } = require('../services/assignments');
@@ -377,7 +373,7 @@ router.post(
         ]
       );
       const project = rows[0];
-      const invoice = autoActive ? await invoiceForApprovedProject(tx, project) : null;
+      const invoice = null; // Invoices are raised by Finance, never automatically
       return { project, invoice };
     });
     const rows = [created.project];
@@ -605,9 +601,8 @@ router.post(
       const project = rows[0];
       if (!project) throw new AppError('Project not pending approval', 409, 'INVALID_STATE');
 
-      // Sync: create invoice row immediately (user-facing result)
-      const invoice = await invoiceForApprovedProject(tx, project);
-      return { project, invoice };
+      // No invoice here: Finance creates it (and only then is the client emailed)
+      return { project, invoice: null };
     });
 
     // Async side-effects: email client, notify finance, invite the developer, audit

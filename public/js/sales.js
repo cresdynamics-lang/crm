@@ -1136,9 +1136,7 @@ const CresSales = (() => {
     });
     flash(
       document.getElementById('lead-detail-flash'),
-      res.data?.invoice
-        ? 'Won — client, project, and deposit invoice created'
-        : 'Won — client and project created (awaiting Director approval)'
+      'Won — client and project created (awaiting Director approval). Finance raises the invoice.'
     );
     e.target.reset();
     await openLeadDetail(leadModalId);

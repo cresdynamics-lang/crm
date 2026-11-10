@@ -35,7 +35,7 @@ async function create(role, extra = {}) {
   return r;
 }
 
-test('Director and Admin projects are active at once, with their invoice (PMs have no create permission)', async () => {
+test('Director and Admin projects are active at once, with no automatic invoice (PMs have no create permission)', async () => {
   for (const role of ['director', 'admin']) {
     if (!users[role]) continue;
     const r = await create(role);
@@ -43,12 +43,14 @@ test('Director and Admin projects are active at once, with their invoice (PMs ha
     assert.equal(r.body.data.status, 'approved', `${role} project should be active`);
     assert.equal(r.body.data.approved_by, users[role]);
     assert.ok(r.body.data.approved_at);
-    assert.ok(r.body.data.invoice, `${role} project should raise its invoice`);
-    assert.equal(Number(r.body.data.invoice.amount), 50000);
+    assert.ok(!r.body.data.invoice, `${role} project must NOT auto-create an invoice`);
+    const { query } = require('../src/config/database');
+    const n = await query(`SELECT count(*)::int n FROM invoices WHERE project_id = $1`, [r.body.data.id]);
+    assert.equal(n.rows[0].n, 0, 'Finance raises invoices');
   }
 });
 
-test('Sales projects wait for approval, then approval makes them active with the invoice', async () => {
+test('Sales projects wait for approval, then approval makes them active (still no automatic invoice)', async () => {
   const r = await create('sales');
   assert.equal(r.status, 201);
   assert.equal(r.body.data.status, 'pending_approval');
@@ -63,7 +65,9 @@ test('Sales projects wait for approval, then approval makes them active with the
   });
   assert.equal(ok.status, 200);
   assert.equal(ok.body.data.project.status, 'approved');
-  assert.ok(ok.body.data.invoice);
+  assert.ok(!ok.body.data.invoice, 'approval does not create an invoice');
+  const after = await query(`SELECT count(*)::int n FROM invoices WHERE project_id = $1`, [r.body.data.id]);
+  assert.equal(after.rows[0].n, 0);
 });
 
 test('Finance still cannot create projects', async () => {
