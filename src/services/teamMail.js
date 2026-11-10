@@ -75,11 +75,17 @@ function withSignature(body, user, ref = null) {
 async function notifyRecipient(row, fromName) {
   try {
     const { queueNotification } = require('../queues/jobs');
+    // A developer is never told who (or what address) a project owner is
+    let hideOwner = false;
+    if (row.project_id) {
+      const { rows: rr } = await query(`SELECT r.name FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = $1`, [row.to_user_id]);
+      hideOwner = rr[0]?.name === 'developer';
+    }
     await queueNotification({
       userId: row.to_user_id,
       type: 'team_mail',
       content: row.auto_routed
-        ? `Reply from ${row.original_from_name || row.original_from_email}: ${row.subject}`
+        ? `Reply from ${hideOwner ? 'the project owner' : row.original_from_name || row.original_from_email}: ${row.subject}`
         : `${fromName} forwarded you an email: ${row.subject}`,
       meta: { mailId: row.id, href: '/mail' },
     });
@@ -182,7 +188,8 @@ function parseRecipients(input) {
   const emails = [...new Set((raw.match(EMAIL_RE) || []).map((e) => e.trim()))];
   const rest = raw.replace(EMAIL_RE, ' ');
   const mentions = [...new Set([...rest.matchAll(/(?:^|[\s,;])@([\w.\-]+)/g)].map((m) => m[1].toLowerCase()))];
-  return { emails, mentions };
+  const tags = [...new Set([...rest.matchAll(/(?:^|[\s,;])#([\w.\-]+)/g)].map((m) => m[1].toLowerCase()))];
+  return { emails, mentions, tags };
 }
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -212,32 +219,120 @@ async function resolveMentions({ mentions = [], userIds = [], excludeId }) {
 }
 
 /** Put a copy of an email in a colleague's Team mail (CC or direct, inside CRES OS). */
-async function deliverInternalCopy({ by, user, sentId, subject, body, replyTo, toLabel, role }) {
+async function deliverInternalCopy({ by, user, sentId, subject, body, replyTo, toLabel, role, projectId = null }) {
   const { rows } = await query(
     `INSERT INTO team_mail (from_user_id, to_user_id, subject, body, note, original_from_email, original_from_name,
-                            original_subject, original_received_at, attachments, sent_ref_id, is_cc)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW(),'[]'::jsonb,$9,$10) RETURNING *`,
+                            original_subject, original_received_at, attachments, sent_ref_id, is_cc, project_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW(),'[]'::jsonb,$9,$10,$11) RETURNING *`,
     [
       by.id, user.id, subject, body,
       role === 'cc' ? `${by.name} CC'd you${toLabel ? ` on an email to ${toLabel}` : ''}. Replies will be shared with you here.` : `${by.name} sent you this inside CRES OS.`,
-      replyTo || null, replyTo ? toLabel : null, subject, sentId || null, role === 'cc',
+      replyTo || null, replyTo ? toLabel : null, subject, sentId || null, role === 'cc', projectId,
     ]
   );
   await notifyRecipient({ ...rows[0], to_user_id: user.id }, by.name);
   return rows[0];
 }
 
+const EMAIL_ANY = /[^\s@,;<>()"']+@[^\s@,;<>()"']+\.[^\s@,;<>()"']+/g;
+/** Developers never see a project owner's address: mask any outside address in text shown to them. */
+function hideAddresses(text) {
+  return String(text || '').replace(EMAIL_ANY, (m) => (/@cresdynamics\.com$/i.test(m) ? m : '[address hidden]'));
+}
+
+/** Projects a person may write to with #tag: a developer only their own accepted projects. */
+async function mailableProjects(user) {
+  if (!['developer', 'director', 'admin', 'pm', 'sales'].includes(user.role)) return [];
+  const { rows } = await query(
+    `SELECT p.id, p.name, p.assigned_developer_id, p.created_by, c.email AS client_email, u.email AS owner_user_email
+       FROM projects p
+       LEFT JOIN clients c ON c.id = p.client_id
+       LEFT JOIN users u ON u.id = c.user_id
+      WHERE p.deleted_at IS NULL AND p.status NOT IN ('pending_approval', 'rejected')`
+  );
+  return rows.filter((p) => {
+    if (user.role === 'developer') return p.assigned_developer_id === user.id;
+    if (user.role === 'sales') return p.created_by === user.id;
+    return true;
+  });
+}
+
+const projectHandle = (name) => String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+/** "#swift-mall" -> that project and the owner's email (the client's address, else the owner's user account). */
+async function resolveProjectTags({ by, tags }) {
+  if (!tags.length) return [];
+  const mine = await mailableProjects(by);
+  const out = [];
+  for (const t of tags) {
+    const key = norm(t);
+    let hits = mine.filter((p) => norm(p.name) === key);
+    if (!hits.length) hits = mine.filter((p) => norm(p.name).startsWith(key) && key.length >= 3);
+    if (!hits.length) throw new AppError(`No project of yours matches #${t}`, 400, 'VALIDATION');
+    if (hits.length > 1) throw new AppError(`#${t} matches more than one project - type more of the name`, 400, 'VALIDATION');
+    const p = hits[0];
+    const email = String(p.client_email || p.owner_user_email || '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new AppError(`The owner of "${p.name}" has no email on file. Ask Sales or Finance to add it.`, 400, 'VALIDATION');
+    }
+    out.push({ id: p.id, name: p.name, email });
+  }
+  return out;
+}
+
+/** The Director(s) copied on a developer's message to a project owner. */
+async function directorsFor(user) {
+  const { rows } = await query(
+    `SELECT u.id, u.name, r.name AS role FROM users u JOIN roles r ON r.id = u.role_id
+      WHERE u.status = 'active' AND r.name = 'director' AND u.id <> $1
+        AND (u.id = (SELECT assigned_director_id FROM users WHERE id = $1)
+             OR NOT EXISTS (SELECT 1 FROM users WHERE id = $1 AND assigned_director_id IS NOT NULL))`,
+    [user.id]
+  );
+  return rows;
+}
+
+/** Hide the project owner's address from a developer (list rows, a single mail, or a sent item). */
+function maskForDeveloper(user, row) {
+  if (!row || user.role !== 'developer' || !row.project_id) return row;
+  const label = `Owner of ${row.project_name || 'the project'}`;
+  const out = { ...row, reply_hidden: true };
+  if ('original_from_email' in out) {
+    out.original_from_email = null;
+    out.original_from_name = label;
+  }
+  if ('to_email' in out) { out.to_email = label; out.cc = []; }
+  for (const k of ['body', 'note', 'error']) if (typeof out[k] === 'string') out[k] = hideAddresses(out[k]);
+  if (Array.isArray(out.replies)) out.replies = out.replies.map((r) => ({ ...r, to_email: label, body: hideAddresses(r.body) }));
+  return out;
+}
+
 /** Send an email to someone outside, as "<Name> - <Team>, Cres Dynamics Ltd"; replies go to info@. */
-async function sendOutside({ by, to, cc, ccUserIds = [], subject, body, teamMailId = null }) {
+async function sendOutside({ by, to, cc, ccUserIds = [], subject, body, teamMailId = null, projectId = null }) {
   const toP = parseRecipients(to);
   const ccP = parseRecipients(cc);
   const toStaff = await resolveMentions({ mentions: toP.mentions, excludeId: by.id });
-  const ccStaff = (await resolveMentions({ mentions: ccP.mentions, userIds: ccUserIds, excludeId: by.id }))
+  let ccStaff = (await resolveMentions({ mentions: ccP.mentions, userIds: ccUserIds, excludeId: by.id }))
     .filter((u) => !toStaff.some((t) => t.id === u.id));
-  const outside = [...toP.emails];
+  // #project: the system supplies the owner's address and always copies the Director
+  const projects = await resolveProjectTags({ by, tags: [...toP.tags, ...ccP.tags] });
+  if (projects.length > 1) throw new AppError('Tag one project per email', 400, 'VALIDATION');
+  let project = projects[0] || null;
+  if (!project && projectId) {
+    // Replying inside a project thread: stays project mail (Director still copied, address still hidden from developers)
+    const { rows: pr } = await query(`SELECT id, name FROM projects WHERE id = $1`, [projectId]);
+    if (pr[0]) project = { id: pr[0].id, name: pr[0].name, email: null };
+  }
+  const outside = [...(project?.email ? [project.email] : []), ...toP.emails];
+  if (project) {
+    for (const d of await directorsFor(by)) {
+      if (!toStaff.some((t) => t.id === d.id) && !ccStaff.some((c) => c.id === d.id)) ccStaff = [...ccStaff, d];
+    }
+  }
   const addr = outside[0] || '';
   const ccList = [...new Set([...outside.slice(1), ...ccP.emails])].filter((e) => e.toLowerCase() !== addr.toLowerCase()).slice(0, 10);
-  const subj = String(subject || '').trim();
+  let subj = String(subject || '').trim();
+  if (project && subj && !subj.toLowerCase().includes(project.name.toLowerCase())) subj = `[${project.name}] ${subj}`;
   const text = String(body || '').trim();
   if (!addr && !toStaff.length) throw new AppError('Add who it is for: an email address or an @name', 400, 'VALIDATION');
   if (!subj) throw new AppError('Add a subject', 400, 'VALIDATION');
@@ -284,23 +379,23 @@ async function sendOutside({ by, to, cc, ccUserIds = [], subject, body, teamMail
     });
   } catch (err) {
     await query(
-      `INSERT INTO team_mail_sent (team_mail_id, user_id, team_label, to_email, cc, subject, body, status, error, ref_code, message_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'failed',$8,$9,$10)`,
-      [teamMailId, by.id, label, addr, ccList, subj, finalBody, err.message, ref, messageId]
+      `INSERT INTO team_mail_sent (team_mail_id, user_id, team_label, to_email, cc, subject, body, status, error, ref_code, message_id, project_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'failed',$8,$9,$10,$11)`,
+      [teamMailId, by.id, label, addr, ccList, subj, finalBody, err.message, ref, messageId, project?.id || null]
     ).catch(() => {});
-    throw new AppError(`The email did not send: ${err.message}`, 502, 'EMAIL_FAILED');
+    throw new AppError(`The email did not send: ${project ? hideAddresses(err.message) : err.message}`, 502, 'EMAIL_FAILED');
   }
   const { rows } = await query(
-    `INSERT INTO team_mail_sent (team_mail_id, user_id, team_label, to_email, cc, subject, body, provider, message_ref, ref_code, message_id, cc_user_ids)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::uuid[]) RETURNING *`,
-    [teamMailId, by.id, label, addr, ccList, subj, finalBody, result?.provider || null, result?.messageId || null, ref, messageId, ccStaff.map((u) => u.id)]
+    `INSERT INTO team_mail_sent (team_mail_id, user_id, team_label, to_email, cc, subject, body, provider, message_ref, ref_code, message_id, cc_user_ids, project_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::uuid[],$13) RETURNING *`,
+    [teamMailId, by.id, label, addr, ccList, subj, finalBody, result?.provider || null, result?.messageId || null, ref, messageId, ccStaff.map((u) => u.id), project?.id || null]
   );
   // Colleagues named with @ get their copy now; later replies are shared with them (see routeReplies)
   for (const u of [...toStaff, ...ccStaff]) {
-    await deliverInternalCopy({ by, user: u, sentId: rows[0].id, subject: subj, body: finalBody, replyTo: addr, toLabel: addr, role: toStaff.includes(u) ? 'to' : 'cc' }).catch((e) => console.warn('[mail] internal copy failed', e.message));
+    await deliverInternalCopy({ by, user: u, sentId: rows[0].id, subject: subj, body: finalBody, replyTo: addr, toLabel: addr, role: toStaff.includes(u) ? 'to' : 'cc', projectId: project?.id || null }).catch((e) => console.warn('[mail] internal copy failed', e.message));
   }
   if (teamMailId) await query(`UPDATE team_mail SET status = 'done' WHERE id = $1 AND to_user_id = $2`, [teamMailId, by.id]);
-  return { ...rows[0], from: displayName(by), replyTo: replyToAddress(), skipped: Boolean(result?.skipped), internal: [...toStaff, ...ccStaff].map((u) => u.name) };
+  return { ...rows[0], project_name: project?.name || null, from: displayName(by), replyTo: replyToAddress(), skipped: Boolean(result?.skipped), internal: [...toStaff, ...ccStaff].map((u) => u.name) };
 }
 
 /**
@@ -357,8 +452,8 @@ async function routeReplies(inboxRows) {
     const { sent, by } = hit;
     const { rows: ins } = await query(
       `INSERT INTO team_mail (inbox_message_id, parent_id, to_user_id, subject, body, original_from_email, original_from_name,
-                              original_subject, original_received_at, attachments, auto_routed, note, sent_ref_id, reply_message_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,TRUE,$11,$12,$13) RETURNING *`,
+                              original_subject, original_received_at, attachments, auto_routed, note, sent_ref_id, reply_message_id, project_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,TRUE,$11,$12,$13,$14) RETURNING *`,
       [
         msg.id, sent.team_mail_id, sent.user_id, msg.subject || '(no subject)', msg.body_text || '',
         msg.reply_to_email || msg.from_email, msg.from_name, msg.subject, msg.received_at || msg.created_at,
@@ -366,6 +461,7 @@ async function routeReplies(inboxRows) {
         `Reply to your email "${sent.subject}"${sent.ref_code ? ` (Ref ${sent.ref_code})` : ''}. Forwarded to you automatically.`,
         sent.id,
         msg.message_id && !String(msg.message_id).startsWith('uid-') ? msg.message_id : null,
+        sent.project_id || null,
       ]
     );
     await query(
@@ -378,13 +474,13 @@ async function routeReplies(inboxRows) {
       if (ccId === sent.user_id) continue;
       const { rows: cc } = await query(
         `INSERT INTO team_mail (inbox_message_id, parent_id, to_user_id, from_user_id, subject, body, original_from_email, original_from_name,
-                                original_subject, original_received_at, attachments, auto_routed, is_cc, note, sent_ref_id, reply_message_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,TRUE,TRUE,$12,$13,$14) RETURNING *`,
+                                original_subject, original_received_at, attachments, auto_routed, is_cc, note, sent_ref_id, reply_message_id, project_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,TRUE,TRUE,$12,$13,$14,$15) RETURNING *`,
         [
           msg.id, sent.team_mail_id, ccId, sent.user_id, ins[0].subject, ins[0].body, ins[0].original_from_email, ins[0].original_from_name,
           ins[0].original_subject, ins[0].original_received_at, JSON.stringify(ins[0].attachments || []),
           `Reply to an email you were CC'd on ("${sent.subject}"). Shared with you automatically.`,
-          sent.id, ins[0].reply_message_id,
+          sent.id, ins[0].reply_message_id, sent.project_id || null,
         ]
       ).catch((e) => { console.warn('[mail] cc share failed', e.message); return { rows: [] }; });
       if (cc[0]) await notifyRecipient(cc[0], 'CRES OS');
@@ -394,4 +490,4 @@ async function routeReplies(inboxRows) {
   return routed;
 }
 
-module.exports = { parseRecipients, resolveMentions, newRefCode, findSentFor, TEAMS, STAFF_ROLES, teamLabel, displayName, signature, withSignature, forward, sendOutside, routeReplies, replyToAddress, sendingAddress };
+module.exports = { maskForDeveloper, hideAddresses, mailableProjects, projectHandle, resolveProjectTags, parseRecipients, resolveMentions, newRefCode, findSentFor, TEAMS, STAFF_ROLES, teamLabel, displayName, signature, withSignature, forward, sendOutside, routeReplies, replyToAddress, sendingAddress };

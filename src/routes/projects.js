@@ -136,7 +136,8 @@ function shapeProject(project, role, client = null) {
   }
 
   if (!canSeeClientDetails(role)) {
-    delete data.client_id;
+    // Developers see scope and milestones, never who the owner is
+    for (const k of ['client_id', 'client_name', 'client_business', 'client_email', 'client_phone', 'client_company']) delete data[k];
   } else if (client) {
     data.client_name = client.name;
     data.client_business = client.business_name;

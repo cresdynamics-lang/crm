@@ -22,8 +22,9 @@ function staffOnly(req) {
 async function myMail(req, id) {
   if (!UUID.test(String(id))) throw new AppError('Email not found', 404, 'NOT_FOUND');
   const { rows } = await query(
-    `SELECT t.*, f.name AS from_user_name, fr.name AS from_user_role
+    `SELECT t.*, f.name AS from_user_name, fr.name AS from_user_role, pr.name AS project_name
        FROM team_mail t
+       LEFT JOIN projects pr ON pr.id = t.project_id
        LEFT JOIN users f ON f.id = t.from_user_id
        LEFT JOIN roles fr ON fr.id = f.role_id
       WHERE t.id = $1 AND t.to_user_id = $2`,
@@ -59,18 +60,20 @@ router.get(
     const box = String(req.query.box || 'inbox');
     if (box === 'sent') {
       const { rows } = await query(
-        `SELECT id, to_email, cc, subject, LEFT(body, 300) AS body, status, error, team_label, created_at
-           FROM team_mail_sent WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100`,
+        `SELECT s.id, s.to_email, s.cc, s.subject, LEFT(s.body, 300) AS body, s.status, s.error, s.team_label, s.created_at,
+                s.project_id, pr.name AS project_name
+           FROM team_mail_sent s LEFT JOIN projects pr ON pr.id = s.project_id
+          WHERE s.user_id = $1 ORDER BY s.created_at DESC LIMIT 100`,
         [req.user.id]
       );
-      return res.json({ ok: true, data: rows });
+      return res.json({ ok: true, data: rows.map((r) => tm.maskForDeveloper(req.user, r)) });
     }
     const statusSql = box === 'done' ? `t.status = 'done'` : `t.status <> 'done'`;
     const { rows } = await query(
       `SELECT t.id, t.subject, LEFT(t.body, 240) AS body, t.note, t.status, t.auto_routed, t.to_team, t.created_at,
               t.original_from_email, t.original_from_name, jsonb_array_length(t.attachments) AS attachment_count,
-              f.name AS from_user_name
-         FROM team_mail t LEFT JOIN users f ON f.id = t.from_user_id
+              t.project_id, pr.name AS project_name, f.name AS from_user_name
+         FROM team_mail t LEFT JOIN users f ON f.id = t.from_user_id LEFT JOIN projects pr ON pr.id = t.project_id
         WHERE t.to_user_id = $1 AND ${statusSql}
         ORDER BY t.created_at DESC LIMIT 150`,
       [req.user.id]
@@ -80,7 +83,7 @@ router.get(
          FROM team_mail WHERE to_user_id = $1`,
       [req.user.id]
     );
-    res.json({ ok: true, data: rows, meta: { counts: c[0], me: { from: tm.displayName(req.user), replyTo: tm.replyToAddress() } } });
+    res.json({ ok: true, data: rows.map((r) => tm.maskForDeveloper(req.user, r)), meta: { counts: c[0], me: { from: tm.displayName(req.user), replyTo: tm.replyToAddress() } } });
   })
 );
 
@@ -109,7 +112,17 @@ router.post(
   asyncHandler(async (req, res) => {
     staffOnly(req);
     const out = await tm.sendOutside({ by: req.user, to: req.body?.to, cc: req.body?.cc, ccUserIds: req.body?.cc_user_ids || [], subject: req.body?.subject, body: req.body?.body });
-    res.status(201).json({ ok: true, data: out });
+    res.status(201).json({ ok: true, data: tm.maskForDeveloper(req.user, out) });
+  })
+);
+
+/** Projects you can tag with #name in To (a developer: only their own). */
+router.get(
+  '/projects',
+  asyncHandler(async (req, res) => {
+    staffOnly(req);
+    const list = await tm.mailableProjects(req.user);
+    res.json({ ok: true, data: list.map((p) => ({ id: p.id, name: p.name, handle: tm.projectHandle(p.name) })) });
   })
 );
 
@@ -126,7 +139,7 @@ router.get(
       `SELECT to_email, subject, body, created_at, status FROM team_mail_sent WHERE team_mail_id = $1 AND user_id = $2 ORDER BY created_at`,
       [mail.id, req.user.id]
     );
-    res.json({ ok: true, data: { ...mail, replies: sent, me: { from: tm.displayName(req.user), replyTo: tm.replyToAddress() } } });
+    res.json({ ok: true, data: { ...tm.maskForDeveloper(req.user, { ...mail, replies: sent }), me: { from: tm.displayName(req.user), replyTo: tm.replyToAddress() } } });
   })
 );
 
@@ -138,8 +151,8 @@ router.post(
     const mail = await myMail(req, req.params.id);
     if (!mail.original_from_email) throw new AppError('This email has no outside sender to reply to', 400, 'VALIDATION');
     const subject = req.body?.subject || (/^re:/i.test(mail.original_subject || '') ? mail.original_subject : `Re: ${mail.original_subject || mail.subject}`);
-    const out = await tm.sendOutside({ by: req.user, to: req.body?.to || mail.original_from_email, cc: req.body?.cc, ccUserIds: req.body?.cc_user_ids || [], subject, body: req.body?.body, teamMailId: mail.id });
-    res.status(201).json({ ok: true, data: out });
+    const out = await tm.sendOutside({ by: req.user, to: req.body?.to || mail.original_from_email, cc: req.body?.cc, ccUserIds: req.body?.cc_user_ids || [], subject, body: req.body?.body, teamMailId: mail.id, projectId: mail.project_id || null });
+    res.status(201).json({ ok: true, data: tm.maskForDeveloper(req.user, out) });
   })
 );
 
@@ -167,7 +180,8 @@ router.post(
       mode: req.body?.mode === 'decline' ? 'decline' : 'reply',
       signoff: `Kind regards,\n${req.user.name}\n${team === 'Director' ? 'Director' : team}, Cres Dynamics Ltd`,
     });
-    res.json({ ok: true, data: { draft: d.draft, summary: d.summary } });
+    const hide = req.user.role === 'developer' && mail.project_id;
+    res.json({ ok: true, data: { draft: hide ? tm.hideAddresses(d.draft) : d.draft, summary: hide ? tm.hideAddresses(d.summary) : d.summary } });
   })
 );
 

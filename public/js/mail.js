@@ -13,6 +13,7 @@
   let box = 'inbox';
   let items = [];
   let people = [];
+  let projects = [];
   let current = null;
   let me = { from: '', replyTo: 'info@cresdynamics.com' };
 
@@ -40,6 +41,7 @@
     bind();
     live();
     CresAPI.request('/api/mail/people').then((r) => { people = r.data?.people || []; }).catch(() => {});
+    CresAPI.request('/api/mail/projects').then((r) => { projects = r.data || []; }).catch(() => {});
     await loadList();
     setInterval(() => document.visibilityState === 'visible' && loadList({ quiet: true }), 60000);
   }
@@ -131,9 +133,9 @@
     const replies = current.replies || [];
     $('ml-replies').hidden = !replies.length;
     $('ml-replies').innerHTML = replies.map((r) => `<div class="mt-side-label">You replied · ${esc(new Date(r.created_at).toLocaleString())}${r.status === 'failed' ? ' (not sent)' : ''}</div><div class="ib-sent">${esc(r.body)}</div>`).join('');
-    const canReply = Boolean(current.original_from_email);
+    const canReply = Boolean(current.original_from_email || current.reply_hidden);
     $('ml-reply').hidden = !canReply;
-    $('ml-reply-to').textContent = current.original_from_email || '';
+    $('ml-reply-to').textContent = current.original_from_email || current.original_from_name || '';
     $('ml-from').textContent = `Sends as “${me.from}” · replies come back to ${me.replyTo}`;
     $('ml-draft-body').value = '';
     $('ml-drafted-by').textContent = '';
@@ -174,7 +176,8 @@
     if (!current) return;
     const body = $('ml-draft-body').value.trim();
     if (!body) return T().warning('Nothing to send', { detail: 'Write the reply or draft it with Jarvis.' });
-    if (!confirm(`Send this reply to ${current.original_from_email} as "${me.from}"?`)) return;
+    const replyLabel = current.original_from_email || current.original_from_name;
+    if (!confirm(`Send this reply to ${replyLabel} as "${me.from}"?`)) return;
     const btn = $('ml-send');
     btn.disabled = true;
     try {
@@ -182,7 +185,7 @@
         method: 'POST',
         body: { body, cc: $('ml-cc').value.trim() },
         timeoutMs: 60000,
-        toastSuccess: `Reply sent to ${current.original_from_email}`,
+        toastSuccess: `Reply sent to ${replyLabel}`,
       });
       closeView();
       await loadList();
@@ -245,7 +248,19 @@
     const handle = (n) => String(n).toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '');
     const hide = () => { box.style.display = 'none'; };
     input.addEventListener('input', () => {
-      const m = input.value.slice(0, input.selectionStart).match(/(?:^|[\s,;])@([\w.\-]*)$/);
+      const upto = input.value.slice(0, input.selectionStart);
+      const pm = upto.match(/(?:^|[\s,;])#([\w.\-]*)$/);
+      if (pm) {
+        const pq = pm[1].toLowerCase();
+        const ph = projects.filter((x) => !pq || x.handle.includes(pq)).slice(0, 8);
+        if (!ph.length) return hide();
+        box.innerHTML = ph.map((x) => `<div data-p="${esc(x.handle)}" style="padding:8px 12px;cursor:pointer;"><b>#${esc(x.handle)}</b> <span style="opacity:.6;font-size:.85em">${esc(x.name)} - owner</span></div>`).join('');
+        box.style.top = `${input.offsetTop + input.offsetHeight + 2}px`;
+        box.style.left = `${input.offsetLeft}px`;
+        box.style.display = 'block';
+        return;
+      }
+      const m = upto.match(/(?:^|[\s,;])@([\w.\-]*)$/);
       if (!m) return hide();
       const q = m[1].toLowerCase().replace(/[^a-z0-9]/g, '');
       const hits = (people || []).filter((p) => !q || p.name.toLowerCase().replace(/[^a-z0-9]/g, '').includes(q)).slice(0, 8);
@@ -256,6 +271,15 @@
       box.style.display = 'block';
     });
     box.addEventListener('mousedown', (e) => {
+      const pe = e.target.closest('[data-p]');
+      if (pe) {
+        e.preventDefault();
+        const ppos = input.selectionStart;
+        input.value = input.value.slice(0, ppos).replace(/#[\w.\-]*$/, `#${pe.dataset.p}, `) + input.value.slice(ppos);
+        hide();
+        input.focus();
+        return;
+      }
       const el = e.target.closest('[data-h]');
       if (!el) return;
       e.preventDefault();
