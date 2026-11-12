@@ -484,60 +484,189 @@ async function findSentFor(msg) {
 }
 
 /**
- * New mail in the company inbox that answers an email a staff member sent:
- * forward it to that person's Team mail automatically (no admin needed).
- * The admin still sees it, marked "auto-forwarded". Returns the routed ids.
+ * Classify new company-inbox mail that is NOT a reply to staff outbound mail.
+ *  - hr: job / employment applications (developer, sales, or general apply)
+ *  - director: inquiries, quotes, change requests, partnership / demo asks
+ *  - null: leave for Admin to handle
+ */
+function classifyInboundIntent(msg) {
+  const text = `${msg.subject || ''}\n${msg.body_text || ''}`.toLowerCase();
+  if (!text.trim()) return null;
+
+  const joby =
+    /\b(apply|application|applying|job\b|vacancy|vacancies|hiring|recruit|cv\b|résumé|resume\b|curriculum vitae|cover letter|looking for (a )?job|seeking (a )?(role|position|opportunity)|i would like to join|open to (work|joining)|available for (work|hire))\b/i.test(
+      text
+    );
+  const roleHint =
+    /\b(developer|software engineer|full[-\s]?stack|back[-\s]?end|front[-\s]?end|web developer|engineer|sales (executive|rep|role|position|officer)|business development|account executive)\b/i.test(
+      text
+    );
+  if (joby || (roleHint && /\b(apply|application|cv\b|resume\b|portfolio)\b/i.test(text))) {
+    return 'hr';
+  }
+
+  const directorTopic =
+    /\b(quot(e|ation)|proposal|pricing|price list|how much|cost of|inquir(?:y|ies)|enquir(?:y|ies)|interested in|need (a |an )?(website|system|app|crm|software|platform)|request for (a )?(quote|proposal)|rfp\b|change request|amendment|revision|modif(?:y|ication)|update (the|our)|partnership|book a (call|demo)|consultation|demo request)\b/i.test(
+      text
+    );
+  if (directorTopic) return 'director';
+  return null;
+}
+
+async function activeUsersByRole(role) {
+  const { rows } = await query(
+    `SELECT u.id, u.name, r.name AS role
+       FROM users u JOIN roles r ON r.id = u.role_id
+      WHERE u.status = 'active' AND r.name = $1
+      ORDER BY u.name`,
+    [role]
+  );
+  return rows;
+}
+
+async function deliverToStaff(
+  msg,
+  user,
+  {
+    note,
+    parentId = null,
+    sentRefId = null,
+    replyMessageId = null,
+    projectId = null,
+    fromUserId = null,
+    isCc = false,
+  } = {}
+) {
+  const attachments = JSON.stringify(
+    (msg.attachment_summaries || []).map((a, i) => ({ name: a.name, mime: a.mime, size: a.size, index: i }))
+  );
+  const { rows: ins } = await query(
+    `INSERT INTO team_mail (inbox_message_id, parent_id, to_user_id, from_user_id, subject, body, original_from_email, original_from_name,
+                            original_subject, original_received_at, attachments, auto_routed, is_cc, note, sent_ref_id, reply_message_id, project_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,TRUE,$12,$13,$14,$15,$16) RETURNING *`,
+    [
+      msg.id,
+      parentId,
+      user.id,
+      fromUserId,
+      msg.subject || '(no subject)',
+      msg.body_text || '',
+      msg.reply_to_email || msg.from_email,
+      msg.from_name,
+      msg.subject,
+      msg.received_at || msg.created_at,
+      attachments,
+      !!isCc,
+      note,
+      sentRefId,
+      replyMessageId,
+      projectId,
+    ]
+  );
+  await notifyRecipient(ins[0], 'CRES OS');
+  return ins[0];
+}
+
+/**
+ * New mail in the company inbox:
+ *  1) Replies to staff outbound (header / Ref / recent sender) → that person's Team mail
+ *  2) Job / employment applications → every active HR
+ *  3) Inquiries, quotes, change requests → every active Director
+ * Admin still sees the message, marked auto-forwarded. Returns the routed ids.
  */
 async function routeReplies(inboxRows) {
-  const own = new Set([replyToAddress(), sendingAddress(), process.env.IMAP_USER].filter(Boolean).map((a) => a.toLowerCase()));
+  const own = new Set(
+    [replyToAddress(), sendingAddress(), process.env.IMAP_USER].filter(Boolean).map((a) => a.toLowerCase())
+  );
   const routed = [];
   for (const m of inboxRows) {
     if (m.is_scam || own.has(String(m.from_email || '').toLowerCase())) continue; // never our own mailbox
     const { rows: full } = await query(`SELECT * FROM admin_inbox_messages WHERE id = $1`, [m.id]);
     const msg = full[0];
     if (!msg || msg.routed_to) continue;
+
     const hit = await findSentFor(msg);
-    if (!hit) continue;
-    const { sent, by } = hit;
-    const { rows: ins } = await query(
-      `INSERT INTO team_mail (inbox_message_id, parent_id, to_user_id, subject, body, original_from_email, original_from_name,
-                              original_subject, original_received_at, attachments, auto_routed, note, sent_ref_id, reply_message_id, project_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,TRUE,$11,$12,$13,$14) RETURNING *`,
-      [
-        msg.id, sent.team_mail_id, sent.user_id, msg.subject || '(no subject)', msg.body_text || '',
-        msg.reply_to_email || msg.from_email, msg.from_name, msg.subject, msg.received_at || msg.created_at,
-        JSON.stringify((msg.attachment_summaries || []).map((a, i) => ({ name: a.name, mime: a.mime, size: a.size, index: i }))),
-        `Reply to your email "${sent.subject}"${sent.ref_code ? ` (Ref ${sent.ref_code})` : ''}. Forwarded to you automatically.`,
-        sent.id,
-        msg.message_id && !String(msg.message_id).startsWith('uid-') ? msg.message_id : null,
-        sent.project_id || null,
-      ]
-    );
+    if (hit) {
+      const { sent, by } = hit;
+      const replyMid =
+        msg.message_id && !String(msg.message_id).startsWith('uid-') ? msg.message_id : null;
+      const ins = await deliverToStaff(msg, { id: sent.user_id }, {
+        note: `Reply to your email "${sent.subject}"${sent.ref_code ? ` (Ref ${sent.ref_code})` : ''}. Forwarded to you automatically.`,
+        parentId: sent.team_mail_id,
+        sentRefId: sent.id,
+        replyMessageId: replyMid,
+        projectId: sent.project_id || null,
+      });
+      await query(
+        `UPDATE admin_inbox_messages SET routed_to = $1, routed_by = $2, is_read = TRUE, updated_at = NOW() WHERE id = $3`,
+        [sent.user_id, by, msg.id]
+      );
+      await query(`UPDATE team_mail_sent SET replied_at = COALESCE(replied_at, NOW()) WHERE id = $1`, [sent.id]);
+      for (const ccId of sent.cc_user_ids || []) {
+        if (ccId === sent.user_id) continue;
+        try {
+          await deliverToStaff(msg, { id: ccId }, {
+            note: `Reply to an email you were CC'd on ("${sent.subject}"). Shared with you automatically.`,
+            parentId: sent.team_mail_id,
+            sentRefId: sent.id,
+            replyMessageId: ins.reply_message_id || replyMid,
+            projectId: sent.project_id || null,
+            fromUserId: sent.user_id,
+            isCc: true,
+          });
+        } catch (e) {
+          console.warn('[mail] cc share failed', e.message);
+        }
+      }
+      routed.push(msg.id);
+      continue;
+    }
+
+    const intent = classifyInboundIntent(msg);
+    if (!intent) continue;
+    const role = intent; // 'hr' | 'director'
+    const users = await activeUsersByRole(role);
+    if (!users.length) {
+      console.warn(`[mail] intent=${intent} but no active ${role} users to route to`);
+      continue;
+    }
+    const teamNote =
+      intent === 'hr'
+        ? 'Job / employment application — auto-routed to HR.'
+        : 'Inquiry / quote / change request — auto-routed to Director.';
+    for (const u of users) {
+      await deliverToStaff(msg, u, { by: intent, note: teamNote });
+    }
     await query(
       `UPDATE admin_inbox_messages SET routed_to = $1, routed_by = $2, is_read = TRUE, updated_at = NOW() WHERE id = $3`,
-      [sent.user_id, by, msg.id]
+      [users[0].id, intent, msg.id]
     );
-    await query(`UPDATE team_mail_sent SET replied_at = COALESCE(replied_at, NOW()) WHERE id = $1`, [sent.id]);
-    await notifyRecipient(ins[0], 'CRES OS');
-    // Share the reply with everyone CC'd inside CRES OS on the original email
-    for (const ccId of sent.cc_user_ids || []) {
-      if (ccId === sent.user_id) continue;
-      const { rows: cc } = await query(
-        `INSERT INTO team_mail (inbox_message_id, parent_id, to_user_id, from_user_id, subject, body, original_from_email, original_from_name,
-                                original_subject, original_received_at, attachments, auto_routed, is_cc, note, sent_ref_id, reply_message_id, project_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,TRUE,TRUE,$12,$13,$14,$15) RETURNING *`,
-        [
-          msg.id, sent.team_mail_id, ccId, sent.user_id, ins[0].subject, ins[0].body, ins[0].original_from_email, ins[0].original_from_name,
-          ins[0].original_subject, ins[0].original_received_at, JSON.stringify(ins[0].attachments || []),
-          `Reply to an email you were CC'd on ("${sent.subject}"). Shared with you automatically.`,
-          sent.id, ins[0].reply_message_id, sent.project_id || null,
-        ]
-      ).catch((e) => { console.warn('[mail] cc share failed', e.message); return { rows: [] }; });
-      if (cc[0]) await notifyRecipient(cc[0], 'CRES OS');
-    }
     routed.push(msg.id);
   }
   return routed;
 }
 
-module.exports = { sendMany, maskForDeveloper, hideAddresses, mailableProjects, projectHandle, resolveProjectTags, parseRecipients, resolveMentions, newRefCode, findSentFor, TEAMS, STAFF_ROLES, teamLabel, displayName, signature, withSignature, forward, sendOutside, routeReplies, replyToAddress, sendingAddress };
+module.exports = {
+  sendMany,
+  maskForDeveloper,
+  hideAddresses,
+  mailableProjects,
+  projectHandle,
+  resolveProjectTags,
+  parseRecipients,
+  resolveMentions,
+  newRefCode,
+  findSentFor,
+  classifyInboundIntent,
+  TEAMS,
+  STAFF_ROLES,
+  teamLabel,
+  displayName,
+  signature,
+  withSignature,
+  forward,
+  sendOutside,
+  routeReplies,
+  replyToAddress,
+  sendingAddress,
+};

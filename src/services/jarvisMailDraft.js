@@ -12,12 +12,32 @@ const { query } = require('../config/database');
 const { loadCompanyProfile } = require('../config/company');
 const { openRouterChat, openRouterChatWithFallback } = require('./openRouter');
 
-/** Jarvis's model first; the CRM's configured models if that one is unavailable. */
+function flattenMessages(messages) {
+  return (messages || []).map((m) => {
+    if (typeof m.content === 'string') return m;
+    const text = Array.isArray(m.content)
+      ? m.content.filter((p) => p.type === 'text').map((p) => p.text).join('\n')
+      : String(m.content || '');
+    return { role: m.role, content: text };
+  });
+}
+
+/** OpenRouter first; Groq if credits/models fail (team-mail Draft with Jarvis). */
 async function chat(opts) {
   try {
     return await openRouterChat({ ...opts, model: MODEL });
-  } catch {
-    return openRouterChatWithFallback(opts);
+  } catch (primaryErr) {
+    try {
+      return await openRouterChatWithFallback(opts);
+    } catch (fallbackErr) {
+      console.warn(`[mail-draft] OpenRouter failed (${fallbackErr.message || primaryErr.message}); using Groq`);
+      const { groqChat } = require('./groq');
+      return groqChat({
+        messages: flattenMessages(opts.messages),
+        temperature: opts.temperature,
+        maxTokens: Math.min(Number(opts.maxTokens) || 800, 800),
+      });
+    }
   }
 }
 
@@ -225,9 +245,10 @@ CRM CONTEXT ABOUT THE SENDER:
 ${ctx || 'Not found in the CRM (treat as a new contact).'}
 ${instructions ? `\nINSTRUCTIONS FROM THE ADMIN (follow these):\n${instructions}\n` : ''}`;
 
+  // Cap tokens so a low OpenRouter balance can still draft; Groq OTPM also needs a modest cap.
   const { text } = await chat({
     temperature: 0.3,
-    maxTokens: 1200,
+    maxTokens: 700,
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: images.length ? [{ type: 'text', text: user }, ...images] : user },

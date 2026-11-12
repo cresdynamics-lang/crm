@@ -198,20 +198,20 @@ router.post(
   })
 );
 
-/** Jarvis drafts the reply, signed as this person and their team. */
+/** Jarvis drafts the reply, signed as this person and their team. Groq is the backup. */
 router.post(
   '/:id/draft',
   asyncHandler(async (req, res) => {
     staffOnly(req);
     const mail = await myMail(req, req.params.id);
-    const { jarvisDraftReply } = require('../services/jarvisMailDraft');
     let attachments = [];
     if (mail.inbox_message_id) {
       const { rows } = await query(`SELECT attachment_summaries FROM admin_inbox_messages WHERE id = $1`, [mail.inbox_message_id]);
       attachments = rows[0]?.attachment_summaries || [];
     }
     const team = tm.teamLabel(req.user.role);
-    const d = await jarvisDraftReply({
+    const signoff = `Kind regards,\n${req.user.name}\n${team === 'Director' ? 'Director' : team}, Cres Dynamics Ltd`;
+    const source = {
       id: mail.inbox_message_id,
       fromName: mail.original_from_name,
       fromEmail: mail.original_from_email,
@@ -220,10 +220,30 @@ router.post(
       attachmentSummaries: attachments,
       instructions: [String(req.body?.instructions || '').trim(), mail.note ? `Note from ${mail.from_user_name || 'a colleague'}: ${mail.note}` : ''].filter(Boolean).join('\n'),
       mode: req.body?.mode === 'decline' ? 'decline' : 'reply',
-      signoff: `Kind regards,\n${req.user.name}\n${team === 'Director' ? 'Director' : team}, Cres Dynamics Ltd`,
-    });
+      signoff,
+    };
+    let d;
+    try {
+      const { jarvisDraftReply } = require('../services/jarvisMailDraft');
+      d = await jarvisDraftReply(source);
+    } catch (err) {
+      console.warn(`[mail] Jarvis draft failed for ${req.user.role} (${err.message}); using Groq`);
+      const { draftInboxReply } = require('../services/groq');
+      const g = await draftInboxReply({
+        ...source,
+        instructions: [source.instructions, `Sign off exactly as:\n${signoff}`].filter(Boolean).join('\n'),
+      });
+      d = { draft: g.draft, summary: g.summary, by: 'groq' };
+    }
     const hide = req.user.role === 'developer' && mail.project_id;
-    res.json({ ok: true, data: { draft: hide ? tm.hideAddresses(d.draft) : d.draft, summary: hide ? tm.hideAddresses(d.summary) : d.summary } });
+    res.json({
+      ok: true,
+      data: {
+        draft: hide ? tm.hideAddresses(d.draft) : d.draft,
+        summary: hide ? tm.hideAddresses(d.summary) : d.summary,
+        by: d.by || 'jarvis',
+      },
+    });
   })
 );
 

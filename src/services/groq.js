@@ -11,11 +11,13 @@ function apiKeys() {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-async function groqChat({ messages, temperature = 0.4 }) {
+async function groqChat({ messages, temperature = 0.4, maxTokens = 800 }) {
   const keys = apiKeys();
   if (!keys.length) {
     throw new Error('GROQ_API_KEY is not configured');
   }
+  // Keep under Groq free-tier OTPM (~1000); oversized max_tokens alone fails the request.
+  const capped = Math.max(128, Math.min(Number(maxTokens) || 800, 900));
   let lastErr;
   for (const key of keys) {
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -30,6 +32,7 @@ async function groqChat({ messages, temperature = 0.4 }) {
             model: config.groq.model,
             messages,
             temperature,
+            max_tokens: capped,
           }),
         });
         const data = await res.json().catch(() => ({}));
