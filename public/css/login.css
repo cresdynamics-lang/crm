@@ -166,3 +166,18 @@ body.login-page {
 .login-footer .deferred {
   opacity: 0.7;
 }
+
+.install-app-login {
+  display: block;
+  width: 100%;
+  margin-top: 16px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.install-app-login[hidden] { display: none; }

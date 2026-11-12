@@ -204,6 +204,12 @@ router.post(
       client_id,
     ]);
     if (!clientCheck.rows[0]) throw new AppError('Client not found', 404, 'NOT_FOUND');
+    // Client in the CRM but no email yet: Finance can supply it here once; it's saved on the client.
+    const suppliedEmail = String(req.body?.client_email || '').trim();
+    if (!String(clientCheck.rows[0].email || '').trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(suppliedEmail)) {
+      await query(`UPDATE clients SET email = $1 WHERE id = $2 AND (email IS NULL OR email = '')`, [suppliedEmail, client_id]);
+      clientCheck.rows[0].email = suppliedEmail;
+    }
     if (!String(clientCheck.rows[0].email || '').trim()) {
       throw new AppError(
         'Client has no email — add contact email before creating an invoice',
@@ -399,7 +405,30 @@ router.patch(
     if (!rows[0]) throw new AppError('Invoice not found', 404, 'NOT_FOUND');
 
     const { rows: crows } = await query(`SELECT * FROM clients WHERE id = $1`, [clientId]);
-    res.json({ ok: true, data: { invoice: rows[0], client: crows[0] } });
+
+    // The invoice now belongs to this client: send them a copy
+    let emailed = false;
+    const to = String(crows[0]?.email || '').trim();
+    if (to) {
+      try {
+        const { invoiceReceipt } = require('../services/receipts');
+        const { queueReceiptEmail } = require('../queues/jobs');
+        const receipt = await invoiceReceipt(rows[0].id);
+        await logInvoiceEmail(rows[0].id, 'receipt', 'queued', `Invoice queued to ${to} (client updated)`);
+        await queueReceiptEmail({
+          to,
+          subject: receipt.subject,
+          body: receipt.text,
+          html: receipt.html,
+          receiptType: 'invoice',
+          receiptId: rows[0].id,
+        });
+        emailed = true;
+      } catch (err) {
+        console.warn('[invoices] client-change email failed to queue', err.message);
+      }
+    }
+    res.json({ ok: true, data: { invoice: rows[0], client: crows[0], emailed, to: to || null } });
   })
 );
 

@@ -154,13 +154,6 @@
       ], faceId);
     }
 
-    if (user.role === 'admin' && ['traffic', 'website-payments'].includes(faceId)) {
-      insertTabs(document.getElementById(`face-${faceId}`), [
-        { href: '#/traffic', id: 'traffic', label: 'Website traffic' },
-        { href: '#/website-payments', id: 'website-payments', label: 'Event registrations' },
-      ], faceId);
-    }
-
     if (user.role === 'admin' && ['users', 'login-audit', 'health', 'organization', 'email'].includes(faceId)) {
       insertTabs(document.getElementById(`face-${faceId}`), [
         { href: '#/users', id: 'users', label: 'Staff' },
@@ -219,8 +212,6 @@
     '/applicants': 'People',
     '/onboarding': 'People',
     '/reports': 'Reports',
-    '/traffic': 'Website traffic',
-    '/website-payments': 'Event registrations',
     '/health': 'Organization',
     '/users': 'Organization',
     '/login-audit': 'Organization',
@@ -234,6 +225,20 @@
   };
 
   const shell = document.getElementById('app-shell');
+  document.getElementById('nav-back')?.addEventListener('click', () => {
+    let target = '#/';
+    try {
+      const trail = JSON.parse(sessionStorage.getItem('cres_trail') || '[]');
+      trail.pop(); // where I am now
+      target = trail.pop() || '#/';
+      sessionStorage.setItem('cres_trail', JSON.stringify(trail));
+    } catch { /* go home */ }
+    // A modal (project, client card...) is the first thing "back" should close
+    const open = document.querySelector('.modal-backdrop.open');
+    if (open) { open.classList.remove('open'); return; }
+    location.hash = target;
+  });
+
   document.getElementById('hamburger')?.addEventListener('click', (e) => {
     e.stopPropagation();
     shell.classList.toggle('nav-open');
@@ -254,6 +259,16 @@
     const faceParam = segments[1] || null;
     const path = faceId === 'home' ? '/' : `/${faceId}`;
     const face = document.getElementById(`face-${faceId}`);
+
+    // Back button: remember where you have been inside the system (not the sign-in page)
+    try {
+      const trail = JSON.parse(sessionStorage.getItem('cres_trail') || '[]');
+      const here = location.hash || '#/';
+      if (trail[trail.length - 1] !== here) trail.push(here);
+      sessionStorage.setItem('cres_trail', JSON.stringify(trail.slice(-30)));
+    } catch { /* private mode: back goes home */ }
+    const backBtn = document.getElementById('nav-back');
+    if (backBtn) backBtn.hidden = faceId === 'home' && !faceParam;
 
     if (faceId === 'community' && user.role === 'client') {
       location.hash = '#/';
@@ -543,7 +558,10 @@
     }
 
     if (faceId === 'settings') {
-      await CresSettings.load();
+      await safeMount('CresSettings', () => CresSettings.load());
+    }
+    if (faceId === 'notifications') {
+      await safeMount('CresNotifActions', () => CresNotifActions.mount(user));
     }
     if (faceId === 'email' && user.role === 'admin') {
       const heading = document.getElementById('email-heading');
@@ -554,22 +572,22 @@
       }
     }
     if (faceId === 'approvals' && typeof CresApprovals !== 'undefined') {
-      await CresApprovals.mount();
+      await safeMount('CresApprovals', () => CresApprovals.mount());
     }
     if (faceId === 'work') {
-      if (typeof CresMyWork !== 'undefined') await CresMyWork.mount();
-      else if (typeof CresTasks !== 'undefined') await CresTasks.mount();
+      if (typeof CresMyWork !== 'undefined') await safeMount('CresMyWork', () => CresMyWork.mount());
+      else if (typeof CresTasks !== 'undefined') await safeMount('CresTasks', () => CresTasks.mount());
     }
 
     paintPageTabs(faceId);
     if (faceId === 'ops' && typeof CresOps !== 'undefined') {
-      await CresOps.mount();
+      await safeMount('CresOps', () => CresOps.mount());
     }
     if (faceId === 'community') {
-      await CresCommunity.mount();
+      await safeMount('CresCommunity', () => CresCommunity.mount());
     }
     if (faceId === 'jarvis' && typeof CresJarvis !== 'undefined') {
-      await CresJarvis.show();
+      await safeMount('CresJarvis', () => CresJarvis.show());
     }
 
     const timelineOn =
@@ -612,14 +630,6 @@
       jobs.push(CresAdmin.mount(faceId, user));
     }
 
-    if (typeof CresTraffic !== 'undefined') {
-      jobs.push(CresTraffic.mount(faceId, user));
-    }
-
-    if (typeof CresWebsitePayments !== 'undefined') {
-      jobs.push(CresWebsitePayments.mount(faceId, user));
-    }
-
     if (typeof CresAdminHealth !== 'undefined') {
       jobs.push(CresAdminHealth.mount(faceId, user));
     }
@@ -628,7 +638,103 @@
       jobs.push(CresClient.mount(faceId, user, faceParam));
     }
 
-    if (jobs.length) await Promise.all(jobs);
+    if (jobs.length) {
+      const results = await Promise.allSettled(jobs);
+      results.filter((r) => r.status === 'rejected').forEach((r) => sectionFailed(faceId, r.reason));
+    }
+  }
+
+  /**
+   * One section failing must not blank the page: run it, and if it throws,
+   * show a small "couldn't load - retry" bar in that page instead.
+   */
+  async function safeMount(label, fn) {
+    try {
+      return await fn();
+    } catch (err) {
+      sectionFailed(currentFaceId(), err, label);
+      return null;
+    }
+  }
+
+  function currentFaceId() {
+    const raw = location.hash.replace(/^#\/?/, '').split('?')[0];
+    return raw.split('/')[0] || 'home';
+  }
+
+  function sectionFailed(faceId, err, label = '') {
+    console.error(`[shell] ${label || faceId} failed to load`, err);
+    if (err?.message === 'Session expired') return;
+    const face = document.getElementById(`face-${faceId}`);
+    if (!face || face.querySelector('.face-load-error')) return;
+    const bar = document.createElement('div');
+    bar.className = 'face-load-error';
+    bar.setAttribute('role', 'alert');
+    const offline = navigator.onLine === false;
+    bar.innerHTML = `<span>${offline ? "You're offline, so part of this page couldn't load." : "Part of this page couldn't load. The rest still works."}</span>`;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-ghost btn-sm';
+    btn.textContent = 'Try again';
+    btn.addEventListener('click', () => {
+      bar.remove();
+      CresAPI.clearCache?.();
+      route().catch(console.error);
+    });
+    bar.appendChild(btn);
+    face.prepend(bar);
+  }
+
+  // ---- Live refresh -------------------------------------------------------
+  // The page you're on refreshes itself: right after something changes (a live
+  // notification), every 60s while you're looking at it, and when you come
+  // back to the tab. It waits while you're typing or have a form open.
+  let lastRefresh = Date.now();
+  let refreshTimer = null;
+  let refreshing = false;
+
+  function userIsBusy() {
+    const a = document.activeElement;
+    if (a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) && a.type !== 'search') return true;
+    if (document.body.classList.contains('modal-open')) return true;
+    if (document.querySelector('.modal-backdrop.open, .modal-overlay.open, .modal-overlay:not([hidden]), [id$="-modal"].open, dialog[open], .dropdown.open, .drawer.open')) return true;
+    if (window.getSelection && String(window.getSelection()).length > 0) return true;
+    return false;
+  }
+
+  async function liveRefresh(reason) {
+    if (refreshing || document.visibilityState !== 'visible' || userIsBusy()) return;
+    const face = currentFaceId();
+    if (['community', 'jarvis', 'settings'].includes(face)) return; // these update themselves
+    refreshing = true;
+    try {
+      CresAPI.clearCache?.();
+      document.querySelectorAll('.face-load-error').forEach((el) => el.remove());
+      await route();
+      lastRefresh = Date.now();
+    } catch (e) {
+      console.warn('[shell] live refresh failed', reason, e);
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  function scheduleRefresh(reason, delay = 1500) {
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => liveRefresh(reason), delay);
+  }
+
+  setInterval(() => {
+    if (Date.now() - lastRefresh >= 60000) liveRefresh('timer');
+  }, 15000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && Date.now() - lastRefresh > 30000) scheduleRefresh('focus', 300);
+  });
+  window.addEventListener('online', () => scheduleRefresh('online', 500));
+  try {
+    CresRealtime.on('notification', () => scheduleRefresh('notification'));
+  } catch {
+    /* realtime optional */
   }
 
   function roleBlurb(role) {
@@ -756,19 +862,58 @@
   });
   searchDrop?.addEventListener('click', (e) => e.stopPropagation());
 
+  // The Notifications section changed something (marked read): refresh the bell
+  window.addEventListener('cres:notifs-changed', () => loadNotifications());
+
   // Notifications
-  async function loadNotifications() {
+  async function loadNotifications({ greet = false } = {}) {
     try {
-      const res = await CresAPI.request('/api/notifications');
+      const res = await CresAPI.request('/api/notifications?filter=unread&limit=100', { noCache: true });
       state.notifs = res.data || [];
+      state.unreadTotal = Number(res.meta?.unread ?? state.notifs.filter((n) => !n.read_at).length);
       updateBadge();
+      if (greet) greetUnread();
     } catch {
       // notifications group may be degraded - don't break shell
     }
   }
 
+  /** Once per sign-in: pop up what's waiting, newest first. */
+  function greetUnread() {
+    const key = `cres_greeted_${user.id}`;
+    try {
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, '1');
+    } catch {
+      /* private mode: greet every load */
+    }
+    const unread = state.notifs.filter((n) => !n.read_at);
+    const total = state.unreadTotal || unread.length;
+    if (!total || typeof CresToast === 'undefined') return;
+    const top = unread.slice(0, 3).map((n) => `• ${n.content}`).join('\n');
+    CresToast.info(`You have ${total} unread notification${total === 1 ? '' : 's'}`, {
+      detail: top,
+      duration: 12000,
+      action: { label: 'Open notifications', onClick: () => openNotifPanel() },
+    });
+  }
+
+  function openNotifPanel() {
+    // Next tick: the click that asked for it would otherwise close it straight away
+    setTimeout(() => {
+      renderNotifs();
+      document.getElementById('notif-dropdown')?.classList.add('open');
+      document.getElementById('profile-dropdown')?.classList.remove('open');
+    }, 0);
+  }
+
+  function unreadCount() {
+    const listed = state.notifs.filter((n) => !n.read_at).length;
+    return Math.max(listed, Number(state.unreadTotal || 0));
+  }
+
   function updateBadge() {
-    const unread = state.notifs.filter((n) => !n.read_at).length;
+    const unread = unreadCount();
     const badge = document.getElementById('notif-badge');
     if (unread > 0) {
       badge.hidden = false;
@@ -791,29 +936,7 @@
   }
 
   function hrefForNotification(n) {
-    const meta = parseNotifMeta(n);
-    if (meta.href) return meta.href;
-    const type = String(n.type || '').toLowerCase();
-    if (meta.conversationId || type.includes('message')) return '#/community';
-    if (meta.taskId || type.includes('task')) return '#/work';
-    if (meta.leaveId || type.includes('leave')) return '#/leave?mine=1';
-    if (meta.fundingId || type.includes('salary_funding') || type.includes('funding')) {
-      return '#/salary-funding';
-    }
-    if (meta.expenseId || type.includes('expense')) return '#/expenses';
-    if (meta.followupId || type.includes('followup')) return '#/followups';
-    if (meta.invoiceId || type.includes('invoice') || type.includes('payment')) {
-      return '#/invoices';
-    }
-    if (meta.projectId) return `#/projects/${meta.projectId}`;
-    if (type.includes('approval') || type.includes('project') || type.includes('milestone')) {
-      return user.role === 'director' || user.role === 'admin' ? '#/approvals' : '#/projects';
-    }
-    if (type.includes('report')) {
-      return ['admin', 'director', 'pm', 'finance'].includes(user.role) ? '#/reports' : '#/work';
-    }
-    if (type.includes('assign')) return '#/projects';
-    return null;
+    return CresNotifActions.action(n, user).href;
   }
 
   function actionHintForNotification(n) {
@@ -869,54 +992,51 @@
 
   function renderNotifs() {
     const list = document.getElementById('notif-list');
-    if (!state.notifs.length) {
-      list.innerHTML = `<div class="notif-empty">No notifications yet.${
-        user.role === 'finance' ? ' Your system feed will appear here.' : ''
-      }</div>`;
+    // The bell only holds what you have not read. Read ones live in the Notifications section.
+    const unread = state.notifs.filter((n) => !n.read_at);
+    if (!unread.length) {
+      list.innerHTML = `<div class="notif-empty">You're all caught up.</div>
+        <a class="notif-all" href="#/notifications">See all notifications</a>`;
+      list.querySelector('.notif-all').addEventListener('click', () => document.getElementById('notif-dropdown')?.classList.remove('open'));
       return;
     }
-    list.innerHTML = state.notifs
-      .slice(0, 40)
+    list.innerHTML = unread
+      .slice(0, 30)
       .map((n) => {
-        const unread = n.read_at ? '' : 'unread';
         const when = CresFormat.datetime(n.created_at);
-        const href = hrefForNotification(n);
-        return `<button type="button" class="notif-item ${unread}" data-id="${escapeHtml(n.id)}" data-has-href="${href ? '1' : '0'}">
+        const act = CresNotifActions.action(n, user);
+        return `<button type="button" class="notif-item unread" data-id="${escapeHtml(n.id)}">
           <span>${escapeHtml(n.content)}</span>
-          <span class="ntime">${escapeHtml(n.type)} · ${when}${href ? ' · Open →' : ''}</span>
+          <span class="ntime">${escapeHtml(String(n.type || '').replace(/_/g, ' '))} · ${when} · <b>${escapeHtml(act.label)} →</b></span>
         </button>`;
       })
-      .join('');
+      .join('') + `<a class="notif-all" href="#/notifications">See all notifications</a>`;
+    list.querySelector('.notif-all').addEventListener('click', () => document.getElementById('notif-dropdown')?.classList.remove('open'));
 
     list.querySelectorAll('.notif-item').forEach((el) => {
       el.addEventListener('click', async () => {
         const n = state.notifs.find((x) => x.id === el.dataset.id);
-        try {
-          await CresAPI.request(`/api/notifications/${el.dataset.id}/read`, { method: 'POST' });
-          if (n) n.read_at = new Date().toISOString();
+        if (n && !n.read_at) {
+          n.read_at = new Date().toISOString(); // read: it leaves the bell now
+          state.unreadTotal = Math.max(0, Number(state.unreadTotal || 0) - 1);
           updateBadge();
-        } catch {
-          // ignore
+          el.remove();
+          if (!list.querySelector('.notif-item')) renderNotifs();
         }
+        CresAPI.request(`/api/notifications/${el.dataset.id}/read`, { method: 'POST', toast: false }).catch(() => {});
+        window.dispatchEvent(new Event('cres:notifs-changed-local'));
         document.getElementById('notif-dropdown')?.classList.remove('open');
-        if (!n) return;
-        const href = hrefForNotification(n);
-        if (href) {
-          // Full page links (e.g. /meeting/<id>) leave the dashboard; the rest are in-app routes.
-          if (href.startsWith('/')) location.href = href;
-          else location.hash = href;
-        } else {
-          openNotificationDetail(n);
-        }
+        if (n) CresNotifActions.go(hrefForNotification(n));
       });
     });
   }
 
   document.getElementById('notif-read-all').addEventListener('click', async () => {
-    await CresAPI.request('/api/notifications/read-all', { method: 'POST' });
+    await CresAPI.request('/api/notifications/read-all', { method: 'POST', toastSuccess: 'All notifications marked read' });
     state.notifs.forEach((n) => {
       n.read_at = n.read_at || new Date().toISOString();
     });
+    state.unreadTotal = 0;
     updateBadge();
     renderNotifs();
   });
@@ -959,8 +1079,30 @@
       return;
     }
     if (payload?.id) {
+      if (state.notifs.some((x) => x.id === payload.id)) return;
       state.notifs.unshift(payload);
+      if (!payload.read_at) state.unreadTotal = Number(state.unreadTotal || 0) + 1;
       updateBadge();
+      if (document.getElementById('notif-dropdown')?.classList.contains('open')) renderNotifs();
+      // Pop it up the moment it arrives
+      if (typeof CresToast !== 'undefined' && !payload.read_at) {
+        const href = hrefForNotification(payload);
+        CresToast.info(payload.content || 'New notification', {
+          force: true,
+          action: {
+            label: href ? 'Open' : 'View',
+            onClick: async () => {
+              payload.read_at = new Date().toISOString();
+              state.unreadTotal = Math.max(0, Number(state.unreadTotal || 0) - 1);
+              updateBadge();
+              CresAPI.request(`/api/notifications/${payload.id}/read`, { method: 'POST', toast: false }).catch(() => {});
+              if (!href) return openNotificationDetail(payload);
+              if (href.startsWith('/')) location.href = href;
+              else location.hash = href;
+            },
+          },
+        });
+      }
     }
   });
 
@@ -989,7 +1131,11 @@
     route().catch(console.error);
   });
   await route();
-  loadNotifications().catch(() => {});
+  loadNotifications({ greet: true }).catch(() => {});
+  // Keep the bell honest even if a live push was missed
+  setInterval(() => {
+    if (document.visibilityState === 'visible') loadNotifications().catch(() => {});
+  }, 60000);
   setTimeout(() => {
     CresRealtime.connect();
     paintLive(CresRealtime.getStatus());

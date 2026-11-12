@@ -37,7 +37,7 @@ const CresClientCard = (() => {
                 <div><label>Phone</label><input id="client-edit-phone" value="${esc(c.phone || '')}" /></div>
                 <div><label>Email</label><input id="client-edit-email" type="email" value="${esc(c.email || '')}" /></div>
                 <div><label>Business</label><input id="client-edit-business" value="${esc(c.business_name || '')}" /></div>
-                <div class="form-actions"><button type="submit" class="btn btn-ghost">Save client</button></div>
+                <div class="form-actions" style="grid-column:1/-1;"><button type="submit" class="btn btn-primary" id="client-card-save">Save contact</button></div>
               </form>`
             : ''
         }
@@ -78,6 +78,8 @@ const CresClientCard = (() => {
       body.innerHTML = render(res.data, { showMoney, canEdit });
       body.querySelector('#client-card-edit')?.addEventListener('submit', async (e) => {
         e.preventDefault();
+        const saveBtn = document.getElementById('client-card-save');
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
         try {
           await CresAPI.request(`/api/clients/${clientId}`, {
             method: 'PATCH',
@@ -89,7 +91,9 @@ const CresClientCard = (() => {
             },
           });
           await open(clientId);
+          if (typeof CresToast !== 'undefined') CresToast.success('Contact saved');
         } catch (err) {
+          if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save contact'; }
           alert(err.message);
         }
       });

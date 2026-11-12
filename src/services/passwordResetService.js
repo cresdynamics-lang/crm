@@ -17,6 +17,18 @@ function generateNumericOtp() {
   return String(n).padStart(OTP_LENGTH, '0');
 }
 
+async function sendResetEmail({ email, code, name, expiresAt }) {
+  const { sendWithFailover } = require('./emailService');
+  const first = String(name || '').trim().split(/\s+/)[0] || 'there';
+  const body = `Hi ${first},\n\nYour Cres Dynamics password reset code is: ${code}\n\nIt expires in 10 minutes and works once. If you did not ask for this, ignore this email: your password has not changed.`;
+  const html = `<p>Hi ${first.replace(/[<>&]/g, '')},</p>
+  <p>Your <strong>CRES OS</strong> password reset code is:</p>
+  <p style="font-family:monospace;font-size:32px;letter-spacing:8px;font-weight:bold;margin:14px 0;color:#1b2a4a;">${code}</p>
+  <p style="font-size:14px;">It expires in 10 minutes and works once. Type it on the sign-in page, then choose a new password.</p>
+  <p style="color:#5b6b80;font-size:13px;">If you did not ask for this, ignore this email: your password has not changed.</p>`;
+  return sendWithFailover({ to: email, subject: `${code} is your Cres OS password reset code`, body, html, meta: { type: 'password_reset', expiresAt, fromRole: 'default' } });
+}
+
 /**
  * Always returns ok shape - never reveal whether email exists.
  */
@@ -42,12 +54,13 @@ async function requestPasswordReset(email) {
       [user.id, normalized, hashCode(code), expiresAt]
     );
 
-    await queuePasswordResetEmail({
-      email: normalized,
-      code,
-      name: user.name,
-      expiresAt: expiresAt.toISOString(),
-    });
+    // Send at once (so the code arrives in seconds); the queue is only the backup if sending fails.
+    try {
+      await sendResetEmail({ email: normalized, code, name: user.name, expiresAt: expiresAt.toISOString() });
+    } catch (err) {
+      console.warn('[password-reset] direct send failed, queued instead:', err.message);
+      await queuePasswordResetEmail({ email: normalized, code, name: user.name, expiresAt: expiresAt.toISOString() });
+    }
   }
 
   return {
@@ -128,6 +141,8 @@ async function resetPassword({ email, resetToken, newPassword }) {
     [row.user_id]
   );
 
+  // The message said "reset your password" when locked out: make that true straight away
+  await require('../middleware/authLimiter').clearForEmail(normalized, 'login').catch(() => {});
   return { reset: true };
 }
 

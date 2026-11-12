@@ -924,7 +924,7 @@ const CresSales = (() => {
     }
 
     const overview = document.getElementById('proj-description').value.trim();
-    await CresAPI.request('/api/projects', {
+    const created = await CresAPI.request('/api/projects', {
       method: 'POST',
       body: {
         name: document.getElementById('proj-name').value.trim(),
@@ -945,7 +945,10 @@ const CresSales = (() => {
     e.target.reset();
     document.getElementById('milestone-list').innerHTML =
       `<div class="milestone-row"><input placeholder="Milestone title" /><button type="button" class="btn btn-ghost" data-remove-ms style="padding:6px 10px;">✕</button></div>`;
-    flash(document.getElementById('projects-flash'), 'Project submitted for Director approval');
+    flash(
+      document.getElementById('projects-flash'),
+      created.data?.status === 'approved' ? 'Project created and active' : 'Project submitted for Director approval'
+    );
     await refreshProjectsView();
   }
 
@@ -1075,6 +1078,9 @@ const CresSales = (() => {
       if (CresAPI.getUser()?.role === 'finance') return;
       sendEmail(e).catch((err) => alert(err.message));
     });
+    // Only Sales projects wait for approval; for everyone else the button just creates the project
+    const createBtn = document.querySelector('#new-project-form button[type="submit"]');
+    if (createBtn && CresAPI.getUser()?.role !== 'sales') createBtn.textContent = 'Create project';
     document.getElementById('new-project-form')?.addEventListener('submit', (e) =>
       createProject(e).catch((err) => alert(err.message))
     );
@@ -1130,9 +1136,7 @@ const CresSales = (() => {
     });
     flash(
       document.getElementById('lead-detail-flash'),
-      res.data?.invoice
-        ? 'Won — client, project, and deposit invoice created'
-        : 'Won — client and project created (awaiting Director approval)'
+      'Won — client and project created (awaiting Director approval). Finance raises the invoice.'
     );
     e.target.reset();
     await openLeadDetail(leadModalId);

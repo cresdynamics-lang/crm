@@ -1,0 +1,21 @@
+{
+  "name": "Cres OS",
+  "short_name": "Cres OS",
+  "description": "Cres Dynamics business operating system",
+  "id": "/dashboard",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f1419",
+  "theme_color": "#0f1419",
+  "icons": [
+    { "src": "/icons/cres-os-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/cres-os-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/cres-os-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "My work", "url": "/dashboard#/work", "icons": [{ "src": "/icons/cres-os-192.png", "sizes": "192x192" }] },
+    { "name": "Meetings", "url": "/meetings", "icons": [{ "src": "/icons/cres-os-192.png", "sizes": "192x192" }] }
+  ]
+}

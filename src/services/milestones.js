@@ -68,8 +68,15 @@ function pendingHours(milestones) {
   return { pending_hours: hours, pending_tasks: tasks };
 }
 
-/** % complete from milestone statuses (developer-updated ceilings / milestones). */
-function progressPercent(milestones) {
+/**
+ * Project progress %, the one rule used on every screen, export and report:
+ *   completed milestones / all milestones  (1 of 2 done = 50%, 3 of 3 = 100%).
+ * A project marked "completed" is 100% whatever its milestone list says (older
+ * projects were closed without ticking milestones). No milestones yet = 0%.
+ * Recalculated every time it is read, so it can never go stale.
+ */
+function progressPercent(milestones, projectStatus) {
+  if (projectStatus === 'completed') return 100;
   const list = normalizeMilestones(Array.isArray(milestones) ? milestones : []);
   if (!list.length) return 0;
   const done = list.filter((m) => normalizeStatus(m.status) === 'completed').length;
@@ -93,7 +100,78 @@ function newlyCompletedMilestones(beforeList, afterList) {
   return completed;
 }
 
+const STATUS_WORDS = {
+  not_started: 'not started',
+  in_progress: 'in progress',
+  blocked: 'on hold',
+  completed: 'completed',
+};
+
+function fmtDate(d) {
+  if (!d) return null;
+  const x = new Date(d);
+  if (Number.isNaN(x.getTime())) return String(d);
+  return x.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Africa/Nairobi' });
+}
+
+/**
+ * Client-facing list of milestone changes between two lists (matched by id,
+ * falling back to the same title). Task-level edits are internal and not included.
+ * Returns [{ kind, title, text }].
+ */
+function describeMilestoneChanges(beforeList, afterList) {
+  const before = normalizeMilestones(Array.isArray(beforeList) ? beforeList : []);
+  const after = normalizeMilestones(Array.isArray(afterList) ? afterList : []);
+  const usedBefore = new Set();
+  const out = [];
+
+  after.forEach((a) => {
+    // Match by id; otherwise (older rows saved without ids) by the same title.
+    let b = before.find((x) => !usedBefore.has(x) && x.id && x.id === a.id);
+    if (!b) {
+      b = before.find(
+        (x) => !usedBefore.has(x) && !after.some((y) => y.id === x.id) && milestoneLabel(x) === milestoneLabel(a)
+      );
+    }
+    if (b) usedBefore.add(b);
+    const title = milestoneLabel(a);
+    if (!b) {
+      out.push({ kind: 'added', title, text: `New milestone added: "${title}"${a.due_date ? ` (due ${fmtDate(a.due_date)})` : ''}` });
+      return;
+    }
+    if (milestoneLabel(b) !== title) {
+      out.push({ kind: 'renamed', title, text: `Milestone "${milestoneLabel(b)}" renamed to "${title}"` });
+    }
+    if (b.status !== a.status) {
+      out.push({
+        kind: a.status === 'completed' ? 'completed' : 'status',
+        title,
+        text: a.status === 'completed'
+          ? `Milestone "${title}" is completed`
+          : `Milestone "${title}" is now ${STATUS_WORDS[a.status] || a.status.replace(/_/g, ' ')}`,
+      });
+    }
+    if ((b.due_date || null) !== (a.due_date || null)) {
+      out.push({
+        kind: 'due_date',
+        title,
+        text: a.due_date
+          ? `Milestone "${title}" due date set to ${fmtDate(a.due_date)}`
+          : `Milestone "${title}" due date removed`,
+      });
+    }
+  });
+
+  for (const b of before) {
+    if (!usedBefore.has(b)) {
+      out.push({ kind: 'removed', title: milestoneLabel(b), text: `Milestone "${milestoneLabel(b)}" removed from the plan` });
+    }
+  }
+  return out;
+}
+
 module.exports = {
+  describeMilestoneChanges,
   MS_STATUSES,
   TASK_STATUSES,
   normalizeStatus,

@@ -28,7 +28,8 @@ Extract ALL of the following sections. Return empty string "" for any section no
 WORK SECTIONS:
 - "done": array of bullet points — all work completed today (overall, not just one project).
 - "blockers": array of bullet points — issues, delays, blockers.
-- "needs_attention": string — anything needing follow-up or a decision.
+- "needs_attention": string — the plan for tomorrow / next steps (up to 3, one per line starting "- "),
+  then anything needing someone's decision. This fills the "Tomorrow's top 3" box.
 
 HR / WELL-BEING SECTIONS:
 - "hard_today": string — what was challenging, difficult, or frustrating today.
@@ -44,7 +45,7 @@ Rules:
 - Do NOT fabricate details that were not spoken.
 - If a section was not mentioned, return "" (empty string) for that field.
 - Keep bullet points concise (one sentence each).
-- If the speaker mentioned a project, match to the closest entry. If unsure, null.${projectContext}
+- If the speaker mentioned a project, match to the closest entry even if the spelling differs slightly (speech-to-text often misspells names). If unsure, null.${projectContext}
 
 Respond with ONLY valid JSON, no markdown:
 {"done":["task1"],"blockers":[""],"needs_attention":"","hard_today":"","easy_today":"","happiness":"","concerns":"","project_name":null,"project_id":null}`;

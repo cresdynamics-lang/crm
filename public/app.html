@@ -2,18 +2,27 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Cres Dynamics CRM</title>
-  <link rel="icon" href="/brand/logo-mark.png?v=20261023" type="image/png" />
-  <link rel="apple-touch-icon" href="/brand/logo-mark.png?v=20261023" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+  <title>Cres OS</title>
+  <link rel="icon" href="/icons/cres-os-192.png" type="image/png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#0f1419" />
+  <meta name="application-name" content="Cres OS" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Cres OS" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/tokens.css?v=20261023" />
-  <link rel="stylesheet" href="/css/shell.css?v=20261029c" />
-  <link rel="stylesheet" href="/css/community.css?v=20261024p1" />
-  <link rel="stylesheet" href="/css/sales.css" />
+  <link rel="stylesheet" href="/css/shell.css?v=20261110a" />
+  <link rel="stylesheet" href="/css/toast.css?v=20261109c" />
+  <link rel="stylesheet" href="/css/community.css?v=20261110c" />
+  <link rel="stylesheet" href="/css/sales.css?v=20261110a" />
   <link rel="stylesheet" href="/css/jarvis.css?v=20261023f" />
+  <link rel="stylesheet" href="/css/mobile.css?v=20261110c" />
 </head>
 <body class="shell-page">
   <div class="app-shell" id="app-shell">
@@ -30,14 +39,16 @@
         <button type="button" class="hamburger" id="hamburger" aria-label="Open menu">
           <span></span><span></span><span></span>
         </button>
+        <button type="button" class="nav-back" id="nav-back" aria-label="Back" title="Back" hidden>‹</button>
         <h1 class="page-title" id="page-title">Home</h1>
-        <div class="live-indicator" id="live-indicator" title="Realtime connection">
+        <div class="live-indicator" id="live-indicator" title="Realtime connection" hidden>
           <span class="dot"></span>
           <span class="label">Connecting…</span>
         </div>
       </div>
       <div class="topbar-right">
-        <div class="global-search-wrap">
+        <button type="button" id="install-app-btn" class="btn btn-ghost btn-sm install-app-btn" hidden title="Install Cres OS on this device">Install app</button>
+        <div class="global-search-wrap" hidden>
           <input id="global-search" type="search" placeholder="Search…" autocomplete="off" aria-label="Global search" />
           <div class="dropdown global-search-dropdown" id="global-search-dropdown"></div>
         </div>
@@ -57,14 +68,17 @@
         </div>
 
         <div class="profile-wrap">
-          <button type="button" class="profile-btn" id="profile-btn" aria-haspopup="true">
+          <button type="button" class="profile-btn" id="profile-btn" aria-haspopup="true" aria-label="Your profile" title="Your profile">
             <span class="avatar" id="profile-avatar">?</span>
-            <span class="profile-meta">
-              <span class="pname" id="profile-name">-</span>
-              <span class="prole" id="profile-role">-</span>
-            </span>
           </button>
-          <div class="dropdown" id="profile-dropdown">
+          <div class="dropdown profile-dropdown" id="profile-dropdown">
+            <div class="profile-card">
+              <span class="avatar avatar-lg" id="profile-card-avatar">?</span>
+              <span class="profile-meta">
+                <span class="pname" id="profile-name">-</span>
+                <span class="prole" id="profile-role">-</span>
+              </span>
+            </div>
             <button type="button" id="logout-btn">Logout</button>
           </div>
         </div>
@@ -274,6 +288,32 @@
                 <button type="submit" class="btn btn-primary">Submit report</button>
               </div>
             </form>
+          </div>
+          <div id="report-delay-block" class="settings-section" style="max-width:640px;margin-top:18px;" hidden>
+            <div id="report-delay-banner" class="rejection-banner" style="margin:0 0 10px;" hidden></div>
+            <h3 style="margin:0 0 6px;font-size:0.95rem;">Report late? File the reason</h3>
+            <p style="margin:0 0 10px;font-size:0.82rem;color:var(--text-muted);">If you can't send today's report on time, say why. It goes to the Director and stays on record.</p>
+            <div id="report-delay-flash" class="flash"></div>
+            <form id="report-delay-form" class="form-grid">
+              <div>
+                <label for="report-delay-reason">Why is the report late?</label>
+                <textarea id="report-delay-reason" rows="3" required minlength="5" maxlength="2000" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);resize:vertical;" placeholder="e.g. Was on site with a client all day, no network"></textarea>
+              </div>
+              <div>
+                <label style="display:flex;align-items:center;gap:8px;font-weight:normal;">
+                  <input type="checkbox" id="report-delay-told" style="width:auto;" />
+                  I already told someone about this delay
+                </label>
+              </div>
+              <div id="report-delay-who-wrap" hidden>
+                <label for="report-delay-who">Who did you tell, and how?</label>
+                <input id="report-delay-who" type="text" maxlength="255" placeholder="e.g. Roy (PM) on WhatsApp at 5pm" />
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="btn btn-ghost">File delay reason</button>
+              </div>
+            </form>
+            <div id="report-delay-history" style="margin-top:10px;font-size:0.82rem;"></div>
           </div>
           <h3 style="margin:24px 0 10px;font-size:0.95rem;">Your recent reports</h3>
           <div class="data-table-wrap">
@@ -687,99 +727,6 @@
         </div>
       </section>
 
-      <section class="face" id="face-traffic" data-title="Website traffic">
-        <div id="traffic-flash" class="flash"></div>
-        <div id="traffic-disconnected" class="not-connected" hidden>
-          <strong>Not connected yet</strong>
-          <p>Website traffic will appear here once the website database is connected.</p>
-        </div>
-        <div id="traffic-connected">
-        <div class="settings-section" style="max-width:none;margin-bottom:16px;">
-          <div class="toolbar" style="flex-wrap:wrap;">
-            <strong style="margin-right:auto;">Live website traffic</strong>
-            <button type="button" class="btn btn-ghost traffic-period" data-period="d3">3 days</button>
-            <button type="button" class="btn btn-ghost traffic-period" data-period="w1">7 days</button>
-            <button type="button" class="btn btn-primary traffic-period" data-period="m1">1 month</button>
-            <button type="button" class="btn btn-ghost traffic-period" data-period="m3">3 months</button>
-            <button type="button" class="btn btn-ghost traffic-period" data-period="m6">6 months</button>
-          </div>
-          <p class="meta" id="traffic-last-updated" style="margin:8px 0 0;"></p>
-        </div>
-        <div class="settings-section" id="traffic-summary" style="max-width:none;margin-bottom:16px;"></div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:16px;">
-          <div class="settings-section" style="max-width:none;"><h3 style="margin:0 0 10px;font-size:0.95rem;">Visits over time</h3><canvas id="traffic-series" style="max-height:240px;"></canvas></div>
-          <div class="settings-section" style="max-width:none;"><h3 style="margin:0 0 10px;font-size:0.95rem;">Views by page</h3><ul class="engagement-list" id="traffic-pages"></ul></div>
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:16px;">
-          <div class="settings-section" style="max-width:none;"><h3 style="margin:0 0 10px;font-size:0.95rem;">Devices</h3><ul class="engagement-list" id="traffic-devices"></ul></div>
-          <div class="settings-section" style="max-width:none;"><h3 style="margin:0 0 10px;font-size:0.95rem;">Top locations</h3><ul class="engagement-list" id="traffic-geo"></ul></div>
-        </div>
-        <div class="settings-section" style="max-width:none;">
-          <h3 style="margin:0 0 10px;font-size:0.95rem;">Recent visitors <span class="meta">(last 15 minutes · <span id="traffic-live-n">0</span> · EAT)</span></h3>
-          <div class="data-table-wrap" style="max-height:320px;overflow:auto;">
-            <table class="data-table">
-              <thead>
-                <tr><th>Time (EAT)</th><th>Page</th><th>City</th><th>Country</th><th>Device</th></tr>
-              </thead>
-              <tbody id="traffic-live"></tbody>
-            </table>
-          </div>
-        </div>
-        </div>
-      </section>
-
-      <section class="face" id="face-website-payments" data-title="Event registrations">
-        <div class="face-hero">
-          <h2>Event registrations</h2>
-          <p>Paid event-ticket registrations from the website.</p>
-        </div>
-        <div id="wp-flash" class="flash"></div>
-        <div id="wp-disconnected" class="not-connected" hidden>
-          <strong>Not connected yet</strong>
-          <p>Event registrations will appear here once the website database is connected.</p>
-        </div>
-        <div id="wp-connected">
-        <div class="settings-section" id="wp-summary" style="max-width:none;margin-bottom:16px;"></div>
-        <div class="settings-section" style="max-width:none;">
-          <div class="toolbar">
-            <select id="wp-status">
-              <option value="">All statuses</option>
-              <option value="paid">Paid</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
-            <select id="wp-event"><option value="">All events</option></select>
-            <input id="wp-from" type="date" title="From" />
-            <input id="wp-to" type="date" title="To" />
-            <button type="button" class="btn btn-primary" id="wp-refresh">Refresh</button>
-          </div>
-          <p class="meta" id="wp-count" style="margin:8px 0;"></p>
-          <div class="data-table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr><th>Payer</th><th>Contact</th><th>Event</th><th>Ticket</th><th>Paid (EAT)</th><th>Emailed</th><th></th></tr>
-              </thead>
-              <tbody id="wp-list"></tbody>
-            </table>
-          </div>
-        </div>
-        </div>
-        <div id="wp-email-modal" class="modal-overlay" hidden>
-          <div class="modal" style="max-width:520px;">
-            <div class="modal-header">
-              <h3>Contact attendee</h3>
-              <button type="button" class="btn btn-ghost" data-close-modal="wp-email-modal">&times;</button>
-            </div>
-            <div id="wp-email-to" style="margin:8px 0;color:var(--text-muted);font-size:0.9rem;"></div>
-            <textarea id="wp-email-message" rows="5" style="width:100%;" placeholder="Message for the attendee..."></textarea>
-            <div id="wp-email-flash" class="flash"></div>
-            <div class="modal-actions">
-              <button type="button" class="btn btn-ghost" data-close-modal="wp-email-modal">Cancel</button>
-              <button type="button" class="btn btn-primary" id="wp-email-send">Send email</button>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <section class="face" id="face-organization" data-title="Organization">
         <div class="face-hero">
           <h2>Company</h2>
@@ -945,6 +892,10 @@
                 <button type="button" class="btn btn-primary btn-sm" id="btn-add-client-manual" hidden>Add client details</button>
               </div>
               <div id="pay-client-manual" class="form-grid" style="margin-top:12px;" hidden>
+                <div style="grid-column:1/-1;">
+                  <label for="pay-pick-client">Client already in the CRM? Pick them - details fill in</label>
+                  <select id="pay-pick-client"><option value="">- New client (type below) -</option></select>
+                </div>
                 <div><label>Client name</label><input id="pay-new-client-name" placeholder="Contact name" autocomplete="off" /></div>
                 <div><label>Business</label><input id="pay-new-client-business" placeholder="Company" autocomplete="off" /></div>
                 <div><label>Email</label><input id="pay-new-client-email" type="email" placeholder="billing@client.com" autocomplete="off" /></div>
@@ -1098,6 +1049,22 @@
             <tbody id="employees-tbody"></tbody>
           </table>
         </div>
+      </section>
+
+      <section class="face" id="face-notifications" data-title="Notifications">
+        <div class="face-hero">
+          <h2>Notifications</h2>
+          <p>Everything that has happened for you. Each one has a button that takes you straight to it. The bell in the top bar only keeps what you have not read.</p>
+        </div>
+        <div class="toolbar">
+          <div class="ib-tabs" id="notif-page-tabs" style="display:flex;gap:6px;">
+            <button type="button" class="btn btn-ghost btn-sm on" data-filter="unread">Unread</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-filter="all">All</button>
+          </div>
+          <div class="spacer"></div>
+          <button type="button" class="btn btn-ghost btn-sm" id="notif-page-readall">Mark all read</button>
+        </div>
+        <div id="notif-page-list"></div>
       </section>
 
       <section class="face" id="face-leave" data-title="Leave">
@@ -1438,6 +1405,7 @@
             </div>
             <div id="chat-active" hidden>
               <div class="chat-header">
+                <button type="button" class="btn btn-ghost btn-sm chat-back" id="chat-back" aria-label="Back to chats">‹ Chats</button>
                 <div>
                   <div class="peer-name" id="chat-peer-name">-</div>
                   <div class="peer-role" id="chat-peer-role">-</div>
@@ -1612,6 +1580,28 @@
     </div>
   </div>
 
+  <div class="modal-backdrop" id="director-report-view-modal">
+    <div class="modal-card wide">
+      <header>
+        <h3 id="director-report-view-title">Daily report</h3>
+        <button type="button" class="btn btn-ghost" data-close-modal style="padding:4px 10px;">Close</button>
+      </header>
+      <div class="modal-body">
+        <div id="director-report-view-body"></div>
+        <div id="director-report-remarks-block" class="settings-section" style="margin-top:16px;max-width:none;" hidden>
+          <h3 style="margin:0 0 8px;font-size:0.9rem;">Remarks to author</h3>
+          <p class="meta" style="margin:0 0 8px;">Visible to the person who filed this report.</p>
+          <textarea id="director-report-remarks" rows="3" placeholder="Ask for clarity…" style="width:100%;padding:11px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);"></textarea>
+          <div class="form-actions" style="margin-top:8px;gap:8px;">
+            <button type="button" class="btn btn-primary" id="director-report-remarks-send">Save remarks</button>
+            <button type="button" class="btn btn-ghost" id="director-report-ai-review">AI Review</button>
+          </div>
+        </div>
+        <div id="director-report-view-flash" class="flash"></div>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="new-client-modal">
     <div class="modal-card">
       <header>
@@ -1693,7 +1683,7 @@
         </form>
         <div id="lead-win-box" class="settings-section" style="max-width:none;margin-bottom:20px;">
           <h4 style="margin:0 0 8px;font-size:0.9rem;">Mark as won</h4>
-          <p class="meta" style="margin:0 0 10px;">Creates the client, a project for Director approval, and a deposit invoice.</p>
+          <p class="meta" style="margin:0 0 10px;">Creates the client and a project for Director approval. Finance raises the invoice; the deposit is noted on the project.</p>
           <form id="lead-win-form" class="form-grid">
             <div><label>Project name</label><input id="win-project-name" required placeholder="Website rebuild" /></div>
             <div><label>Project value (KES)</label><input id="win-value" type="number" min="0" step="0.01" placeholder="0.00" /></div>
@@ -1869,8 +1859,12 @@
             </div>
           </div>
           <div id="new-inv-contact" class="placeholder-card" hidden style="margin:10px 0 12px;">
-            <strong style="display:block;margin-bottom:6px;">Bill to (from client record)</strong>
+            <strong style="display:block;margin-bottom:6px;">Bill to (filled from the client record)</strong>
             <div id="new-inv-contact-body" class="meta"></div>
+            <div id="new-inv-email-wrap" style="margin-top:8px;" hidden>
+              <label for="new-inv-email">Client email (missing on the record - saved once, used from now on)</label>
+              <input id="new-inv-email" type="email" placeholder="billing@client.com" autocomplete="off" />
+            </div>
           </div>
           <p class="meta" style="margin:8px 0 12px;">Due date is invoice date + 5 days. No VAT. Numbering is per project (e.g. 009/02/26). On create, the invoice downloads and is emailed to the client.</p>
           <div class="toolbar" style="margin-bottom:8px;">
@@ -2171,34 +2165,37 @@
 
   <script src="/vendor/chart.umd.min.js"></script>
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/js/api.js?v=20261024s1"></script>
+  <script src="/js/toast.js?v=20261109a"></script>
+  <script src="/js/api.js?v=20261110b"></script>
   <script src="/js/jarvis.js?v=20261023g"></script>
   <script src="/js/format.js?v=20261021e"></script>
   <script src="/js/receipts.js?v=20260815g"></script>
-  <script src="/js/nav.js?v=20261029e"></script>
+  <script src="/js/nav.js?v=20261110a"></script>
   <script src="/js/socket.js?v=20261029f"></script>
+  <script src="/js/alerts.js?v=20261110b"></script>
+  <script src="/js/notifActions.js?v=20261110a"></script>
   <script src="/js/calls.js?v=20261023i"></script>
-  <script src="/js/settings.js?v=20260815g"></script>
+  <script src="/js/settings.js?v=20261109a"></script>
   <script src="/js/tasks.js?v=20261021b"></script>
-  <script src="/js/myWork.js?v=20261021b"></script>
+  <script src="/js/myWork.js?v=20261109c"></script>
   <script src="/js/approvals.js?v=20261021e"></script>
-  <script src="/js/projectDetail.js?v=20261029e"></script>
-  <script src="/js/clientCard.js?v=20261029e"></script>
-  <script src="/js/community.js?v=20261029a"></script>
-  <script src="/js/voiceReport.js?v=20260827b"></script>
-  <script src="/js/voiceForms.js?v=20260827b"></script>
-  <script src="/js/ops.js?v=20260826a"></script>
-  <script src="/js/sales.js?v=20261029e"></script>
-  <script src="/js/director.js?v=20261029e"></script>
+  <script src="/js/projectDetail.js?v=20261110a"></script>
+  <script src="/js/clientCard.js?v=20261110a"></script>
+  <script src="/js/community.js?v=20261110a"></script>
+  <script src="/js/audioRec.js?v=20261109a"></script>
+  <script src="/js/voiceReport.js?v=20261109a"></script>
+  <script src="/js/voiceForms.js?v=20261109a"></script>
+  <script src="/js/ops.js?v=20261109a"></script>
+  <script src="/js/sales.js?v=20261110a"></script>
+  <script src="/js/director.js?v=20261110a"></script>
   <script src="/js/developer.js?v=20261021d"></script>
-  <script src="/js/finance.js?v=20261029d"></script>
-  <script src="/js/hr.js?v=20261023i"></script>
+  <script src="/js/finance.js?v=20261109b"></script>
+  <script src="/js/hr.js?v=20261109b"></script>
   <script src="/js/pm.js?v=20261021e"></script>
-  <script src="/js/admin.js?v=20261029e"></script>
+  <script src="/js/admin.js?v=20261109a"></script>
   <script src="/js/client.js?v=20261021d"></script>
-  <script src="/js/traffic.js?v=20261021e"></script>
-  <script src="/js/websitePayments.js?v=20261021e"></script>
-  <script src="/js/adminHealth.js?v=20261021e"></script>
-  <script src="/js/shell.js?v=20261029f"></script>
+  <script src="/js/adminHealth.js?v=20261109b"></script>
+  <script src="/js/shell.js?v=20261110b"></script>
+  <script src="/js/pwa.js?v=20261109a"></script>
 </body>
 </html>

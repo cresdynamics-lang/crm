@@ -1,0 +1,65 @@
+/*
+ * Phones: the screen stays put.
+ *  - never slides left or right
+ *  - typing in a box does not zoom or shift the page (iPhone zooms any box under 16px)
+ *  - the visible area follows the on-screen keyboard (dvh) so Send is never pushed off
+ */
+html, body { max-width: 100%; overflow-x: hidden; overscroll-behavior-x: none; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+img, video, canvas, svg, iframe { max-width: 100%; }
+
+@media (max-width: 860px) {
+  input, select, textarea, button { font-size: 16px !important; }
+  input[type='checkbox'], input[type='radio'], input[type='range'] { font-size: inherit !important; }
+  .chat-composer input { font-size: 16px !important; }
+
+  /* Wide tables and grids scroll inside their own box instead of widening the page */
+  .main-content, .face, .card, .panel, .settings-section, .modal-card, .modal-body { min-width: 0; max-width: 100%; }
+  table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .kpi-grid, .form-grid { max-width: 100%; }
+  pre, code { white-space: pre-wrap; word-break: break-word; }
+  .main-content { overflow-x: hidden; }
+  .modal-card { width: calc(100vw - 24px) !important; max-width: calc(100vw - 24px) !important; }
+}
+
+/* ---------- Phone top bar: clear of the status bar, easy to tap ---------- */
+@media (max-width: 860px) {
+  :root { --topbar-h: calc(52px + env(safe-area-inset-top, 0px)); }
+  .app-shell { grid-template-rows: var(--topbar-h) minmax(0, 1fr); }
+  .topbar { padding-top: env(safe-area-inset-top, 0px); padding-left: max(10px, env(safe-area-inset-left, 0px)); padding-right: max(10px, env(safe-area-inset-right, 0px)); z-index: 40; }
+  .mt-top { padding-top: calc(env(safe-area-inset-top, 0px) + 6px); }
+  /* 44px is the smallest comfortable thumb target */
+  .hamburger, .nav-back, .icon-btn, .profile-btn, .ms-menu-btn, .ms-bell, .ms-back { min-width: 44px; min-height: 44px; }
+  .hamburger { width: 44px !important; height: 44px !important; display: grid !important; place-items: center; touch-action: manipulation; }
+  .hamburger span { width: 18px !important; margin: 2.5px 0 !important; }
+  .page-title { font-size: 1rem; }
+  button, a, [role='button'] { touch-action: manipulation; }
+}
+
+/* ---------- Phone content: moderate, not stretched ---------- */
+@media (max-width: 600px) {
+  .main-content { padding: 12px 12px 20px !important; }
+  .face-hero { margin-bottom: 12px; }
+  .face-hero h2 { font-size: 1.25rem; }
+  .face-hero p { font-size: 0.88rem; }
+  .kpi-grid { gap: 8px; margin-bottom: 12px; }
+  .kpi-card { padding: 10px 12px; }
+  .kpi-card .kpi-label { font-size: 0.66rem; }
+  .kpi-card .kpi-value { font-size: 1.3rem; margin-top: 4px; }
+  .chart-panel, .settings-section { padding: 12px; margin-bottom: 12px; }
+  .toolbar { gap: 8px; flex-wrap: wrap; }
+  h3 { font-size: 1rem; }
+}
+
+/* ---------- Back button ---------- */
+.nav-back { display: inline-flex; align-items: center; justify-content: center; font-size: 1.6rem; line-height: 1; padding: 0 8px; border: 1px solid var(--border); background: transparent; color: inherit; border-radius: 10px; cursor: pointer; flex: 0 0 auto; }
+.nav-back[hidden] { display: none; }
+.ms-back { display: inline-flex; align-items: center; justify-content: center; font-size: 1.5rem; line-height: 1; padding: 0 10px; border: 1px solid var(--border); background: transparent; color: inherit; border-radius: 10px; cursor: pointer; flex: 0 0 auto; }
+@media (max-width: 860px) {
+  .sidebar { padding-top: env(safe-area-inset-top, 0px); overflow-y: auto; -webkit-overflow-scrolling: touch; }
+}
+@media (max-width: 860px) {
+  /* The menu drawer: small logo, compact rows, so the whole menu fits without scrolling */
+  .sidebar-brand { padding: 8px 12px; }
+  .sidebar-brand .brand-logo { max-height: 40px; width: auto; }
+  .nav-list a { padding-top: 9px; padding-bottom: 9px; }
+}

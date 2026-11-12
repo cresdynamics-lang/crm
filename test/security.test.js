@@ -7,13 +7,17 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { start, stop, roleUsers, tokenFor, call } = require('./helpers');
+const { start, stop, roleUsers, tokenFor, call, clearAuthLimits } = require('./helpers');
 
 let base;
 before(async () => {
   base = await start();
+  await clearAuthLimits();
 });
-after(stop);
+after(async () => {
+  await clearAuthLimits();
+  await stop();
+});
 
 test('uploaded files need a signed-in user', async () => {
   const dir = path.join(__dirname, '..', 'uploads', 'avatars');
@@ -94,4 +98,18 @@ test('reading payroll pages does not write payroll rows', async () => {
   await call(users.hr || users.admin, '/api/salaries/employees');
   if (users.developer) await call(users.developer, '/api/salaries/me');
   assert.equal(await count(), before);
+});
+
+test('rotating a forged X-Forwarded-For does not reset the sign-in limit', async () => {
+  const email = `spoof-${Date.now()}@example.invalid`;
+  let blocked = 0;
+  for (let i = 1; i <= 8; i++) {
+    const r = await call(null, '/api/auth/login', {
+      method: 'POST',
+      body: { email, password: 'wrong-password' },
+      headers: { 'X-Forwarded-For': `10.88.0.${i}`, 'X-Real-IP': '127.0.0.9' },
+    });
+    if (r.status === 429) blocked++;
+  }
+  assert.ok(blocked >= 1, 'limit still applies when X-Forwarded-For changes each time');
 });

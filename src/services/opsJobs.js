@@ -388,7 +388,8 @@ async function alertStaleLeads() {
      WHERE r.name IN ('director', 'admin') AND u.status = 'active'`
   );
 
-  let sent = 0;
+  // One notification per person per day, listing their stale leads (it used to be one per lead per day: thousands)
+  const byUser = new Map();
   for (const row of rows) {
     const recipients = [row.owner_id, ...directors.map((d) => d.id)];
     for (const userId of [...new Set(recipients.filter(Boolean))]) {
@@ -400,16 +401,224 @@ async function alertStaleLeads() {
         [row.lead_id, userId]
       );
       if (!inserted.rows[0]) continue;
-      await queueNotification({
-        userId,
-        type: 'lead_stale',
-        content: `Stale lead (no contact 7+ days): ${row.lead_name}`,
-        meta: { leadId: row.lead_id, lastContactAt: row.last_contact_at },
-      });
-      sent += 1;
+      if (!byUser.has(userId)) byUser.set(userId, []);
+      byUser.get(userId).push(row);
     }
   }
+  let sent = 0;
+  for (const [userId, leads] of byUser) {
+    const names = leads.slice(0, 3).map((l) => l.lead_name).join(', ');
+    await queueNotification({
+      userId,
+      type: 'lead_stale',
+      content: leads.length === 1
+        ? `Stale lead (no contact 7+ days): ${leads[0].lead_name}`
+        : `${leads.length} leads have had no contact for 7+ days: ${names}${leads.length > 3 ? ` and ${leads.length - 3} more` : ''}`,
+      meta: { leadId: leads[0].lead_id, count: leads.length, href: '#/pipeline' },
+    });
+    sent += 1;
+  }
   return { flagged: rows.length, notifications: sent };
+}
+
+/**
+ * Sales + developers who have NOT filed a daily report today (Africa/Nairobi
+ * calendar day) get one in-app reminder + email during working hours
+ * (Mon-Sat, 08:00-20:00 Nairobi). Filing today's report clears reminders.
+ * A rolling 12h gap was wrong: people who filed in the morning still got
+ * reminded again the same evening.
+ */
+const REPORT_REMIND_COOLDOWN_HOURS = 12;
+
+function nairobiClock(now = new Date()) {
+  const nrb = new Date(now.getTime() + 3 * 3600 * 1000);
+  return { hour: nrb.getUTCHours(), weekday: nrb.getUTCDay() };
+}
+
+function reportReminderWindowOpen(now = new Date()) {
+  const { hour, weekday } = nairobiClock(now);
+  return weekday !== 0 && hour >= 8 && hour < 20;
+}
+
+function nairobiTodaySql() {
+  return `(NOW() AT TIME ZONE 'Africa/Nairobi')::date`;
+}
+
+/** True when this user already has a daily_reports row for Nairobi today. */
+async function hasReportToday(userId) {
+  const { rows } = await query(
+    `SELECT 1 FROM daily_reports d
+      WHERE d.user_id = $1
+        AND (d.created_at AT TIME ZONE 'Africa/Nairobi')::date = ${nairobiTodaySql()}
+      LIMIT 1`,
+    [userId]
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Drop leftover reminder noise once someone has filed today's report
+ * (in-app notifications + any same-day reminder log rows that would re-prompt).
+ */
+async function clearReportRemindersForFilers() {
+  const { rows } = await query(
+    `WITH filed AS (
+       SELECT DISTINCT d.user_id
+         FROM daily_reports d
+        WHERE (d.created_at AT TIME ZONE 'Africa/Nairobi')::date = ${nairobiTodaySql()}
+     )
+     DELETE FROM notifications n
+      USING filed f
+      WHERE n.user_id = f.user_id
+        AND n.type = 'report_reminder'
+        AND (n.created_at AT TIME ZONE 'Africa/Nairobi')::date = ${nairobiTodaySql()}
+     RETURNING n.id, n.user_id`
+  );
+  return { clearedNotifications: rows.length };
+}
+
+async function clearReportRemindersForUser(userId) {
+  await query(
+    `DELETE FROM notifications
+      WHERE user_id = $1 AND type = 'report_reminder'
+        AND (created_at AT TIME ZONE 'Africa/Nairobi')::date = ${nairobiTodaySql()}`,
+    [userId]
+  ).catch(() => {});
+}
+
+async function remindMissingReports({ now = new Date(), force = false } = {}) {
+  if (!force && !reportReminderWindowOpen(now)) return { skipped: 'outside_hours' };
+
+  // Evict stale reminders for anyone who already filed today before scanning
+  const cleared = await clearReportRemindersForFilers().catch((e) => {
+    console.error('[ops] clear report reminders failed', e.message);
+    return { clearedNotifications: 0 };
+  });
+
+  const { rows } = await query(
+    `SELECT u.id, u.name, u.email, r.name AS role,
+            lr.last_report_at,
+            FLOOR(EXTRACT(EPOCH FROM (NOW() - COALESCE(lr.last_report_at, u.created_at))) / 3600)::int AS hours_since
+       FROM users u
+       JOIN roles r ON r.id = u.role_id
+       LEFT JOIN LATERAL (
+         SELECT MAX(d.created_at) AS last_report_at FROM daily_reports d WHERE d.user_id = u.id
+       ) lr ON TRUE
+      WHERE r.name IN ('sales', 'developer')
+        AND u.status = 'active'
+        AND NOT EXISTS (
+          SELECT 1 FROM daily_reports d
+           WHERE d.user_id = u.id
+             AND (d.created_at AT TIME ZONE 'Africa/Nairobi')::date = ${nairobiTodaySql()}
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM report_reminder_log l
+           WHERE l.user_id = u.id
+             AND (l.sent_at AT TIME ZONE 'Africa/Nairobi')::date = ${nairobiTodaySql()}
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM report_delay_notes n
+           WHERE n.user_id = u.id
+             AND (n.created_at AT TIME ZONE 'Africa/Nairobi')::date = ${nairobiTodaySql()}
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM leave_requests lv
+            JOIN employees e ON e.id = lv.employee_id
+           WHERE e.user_id = u.id AND lv.status = 'approved'
+             AND ${nairobiTodaySql()} BETWEEN lv.start_date AND lv.end_date
+        )`
+  );
+
+  const root = (process.env.PUBLIC_WEB_URL || 'https://cresos.cresdynamics.com').replace(/\/$/, '');
+  const link = `${root}/dashboard#/work`;
+  let reminded = 0;
+  let emailed = 0;
+  let skippedFiled = 0;
+
+  for (const u of rows) {
+    // Race: they may have filed between the SELECT and now
+    if (await hasReportToday(u.id)) {
+      skippedFiled += 1;
+      await clearReportRemindersForUser(u.id);
+      continue;
+    }
+
+    // Claim one reminder slot for Nairobi today
+    const { rows: logRows } = await query(
+      `INSERT INTO report_reminder_log (user_id, last_report_at, hours_since)
+       SELECT $1, $2, $3
+        WHERE NOT EXISTS (
+          SELECT 1 FROM report_reminder_log l
+           WHERE l.user_id = $1
+             AND (l.sent_at AT TIME ZONE 'Africa/Nairobi')::date = ${nairobiTodaySql()}
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM daily_reports d
+           WHERE d.user_id = $1
+             AND (d.created_at AT TIME ZONE 'Africa/Nairobi')::date = ${nairobiTodaySql()}
+        )
+       RETURNING id`,
+      [u.id, u.last_report_at, u.hours_since]
+    );
+    const reminderId = logRows[0]?.id;
+    if (!reminderId) continue;
+
+    const content =
+      'You have not sent today’s daily report yet. Send it now, or file why it is late (and say if you already told your PM or Director).';
+
+    await queueNotification({
+      userId: u.id,
+      type: 'report_reminder',
+      content,
+      meta: {
+        reminderId,
+        hoursSince: u.hours_since,
+        href: '#/work',
+        action: 'Open My work to send your report or file the reason for the delay.',
+      },
+    }).catch((e) => console.error('[ops] report reminder notify failed', e.message));
+    reminded += 1;
+
+    if (u.email) {
+      const first = String(u.name || '').trim().split(/\s+/)[0] || 'there';
+      const body = [
+        `Hi ${first},`,
+        '',
+        'CRES OS has no daily report from you for today.',
+        '',
+        'Please do one of these now:',
+        '1. Send your daily report.',
+        '2. If you already told your PM or Director about the delay, file it in CRES OS so it is on record.',
+        '3. If you have not told anyone yet, explain the delay in CRES OS - it goes straight to the Director.',
+        '',
+        `Open My work: ${link}`,
+        '',
+        '- Cres Dynamics',
+      ].join('\n');
+      try {
+        const { enqueue } = require('../queues');
+        await enqueue('email', 'report.reminder', {
+          to: u.email,
+          subject: 'Reminder: your daily report is overdue',
+          body,
+          reminderId,
+          userId: u.id,
+        });
+        await query(`UPDATE report_reminder_log SET emailed = TRUE WHERE id = $1`, [reminderId]);
+        emailed += 1;
+      } catch (e) {
+        console.error('[ops] report reminder email failed', e.message);
+      }
+    }
+  }
+  return {
+    candidates: rows.length,
+    reminded,
+    emailed,
+    skippedFiled,
+    clearedNotifications: cleared.clearedNotifications || 0,
+    cooldownHours: REPORT_REMIND_COOLDOWN_HOURS,
+  };
 }
 
 async function runOpsJobs() {
@@ -440,7 +649,16 @@ async function runOpsJobs() {
     console.error('[ops] stale leads failed', e.message);
     return { flagged: 0, error: e.message };
   });
-  return { overdue, penaltyCycle, followups, assignments, leadMails, stale, at: new Date().toISOString() };
+  const reportReminders = await remindMissingReports().catch((e) => {
+    console.error('[ops] report reminders failed', e.message);
+    return { reminded: 0, error: e.message };
+  });
+  const mailFollowups = await require('./mailFollowups').remindMailFollowups().catch((e) => {
+    console.error('[ops] mail follow-ups failed', e.message);
+    return { reminded: 0, error: e.message };
+  });
+  await require('./credentialReveal').wipeExpired().catch((e) => console.error('[ops] reveal wipe failed', e.message));
+  return { overdue, penaltyCycle, followups, assignments, leadMails, stale, reportReminders, mailFollowups, at: new Date().toISOString() };
 }
 
 function startOpsScheduler(intervalMs = 5 * 60 * 1000) {
@@ -475,7 +693,12 @@ function startOpsScheduler(intervalMs = 5 * 60 * 1000) {
 }
 
 module.exports = {
+  clearReportRemindersForFilers,
+  clearReportRemindersForUser,
+  hasReportToday,
   runOpsJobs,
+  remindMissingReports,
+  reportReminderWindowOpen,
   markOverdueInvoices,
   alertFollowUpsDue,
   sendDueLeadMessages,

@@ -73,7 +73,7 @@ router.get(
         { label: 'project', key: 'name' },
         { label: 'client', key: 'client_name' },
         { label: 'status', key: 'status' },
-        { label: 'progress_pct', value: (r) => progressPercent(r.milestones) },
+        { label: 'progress_pct', value: (r) => progressPercent(r.milestones, r.status) },
         { label: 'value_kes', key: 'value_amount' },
         { label: 'invoiced_kes', key: 'invoiced' },
         { label: 'paid_kes', key: 'paid' },

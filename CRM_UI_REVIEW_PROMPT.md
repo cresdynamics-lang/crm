@@ -37,7 +37,7 @@ Every staff role has Tasks and Reports (the daily report) as two items. They are
 | Sales | 14 | Home · Pipeline (leads + clients as tabs) · Projects · Collections (was My Follow-ups) · My work · Team chat |
 | Director | 17 | Home · Approvals · Pipeline (view) · Projects (with timeline tab) · Money (invoices + expenses) · Team (reports, tasks) · Website traffic |
 | Developer | 9 | Home · My projects · My work · Team chat |
-| Finance | 16 | Home · Billing (invoices, record payment, project balances, collections/flag) · Spending (expenses + money approvals) · Reports (financial + website payments) · Team chat |
+| Finance | 16 | Home · Billing (invoices, record payment, project balances, collections/flag) · Spending (expenses + money approvals) · Reports (financial) · Team chat |
 | PM | 10 | Home · Projects (list + timeline) · Team (reports review, tasks) · Team chat |
 | HR | 8 | Home · People (employees, leave decisions) · Payroll (payroll + salary funding as tabs) |
 | Client | 6 | Home · My projects (with change requests and messages inside) · Invoices & documents. Remove Cres Ops: it's the staff help desk. |

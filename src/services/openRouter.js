@@ -63,11 +63,30 @@ async function openRouterChatWithFallback(opts) {
   try {
     return await openRouterChat({ ...opts, model: primary });
   } catch (err) {
-    const retryable = err.status === 404 || err.status === 400 || /model/i.test(err.message || '');
+    // Low credit balance: retry once with fewer max_tokens so a short draft can still run.
+    const creditShort =
+      err.status === 402 || /more credits|fewer max_tokens|afford/i.test(err.message || '');
+    if (creditShort) {
+      const reduced = Math.min(Number(opts.maxTokens) || 700, 500);
+      if (reduced < (Number(opts.maxTokens) || 700)) {
+        console.warn(`[openrouter] credit limit (${err.message.slice(0, 80)}); retrying with max_tokens=${reduced}`);
+        try {
+          return await openRouterChat({ ...opts, model: primary, maxTokens: reduced });
+        } catch {
+          /* fall through to model/Groq fallbacks */
+        }
+      }
+    }
+    const retryable =
+      creditShort || err.status === 404 || err.status === 400 || /model/i.test(err.message || '');
     if (!fallback || fallback === primary || !retryable) throw err;
     console.warn(`[openrouter] ${primary} failed (${err.message}); trying ${fallback}`);
     await sleep(250);
-    return await openRouterChat({ ...opts, model: fallback });
+    return await openRouterChat({
+      ...opts,
+      model: fallback,
+      maxTokens: creditShort ? Math.min(Number(opts.maxTokens) || 700, 500) : opts.maxTokens,
+    });
   }
 }
 

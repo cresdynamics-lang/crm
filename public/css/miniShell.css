@@ -1,0 +1,46 @@
+/* Menu + bell on the standalone pages (inbox, Team mail, meetings) */
+.mt-top { gap: 10px; position: relative; }
+.ms-menu-btn { display: grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; padding: 0; }
+.ms-menu-btn span { display: block; width: 14px; height: 2px; margin: 2px 0; background: currentColor; border-radius: 2px; }
+.mt-top .mt-brand { margin-right: auto; min-width: 0; }
+.mt-top .mt-brand span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt-top-right { align-items: center; }
+.ms-bell-wrap { position: relative; }
+.ms-bell { position: relative; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; border: 0; background: transparent; color: var(--text); cursor: pointer; }
+.ms-badge { position: absolute; top: -2px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--danger, #e05a5a); color: #fff; font-size: 0.66rem; font-weight: 700; line-height: 18px; text-align: center; }
+.ms-badge[hidden] { display: none; }
+.ms-notif-panel { display: none; position: absolute; right: 0; top: calc(100% + 8px); width: min(340px, calc(100vw - 24px)); max-height: 70vh; overflow: auto; z-index: 9500; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35); padding: 6px; }
+.ms-notif-panel.open { display: block; }
+.ms-notif-head { display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; font-weight: 600; font-size: 0.85rem; }
+.ms-notif-head button { background: none; border: 0; color: var(--accent); font-size: 0.76rem; cursor: pointer; }
+.ms-notif { display: grid; gap: 2px; width: 100%; text-align: left; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--text); font: inherit; font-size: 0.82rem; cursor: pointer; }
+.ms-notif:hover { background: var(--bg-soft); }
+.ms-notif.unread { background: var(--accent-soft); }
+.ms-notif small { color: var(--text-muted); font-size: 0.7rem; }
+.ms-empty { padding: 14px; color: var(--text-muted); font-size: 0.82rem; text-align: center; }
+.ms-drawer { position: fixed; inset: 0; z-index: 9400; background: rgba(0, 0, 0, 0); pointer-events: none; transition: background 0.2s; }
+.ms-drawer.open { background: rgba(0, 0, 0, 0.45); pointer-events: auto; }
+.ms-drawer-panel { position: absolute; inset: 0 auto 0 0; width: min(280px, 86vw); background: var(--bg-elevated); border-right: 1px solid var(--border); transform: translateX(-105%); transition: transform 0.2s ease; overflow: auto; padding: 12px; }
+.ms-drawer.open .ms-drawer-panel { transform: translateX(0); }
+.ms-drawer-head { display: flex; align-items: center; gap: 10px; padding: 6px 4px 12px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+.ms-drawer-head img { width: 36px; height: 36px; border-radius: 8px; }
+.ms-drawer-head div { display: grid; }
+.ms-drawer-head small { color: var(--text-muted); text-transform: capitalize; }
+.ms-nav { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.ms-nav a { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; color: var(--text); text-decoration: none; font-size: 0.88rem; }
+.ms-nav a:hover { background: var(--bg-soft); }
+.ms-nav a.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.ms-nav .nav-icon { width: 18px; text-align: center; }
+@media (prefers-reduced-motion: reduce) { .ms-drawer, .ms-drawer-panel { transition: none; } }
+
+/* Phones: keep the header light - menu, short title, bell. The rest lives in the menu. */
+@media (max-width: 640px) {
+  .mt-top { padding: 0 10px; height: 50px; }
+  .mt-top .mt-link, .mt-top #ml-identity, .mt-top #ib-mailbox { display: none !important; }
+  .mt-top .mt-brand img { display: none; }
+  .mt-top .mt-brand span { font-size: 0.92rem; }
+  /* Reading an email on a phone: just the email, compact actions */
+  .ib-main.reading .ib-actions { gap: 4px; }
+  .ib-main.reading .ib-actions .mt-btn { padding: 5px 8px; font-size: 0.72rem; }
+  .ib-main.reading .ib-head h2 { font-size: 0.98rem; }
+}

@@ -1,4 +1,5 @@
 require('dotenv').config();
+process.env.CRES_PROCESS = process.env.CRES_PROCESS || 'web';
 require('./lib/errorLog').installProcessHandlers();
 const http = require('http');
 const config = require('./config');
@@ -35,25 +36,17 @@ async function boot() {
     console.log(`[boot] Cres Dynamics CRM on :${config.port}`);
     console.log(`[boot] db=${db.status} redis=${redis.status} workers=${workers.length} socket=up`);
     try {
-      const { startOpsScheduler } = require('./services/opsJobs');
-      startOpsScheduler();
-      console.log('[boot] ops scheduler started (overdue + follow-up alerts)');
+      require('./services/backgroundServices').startBackgroundServices();
+      console.log('[boot] background services registered (ops scheduler, health sampler, inbox watcher; one process runs each)');
     } catch (e) {
-      console.warn('[boot] ops scheduler skipped:', e.message);
-    }
-
-    try {
-      const { startSampler } = require('./services/healthSampler');
-      startSampler(60000);
-      console.log('[boot] health sampler started (60s)');
-    } catch (e) {
-      console.warn('[boot] health sampler skipped:', e.message);
+      console.warn('[boot] background services skipped:', e.message);
     }
   });
 
   const shutdown = async (signal) => {
     console.log(`[boot] ${signal} received - shutting down`);
     server.close();
+    await require('./services/backgroundServices').stopBackgroundServices().catch(() => {});
     await Promise.all(workers.map((w) => w.close()));
     process.exit(0);
   };

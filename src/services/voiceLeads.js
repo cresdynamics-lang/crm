@@ -16,12 +16,42 @@ function apiKeys() {
   );
 }
 
-/** Transcribe audio via Groq's Whisper endpoint. Returns { text, model }. */
-async function transcribeAudio({ buffer, filename = 'audio.webm', mimetype = 'audio/webm' }) {
+/*
+ * Whisper spells names it was told about. The vocabulary is the company's own
+ * project, client and staff names (cached 10 minutes), so "Mohaa Finest
+ * Curtains" stops coming out as "Maha Curtains".
+ */
+let vocabCache = { at: 0, words: '' };
+async function vocabulary() {
+  if (Date.now() - vocabCache.at < 10 * 60 * 1000) return vocabCache.words;
+  try {
+    const { query } = require('../config/database');
+    const { rows } = await query(
+      `(SELECT name FROM projects WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT 25)
+       UNION ALL (SELECT COALESCE(business_name, name) FROM clients WHERE deleted_at IS NULL ORDER BY converted_at DESC NULLS LAST LIMIT 20)
+       UNION ALL (SELECT name FROM users WHERE status = 'active' LIMIT 20)`
+    );
+    const words = [...new Set(rows.map((r) => String(r.name || '').trim()).filter(Boolean))].join(', ');
+    vocabCache = { at: Date.now(), words: words.slice(0, 600) };
+  } catch {
+    vocabCache = { at: Date.now(), words: '' };
+  }
+  return vocabCache.words;
+}
+
+const DEFAULT_PROMPT = 'Cres Dynamics, a Kenyan software company. Kenyan English. M-Pesa, KES amounts, websites, apps, clients, invoices.';
+
+/**
+ * Transcribe audio via Groq's Whisper endpoint. Returns { text, model }.
+ * prompt: what kind of recording this is (helps punctuation and terms).
+ */
+async function transcribeAudio({ buffer, filename = 'audio.webm', mimetype = 'audio/webm', prompt } = {}) {
   const keys = apiKeys();
   if (!keys.length) {
     throw new Error('GROQ_API_KEY is not configured');
   }
+  const vocab = await vocabulary();
+  const hint = `${prompt || DEFAULT_PROMPT}${vocab ? ` Names: ${vocab}.` : ''}`.slice(0, 900);
   let lastErr;
   for (const key of keys) {
     try {
@@ -29,11 +59,7 @@ async function transcribeAudio({ buffer, filename = 'audio.webm', mimetype = 'au
       form.append('file', new Blob([buffer], { type: mimetype }), filename);
       form.append('model', config.groq.whisperModel);
       form.append('response_format', 'json');
-      form.append(
-        'prompt',
-        'Kenyan sales agent narrating a list of business leads. ' +
-          'Contains business names, phone numbers like 0712 345 678 or 254712345678, and business descriptions.'
-      );
+      form.append('prompt', hint);
 
       const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
         method: 'POST',

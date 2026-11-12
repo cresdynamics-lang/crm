@@ -7,6 +7,7 @@ const { asyncHandler, AppError } = require('../lib/errors');
 const { idempotency } = require('../middleware/idempotency');
 const { queueNotification } = require('../queues/jobs');
 const { removeStaffUser } = require('../services/staffRemoval');
+const { sendStaffCredentials } = require('../services/staffCredentials');
 
 const { currentMonth, ensurePayrollHistory } = require('../services/payrollRows');
 
@@ -95,6 +96,7 @@ router.post(
       throw new AppError('First-time password is required (min 8 characters)', 400, 'VALIDATION');
     }
 
+    let createdUser = null;
     const result = await withTransaction(async (tx) => {
       let userId = req.body.user_id || null;
 
@@ -114,6 +116,7 @@ router.post(
           [name.trim(), email.trim().toLowerCase(), phone || null, passwordHash, roleId]
         );
         userId = users[0].id;
+        createdUser = users[0];
       }
 
       const { rows: emp } = await tx.query(
@@ -146,6 +149,21 @@ router.post(
 
       return { employee: joined[0] };
     });
+
+    // New login created: email the person their sign-in details (background)
+    if (createdUser) {
+      sendStaffCredentials({
+        userId: createdUser.id,
+        name: createdUser.name,
+        email: createdUser.email,
+        password,
+        role,
+        createdBy: req.user.id,
+        createdByName: req.user.name,
+        createdByRole: req.user.role,
+      });
+      result.login_email_queued = true;
+    }
 
     res.status(201).json({ ok: true, data: result });
   })

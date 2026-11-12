@@ -572,3 +572,31 @@
   background: var(--success, #2ecc71); border: 2px solid var(--bg-elevated);
 }
 .conv-item.person .cname { font-weight: 500; }
+
+/* Unread numbers */
+.conv-item { position: relative; }
+.unread-badge {
+  margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
+  background: var(--accent); color: #fff; font-size: 0.72rem; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* Back to the chat list: phones only */
+.chat-back { display: none; margin-right: 8px; flex: 0 0 auto; }
+
+@media (max-width: 860px) {
+  /* Fit the visible screen (follows the keyboard) so the message box is always on screen */
+  .community-face { height: calc(100dvh - var(--topbar-h) - 56px - env(safe-area-inset-bottom)); min-height: 0; }
+  .community-layout { height: 100%; }
+  .conv-pane { min-height: 0; }
+  .chat-back { display: inline-flex; }
+  .chat-header { display: flex; align-items: center; gap: 4px; }
+  .chat-header .chat-call-actions { margin-left: auto; display: flex; gap: 4px; flex: 0 0 auto; }
+  .chat-header .chat-call-actions .btn { padding: 6px 10px; }
+  #btn-call-screen { display: none; } /* phones cannot share their screen */
+  .chat-header > div:not(.chat-call-actions) { min-width: 0; flex: 1 1 auto; }
+  .chat-composer { flex: 0 0 auto; padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+  .chat-composer input { min-width: 0; }
+  .community-face .chat-composer { padding-right: 76px; }
+  .chat-messages { min-height: 0; overscroll-behavior: contain; }
+}

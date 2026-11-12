@@ -3,7 +3,7 @@ const { query } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/rbac');
 const { asyncHandler, AppError } = require('../lib/errors');
-const { pendingHours, normalizeMilestones } = require('../services/milestones');
+const { pendingHours, normalizeMilestones, progressPercent } = require('../services/milestones');
 
 const router = express.Router();
 router.use(authenticate);
@@ -11,11 +11,8 @@ router.use(authenticate);
 const ACTIVE_STATUSES = ['approved', 'in_progress', 'blocked'];
 const DUE_SOON_DAYS = 7;
 
-function milestoneProgress(milestones) {
-  const list = Array.isArray(milestones) ? milestones : [];
-  if (!list.length) return 0;
-  const done = list.filter((m) => (m.status || '').toLowerCase() === 'completed').length;
-  return Math.round((done / list.length) * 100);
+function milestoneProgress(milestones, status) {
+  return progressPercent(milestones, status); // shared rule: services/milestones.js
 }
 
 function projectDueDate(milestones) {
@@ -44,7 +41,7 @@ function healthFlag(dueDate, status) {
 
 function enrichProject(row) {
   const milestones = normalizeMilestones(row.milestones);
-  const progress_pct = milestoneProgress(milestones);
+  const progress_pct = milestoneProgress(milestones, row.status);
   const due_date = row.due_date || projectDueDate(milestones);
   const health = healthFlag(due_date, row.status);
   const workload = pendingHours(milestones);
@@ -132,7 +129,8 @@ router.get(
       `SELECT u.name AS label,
               COUNT(p.id)::int AS projects,
               COALESCE(AVG(
-                CASE WHEN jsonb_array_length(COALESCE(p.milestones, '[]'::jsonb)) = 0 THEN 0
+                CASE WHEN p.status = 'completed' THEN 100
+                WHEN jsonb_array_length(COALESCE(p.milestones, '[]'::jsonb)) = 0 THEN 0
                 ELSE (
                   SELECT COUNT(*)::float FROM jsonb_array_elements(p.milestones) m
                   WHERE LOWER(COALESCE(m->>'status','')) = 'completed'

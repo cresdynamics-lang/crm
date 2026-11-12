@@ -83,7 +83,6 @@ STAFF = admin, director, sales, developer, finance, pm, hr. LEADERS = admin, dir
 | finance_dashboard | /api/finance/dashboard | cash_flow:view, account_balance:view | finance + LEADERS |
 | finance_projects | /api/finance/projects | projects:view | finance + LEADERS |
 | cash_flow_report | /api/finance/cash-flow-report | cash_flow:view, account_balance:view | finance + LEADERS |
-| website_payments | /api/finance/website-payments | cash_flow:view, payments:view | finance + LEADERS |
 | hr_dashboard | /api/hr/dashboard | salaries:view | hr + LEADERS |
 | hr_applicants | /api/hr/applicants | employees:view | hr + LEADERS |
 | hr_onboarding | /api/hr/onboarding | employees:view | hr + LEADERS |

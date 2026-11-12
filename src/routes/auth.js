@@ -21,7 +21,7 @@ router.post(
     if (!email || !password) {
       throw new AppError('email and password are required', 400, 'VALIDATION');
     }
-    const ip = req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() || req.ip;
+    const ip = require('../middleware/authLimiter').clientIp(req);
     const userAgent = req.headers['user-agent'] || null;
     try {
       const result = await login(email, password);

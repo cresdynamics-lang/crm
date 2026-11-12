@@ -174,8 +174,9 @@ const CresProjectDetail = (() => {
     const tel = CresFormat.telLink(phone);
     const me = CresAPI.getUser();
     const canOpenCard = p.client_id && ['sales', 'admin', 'director', 'finance'].includes(me?.role);
+    const canEditContact = p.client_id && ['sales', 'admin', 'director'].includes(me?.role);
     const openCard = canOpenCard
-      ? `<button type="button" class="btn btn-ghost btn-sm" data-open-client-card="${esc(p.client_id)}">Client card</button>`
+      ? `<button type="button" class="btn ${canEditContact ? 'btn-primary' : 'btn-ghost'} btn-sm" data-open-client-card="${esc(p.client_id)}">${canEditContact ? 'Edit contact' : 'Client card'}</button>`
       : '';
     return `<div class="settings-section" style="max-width:none;margin:0 0 16px;">
       <h4 style="margin:0 0 8px;font-size:0.9rem;">Client contact</h4>
@@ -316,6 +317,15 @@ const CresProjectDetail = (() => {
       btn.addEventListener('click', () => {
         if (typeof CresClientCard !== 'undefined') {
           CresClientCard.open(btn.dataset.openClientCard).catch(console.error);
+          // Reload this project once the card is closed so the new contact shows
+          const reopenId = state.id;
+          const watch = setInterval(() => {
+            if (!document.getElementById('client-card-modal')?.classList.contains('open')) {
+              clearInterval(watch);
+              if (state.id === reopenId && document.getElementById('project-detail-modal')?.classList.contains('open')) open(reopenId, { onSaved: state.onSaved }).catch(console.error);
+            }
+          }, 600);
+          setTimeout(() => clearInterval(watch), 10 * 60 * 1000);
         }
       });
     });

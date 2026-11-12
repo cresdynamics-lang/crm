@@ -84,4 +84,21 @@ async function call(userId, pathname, { method = 'GET', body, headers = {} } = {
   return { status: res.status, body: parsed, headers: res.headers };
 }
 
-module.exports = { start, stop, roleUsers, tokenFor, call };
+/** Sign-in limits live in Redis for 15 minutes: tests that trigger them clean up so reruns stay independent. */
+async function clearAuthLimits() {
+  try {
+    const r = require('../src/config/redis').getRedis();
+    if (r.status !== 'ready') return;
+    let cursor = '0';
+    do {
+      const [next, keys] = await r.scan(cursor, 'MATCH', 'authlimit:*', 'COUNT', 500);
+      cursor = next;
+      if (keys.length) await r.del(...keys);
+    } while (cursor !== '0');
+  } catch {
+    /* no redis: limits are in memory for this process only */
+  }
+}
+
+module.exports = {
+  clearAuthLimits, start, stop, roleUsers, tokenFor, call };

@@ -6,6 +6,7 @@ const { requirePermission, requireAnyPermission } = require('../middleware/rbac'
 const { asyncHandler, AppError } = require('../lib/errors');
 const { idempotency } = require('../middleware/idempotency');
 const { removeStaffUser } = require('../services/staffRemoval');
+const { sendStaffCredentials } = require('../services/staffCredentials');
 
 const router = express.Router();
 router.use(authenticate);
@@ -100,7 +101,18 @@ router.post(
        RETURNING id, name, email, phone, status, created_at`,
       [name, email, phone || null, passwordHash, roles[0].id]
     );
-    res.status(201).json({ ok: true, data: { ...rows[0], role } });
+    // Email the new person their sign-in details (background; never blocks the response)
+    sendStaffCredentials({
+      userId: rows[0].id,
+      name: rows[0].name,
+      email: rows[0].email,
+      password,
+      role,
+      createdBy: req.user.id,
+      createdByName: req.user.name,
+      createdByRole: req.user.role,
+    });
+    res.status(201).json({ ok: true, data: { ...rows[0], role, login_email_queued: true } });
   })
 );
 

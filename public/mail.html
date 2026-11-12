@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+  <title>Team mail - Cres OS</title>
+  <link rel="icon" href="/icons/cres-os-192.png" type="image/png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#0f1419" />
+  <meta name="application-name" content="Cres OS" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Cres OS" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/tokens.css?v=20261023" />
+  <link rel="stylesheet" href="/css/meeting.css?v=20261024m4" />
+  <link rel="stylesheet" href="/css/inbox.css?v=20261109c" />
+  <link rel="stylesheet" href="/css/toast.css?v=20261109c" />
+  <link rel="stylesheet" href="/css/miniShell.css?v=20261109a" />
+  <link rel="stylesheet" href="/css/mobile.css?v=20261110c" />
+</head>
+<body class="mt-page ib-page ml-page">
+  <header class="mt-top">
+    <a class="mt-brand" href="/dashboard"><img src="/icons/cres-os-192.png" alt="" /> <span>CRES OS · Team mail</span></a>
+    <div class="mt-top-right">
+      <span class="mt-muted small" id="ml-identity"></span>
+      <a class="mt-link" href="/dashboard">Dashboard</a>
+    </div>
+  </header>
+
+  <main class="ib-main" id="ml-main" hidden>
+    <section class="ib-list-pane">
+      <div class="ib-toolbar">
+        <div class="ib-tabs" id="ml-tabs" role="tablist">
+          <button type="button" class="on" data-box="inbox">Inbox <span data-count="inbox"></span></button>
+          <button type="button" data-box="done">Done</button>
+          <button type="button" data-box="sent">Sent</button>
+          <button type="button" data-box="followups">Follow-ups <span data-count="followups"></span></button>
+        </div>
+        <button type="button" class="mt-btn sm primary" id="ml-compose">✎ New email</button>
+      </div>
+      <div id="ml-search-wrap" hidden style="padding:6px 10px;"><input type="search" id="ml-search" placeholder="Search emails you sent (person, subject, words)" style="width:100%;" /></div>
+      <p class="mt-muted small ml-explain">Emails forwarded to you inside CRES OS, and replies from people you emailed. Nothing here goes to your personal mailbox.</p>
+      <ul class="ib-list" id="ml-list"><li class="mt-muted small ib-empty">Loading…</li></ul>
+    </section>
+
+    <section class="ib-detail" id="ml-detail">
+      <div class="ib-placeholder mt-muted" id="ml-placeholder">Select an email.</div>
+      <article id="ml-message" hidden>
+        <button type="button" class="mt-btn sm ib-back" id="ml-back">← Back to list</button>
+        <div class="ib-actions">
+          <button type="button" class="mt-btn sm" id="ml-forward">Forward inside</button>
+          <button type="button" class="mt-btn sm" id="ml-done">Mark done</button>
+        </div>
+        <header class="ib-head">
+          <h2 id="ml-subject"></h2>
+          <div class="ib-meta" id="ml-meta"></div>
+          <div class="ib-summary" id="ml-note" hidden></div>
+        </header>
+        <div class="ib-body" id="ml-body"></div>
+        <div class="ib-attach" id="ml-attach" hidden></div>
+        <div class="ib-closed" id="ml-replies" hidden></div>
+
+        <div class="ib-reply" id="ml-reply">
+          <div class="ib-reply-head">
+            <strong>Reply to <span id="ml-reply-to"></span></strong>
+            <span class="mt-muted small" id="ml-drafted-by"></span>
+          </div>
+          <div class="ib-jarvis">
+            <input type="text" id="ml-instructions" placeholder="Tell Jarvis how to reply (optional)" />
+            <button type="button" class="mt-btn primary" id="ml-draft">✦ Draft with Jarvis</button>
+          </div>
+          <textarea id="ml-draft-body" class="ml-draft" rows="10" placeholder="Write your reply. Your name and team are added at the bottom."></textarea>
+          <div class="ib-send-row"><input type="text" id="ml-cc" placeholder="CC (optional): emails, or type @ to CC a colleague" autocomplete="off" /></div>
+          <div class="ib-send-row ib-buttons"><span class="mt-muted small ml-from" id="ml-from"></span><span class="ib-grow"></span><button type="button" class="mt-btn primary" id="ml-send">Send reply</button></div>
+        </div>
+      </article>
+      <article id="ml-sent-view" hidden>
+        <button type="button" class="mt-btn sm ib-back" id="ml-back2">← Back to list</button>
+        <header class="ib-head"><h2 id="ml-sent-subject"></h2><div class="ib-meta" id="ml-sent-meta"></div></header>
+        <div class="ib-body" id="ml-sent-body"></div>
+      </article>
+    </section>
+  </main>
+
+  <div class="fw-backdrop" id="ml-compose-modal" hidden>
+    <div class="fw-modal" role="dialog" aria-modal="true" aria-labelledby="ml-compose-title">
+      <div class="fw-head"><h3 id="ml-compose-title">New email</h3><button type="button" class="mt-btn sm" data-close-compose>Close</button></div>
+      <p class="fw-hint" id="ml-compose-from"></p>
+      <label class="fw-label" for="mc-to">To</label>
+      <textarea id="mc-to" rows="2" placeholder="Add as many people as you need: client@company.com, another@firm.com, @colleague, or #project. Separate with commas, spaces or new lines (paste a whole list)." autocomplete="off" style="width:100%;resize:vertical;"></textarea>
+      <div class="mt-muted small" id="mc-count" style="margin:4px 0 8px;"></div>
+      <label class="small" id="mc-ind-wrap" style="display:none;gap:8px;align-items:flex-start;margin-bottom:8px;"><input type="checkbox" id="mc-ind" checked> <span><b>Send each person their own copy</b> - nobody sees the other addresses, and each reply comes back to you. Untick to send one email that shows everyone.</span></label>
+      <label class="fw-label" for="mc-cc">CC (optional)</label>
+      <input id="mc-cc" type="text" placeholder="Emails, or type @ to CC a colleague inside CRES OS" autocomplete="off" />
+      <label class="fw-label" for="mc-subject">Subject</label>
+      <input id="mc-subject" type="text" />
+      <label class="fw-label" for="mc-body">Message</label>
+      <textarea id="mc-body" rows="10" placeholder="Your name and team are added at the bottom."></textarea>
+      <div class="fw-actions"><span class="fw-err" id="mc-err" role="alert"></span><button type="button" class="mt-btn" data-close-compose>Cancel</button><button type="button" class="mt-btn primary" id="mc-send">Send</button></div>
+    </div>
+  </div>
+
+  <main class="mt-lobby" id="ml-denied" hidden>
+    <section class="mt-card"><h2>Team mail</h2><p class="mt-muted">Team mail is for Cres Dynamics staff.</p></section>
+  </main>
+
+  <div class="mt-toasts" id="toasts"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/toast.js?v=20261109a"></script>
+  <script src="/js/alerts.js?v=20261110b"></script>
+  <script src="/js/api.js?v=20261110b"></script>
+  <script src="/js/forwardDialog.js?v=20261109a"></script>
+  <script src="/js/mail.js?v=20261110d"></script>
+  <script src="/js/nav.js?v=20261109b"></script>
+  <script src="/js/miniShell.js?v=20261110b"></script>
+  <script src="/js/pwa.js?v=20261109a"></script>
+</body>
+</html>

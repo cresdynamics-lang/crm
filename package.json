@@ -29,6 +29,7 @@
     "ioredis": "^5.4.2",
     "jsonwebtoken": "^9.0.2",
     "mailparser": "^3.9.15",
+    "mammoth": "^1.12.3",
     "morgan": "^1.10.0",
     "multer": "^2.2.0",
     "nodemailer": "^10.2.1",

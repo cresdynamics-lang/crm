@@ -9,6 +9,7 @@ const { requirePermission, requireAnyPermission } = require('../middleware/rbac'
 const { asyncHandler, AppError } = require('../lib/errors');
 const { loadCompanyProfile } = require('../config/company');
 
+const { progressPercent } = require('../services/milestones');
 const router = express.Router();
 router.use(authenticate);
 
@@ -48,14 +49,8 @@ function assertClient(req) {
   }
 }
 
-function milestoneProgress(milestones) {
-  const list = Array.isArray(milestones) ? milestones : [];
-  if (!list.length) return 0;
-  const done = list.filter((m) => {
-    const s = (m.status || '').toLowerCase();
-    return s === 'completed';
-  }).length;
-  return Math.round((done / list.length) * 100);
+function milestoneProgress(milestones, status) {
+  return progressPercent(milestones, status); // shared rule: services/milestones.js
 }
 
 function publicMilestones(milestones) {
@@ -119,7 +114,7 @@ router.get(
       id: p.id,
       name: p.name,
       status: p.status,
-      progress_pct: milestoneProgress(p.milestones),
+      progress_pct: milestoneProgress(p.milestones, p.status),
       updated_at: p.updated_at,
     }));
 
@@ -168,7 +163,7 @@ router.get(
         id: p.id,
         name: p.name,
         status: p.status,
-        progress_pct: milestoneProgress(p.milestones),
+        progress_pct: milestoneProgress(p.milestones, p.status),
         milestones: publicMilestones(p.milestones),
         preview_url: p.preview_url || null,
         updated_at: p.updated_at,
@@ -217,7 +212,7 @@ router.get(
           name: p.name,
           status: p.status,
           summary: p.summary || null,
-          progress_pct: milestoneProgress(p.milestones),
+          progress_pct: milestoneProgress(p.milestones, p.status),
           milestones: milestonesWithSignoff,
           preview_url: p.preview_url || null,
           due_date: p.due_date || null,

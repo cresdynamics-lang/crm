@@ -60,22 +60,10 @@ const CresHR = (() => {
         <p style="margin:0 0 12px;color:var(--text-muted);font-size:0.9rem;">
           Request the expected total (${fmtMoney(expectedTotal)}) from Finance. Finance adds/approves and escalates to Admin. After Admin approval, you can settle.
         </p>
-        <button type="button" class="btn btn-primary" id="btn-request-funding">Request funding from Finance</button>`;
-      document.getElementById('btn-request-funding')?.addEventListener('click', async () => {
-        const btn = document.getElementById('btn-request-funding');
-        btn.disabled = true;
-        try {
-          await CresAPI.request('/api/salaries/funding', {
-            method: 'POST',
-            body: { month, amount_requested: expectedTotal },
-            idempotencyKey: `fund-${month}-${Date.now()}`,
-          });
-          flash(document.getElementById('hr-dashboard')?.previousElementSibling || null, 'Funding request sent to Finance');
-          await mountHome();
-        } catch (err) {
-          alert(err.message);
-          btn.disabled = false;
-        }
+        <button type="button" class="btn btn-primary" id="btn-request-funding">Choose people and request funding</button>`;
+      // The request needs the people to be chosen: open the Salary funding page
+      document.getElementById('btn-request-funding')?.addEventListener('click', () => {
+        location.hash = '#/salary-funding';
       });
       return;
     }
@@ -354,21 +342,11 @@ const CresHR = (() => {
                · requested ${fmtMoney(f.amount_requested)}
                ${f.amount_funded != null ? `· funded ${fmtMoney(f.amount_funded)}` : ''}
                ${canSettle ? ' · Settlements unlocked' : ' · Settlements locked until Admin approval'}
-               ${!f || f.status === 'rejected' ? ` · <button type="button" class="btn btn-primary btn-sm" id="btn-payroll-request-funding">Request funding</button>` : ''}`
+               ${!f || f.status === 'rejected' ? ` · <button type="button" class="btn btn-primary btn-sm" id="btn-payroll-request-funding">Choose people and request funding</button>` : ''}`
             : `No funding request for ${esc(month)} (expected ${fmtMoney(fundRes.data.expectedTotal)}).
-               <button type="button" class="btn btn-primary btn-sm" id="btn-payroll-request-funding">Request funding from Finance</button>`;
-          document.getElementById('btn-payroll-request-funding')?.addEventListener('click', async () => {
-            try {
-              await CresAPI.request('/api/salaries/funding', {
-                method: 'POST',
-                body: { month, amount_requested: fundRes.data.expectedTotal },
-                idempotencyKey: `fund-${month}-${Date.now()}`,
-              });
-              flash(document.getElementById('payroll-flash'), 'Funding request sent to Finance');
-              await mountPayroll(null, user);
-            } catch (err) {
-              flash(document.getElementById('payroll-flash'), err.message, false);
-            }
+               <button type="button" class="btn btn-primary btn-sm" id="btn-payroll-request-funding">Choose people and request funding</button>`;
+          document.getElementById('btn-payroll-request-funding')?.addEventListener('click', () => {
+            location.hash = '#/salary-funding'; // pick the people there
           });
         }
         if (!rows.length) {
@@ -505,7 +483,7 @@ const CresHR = (() => {
             body: payload,
             idempotencyKey: `emp-${payload.email}-${Date.now()}`,
           });
-          flash(document.getElementById('employees-flash'), 'Employee created with login account');
+          flash(document.getElementById('employees-flash'), `Employee created. Sign-in details are being emailed to ${payload.email}`);
         }
         document.getElementById('employee-modal').classList.remove('open');
         await mountEmployees();

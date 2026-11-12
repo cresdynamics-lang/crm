@@ -53,7 +53,8 @@ router.get(
       `SELECT u.name AS developer,
               COUNT(p.id)::int AS projects,
               COALESCE(AVG(
-                CASE WHEN jsonb_array_length(COALESCE(p.milestones, '[]'::jsonb)) = 0 THEN 0
+                CASE WHEN p.status = 'completed' THEN 100
+                WHEN jsonb_array_length(COALESCE(p.milestones, '[]'::jsonb)) = 0 THEN 0
                 ELSE (
                   SELECT COUNT(*)::float FROM jsonb_array_elements(p.milestones) m
                   WHERE LOWER(COALESCE(m->>'status','')) = 'completed'

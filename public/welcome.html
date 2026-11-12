@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Your login - Cres OS</title>
+  <link rel="icon" href="/icons/cres-os-192.png" />
+  <link rel="stylesheet" href="/css/tokens.css?v=20261023" />
+  <link rel="stylesheet" href="/css/login.css?v=20261109a" />
+  <link rel="stylesheet" href="/css/mobile.css?v=20261110c" />
+  <style>
+    .reveal-box { margin: 18px 0; padding: 20px; border: 1px dashed var(--accent, #00a8c5); border-radius: 12px; text-align: center; }
+    .reveal-dots { font-family: ui-monospace, Menlo, monospace; font-size: 1.4rem; letter-spacing: 6px; margin-bottom: 14px; opacity: .85; }
+    .reveal-pw { font-family: ui-monospace, Menlo, monospace; font-size: 1.35rem; font-weight: 700; word-break: break-all; margin-bottom: 12px; user-select: all; }
+    .hint-line { margin-top: 12px; font-size: .92rem; }
+    .row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+    .login-submit.alt { background: transparent; border: 1px solid var(--border); color: inherit; }
+    .small { font-size: .82rem; opacity: .8; margin-top: 10px; }
+  </style>
+</head>
+<body class="login-page">
+  <main class="login-card">
+    <div class="login-brand">
+      <div class="brand-logo-wrap"><img class="brand-logo" src="/brand/logo.png?v=20261023" alt="CRES Dynamics" /></div>
+      <p id="w-sub">Your CRES OS account</p>
+    </div>
+
+    <div id="w-loading" class="hint">One moment…</div>
+
+    <section id="w-hidden" hidden>
+      <p class="hint" id="w-hello"></p>
+      <div class="reveal-box">
+        <div class="reveal-dots" aria-hidden="true">••••••••••</div>
+        <button type="button" class="login-submit" id="w-show">Click to see your login password</button>
+      </div>
+      <p class="small">Only you should open this page. It shows the password once for a few minutes.</p>
+    </section>
+
+    <section id="w-shown" hidden>
+      <p class="hint">Your login password:</p>
+      <div class="reveal-box">
+        <div class="reveal-pw" id="w-pw"></div>
+        <div class="row">
+          <button type="button" class="login-submit alt" id="w-copy" style="width:auto;padding:10px 18px;">Copy</button>
+          <a class="login-submit" id="w-login" href="/login" style="width:auto;padding:10px 22px;text-decoration:none;display:inline-block;">Login</a>
+        </div>
+      </div>
+      <p class="hint-line">On the next page, type your email. Hint: <strong id="w-hint"></strong></p>
+      <p class="small" id="w-left"></p>
+      <p class="small">After you sign in, change this password under Settings &rsaquo; Password. If you forget it, use "Forgot password" on the sign-in page.</p>
+    </section>
+
+    <section id="w-gone" hidden>
+      <div class="login-error visible" role="alert">This link has expired, was already used, or the password was changed.</div>
+      <p class="hint">Open the sign-in page and choose <strong>Forgot password?</strong> to get a new one by email.</p>
+      <a class="login-submit" href="/login" style="text-decoration:none;display:block;text-align:center;">Go to sign in</a>
+    </section>
+  </main>
+  <script src="/js/welcome.js?v=20261110a"></script>
+</body>
+</html>

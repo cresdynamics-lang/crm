@@ -2,14 +2,25 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Meetings - Cres Dynamics</title>
-  <link rel="icon" href="/brand/logo-mark.png?v=20261023" type="image/png" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+  <title>Meetings - Cres OS</title>
+  <link rel="icon" href="/icons/cres-os-192.png" type="image/png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#0f1419" />
+  <meta name="application-name" content="Cres OS" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Cres OS" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/tokens.css?v=20261023" />
   <link rel="stylesheet" href="/css/meeting.css?v=20261024m4" />
+  <link rel="stylesheet" href="/css/toast.css?v=20261109c" />
+  <link rel="stylesheet" href="/css/miniShell.css?v=20261109a" />
+  <link rel="stylesheet" href="/css/mobile.css?v=20261110c" />
 </head>
 <body class="mt-page">
   <header class="mt-top">
@@ -131,7 +142,11 @@
   <div class="mt-toasts" id="toasts"></div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/js/api.js?v=20261024s1"></script>
-  <script src="/js/meeting.js?v=20261029f"></script>
+  <script src="/js/toast.js?v=20261109a"></script>
+  <script src="/js/api.js?v=20261110b"></script>
+  <script src="/js/meeting.js?v=20261109b"></script>
+  <script src="/js/nav.js?v=20261109b"></script>
+  <script src="/js/miniShell.js?v=20261110b"></script>
+  <script src="/js/pwa.js?v=20261109a"></script>
 </body>
 </html>

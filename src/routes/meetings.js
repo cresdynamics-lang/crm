@@ -24,7 +24,8 @@ function requireStaff(req) {
 }
 
 function baseUrl(req) {
-  return process.env.PUBLIC_APP_URL || `${req.protocol}://${req.get('host')}`;
+  const { publicBase } = require('../services/meetingService');
+  return publicBase(`https://${req.get('host')}`);
 }
 
 function realtime() {
@@ -38,8 +39,9 @@ function realtime() {
 /** GET /api/meetings/config - ICE servers for the browser. */
 router.get(
   '/config',
-  asyncHandler(async (_req, res) => {
-    res.json({ ok: true, data: { iceServers: iceServers() } });
+  asyncHandler(async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ ok: true, data: { iceServers: iceServers(req.user.id), relay: Boolean(process.env.MEETING_TURN_URLS || process.env.MEETING_TURN_URL) } });
   })
 );
 
