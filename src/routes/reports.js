@@ -356,6 +356,9 @@ router.post(
       after: { already_communicated: alreadyCommunicated, communicated_to: communicatedTo },
     }).catch(() => {});
 
+    const { clearReportRemindersForUser } = require('../services/opsJobs');
+    await clearReportRemindersForUser(req.user.id).catch(() => {});
+
     res.status(201).json({ ok: true, data: rows[0] });
   })
 );
@@ -455,6 +458,9 @@ router.post(
     // Mark attendance for today (sales/developer only)
     if (['sales', 'developer'].includes(req.user.role)) {
       await markAttendance(req.user.id, rows[0].created_at, rows[0].id).catch(() => {});
+      // Drop any "send your report" reminders now that today's report is on file
+      const { clearReportRemindersForUser } = require('../services/opsJobs');
+      await clearReportRemindersForUser(req.user.id).catch(() => {});
     }
 
     res.status(201).json({ ok: true, data: rows[0] });

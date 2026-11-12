@@ -197,6 +197,14 @@ async function handleEmail(job) {
   }
 
   if (name === 'report.reminder') {
+    // Evict: if they filed today's report after the reminder was queued, do not email
+    if (data.userId) {
+      const { hasReportToday, clearReportRemindersForUser } = require('../services/opsJobs');
+      if (await hasReportToday(data.userId)) {
+        await clearReportRemindersForUser(data.userId).catch(() => {});
+        return { skipped: true, reason: 'report_already_filed' };
+      }
+    }
     return sendWithFailover({
       to: data.to,
       subject: data.subject,

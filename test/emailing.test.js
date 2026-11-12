@@ -88,29 +88,49 @@ test('report reminders only go out in working hours', () => {
   assert.equal(reportReminderWindowOpen(new Date('2026-11-08T08:00:00Z')), false); // Sunday
 });
 
-test('staff without a report for 12h get one reminder, not two', async () => {
+test('staff without today’s report get one reminder; filers are skipped', async () => {
   const { query } = require('../src/config/database');
-  const { remindMissingReports } = require('../src/services/opsJobs');
+  const { remindMissingReports, clearReportRemindersForFilers } = require('../src/services/opsJobs');
   const dev = users.developer;
   if (!dev) return;
-  // Make this dev look overdue: no reminder in the window, no recent report
-  await query(`DELETE FROM report_reminder_log WHERE user_id = $1 AND sent_at > NOW() - INTERVAL '12 hours'`, [dev]);
-  const { rows: recent } = await query(
-    `SELECT 1 FROM daily_reports WHERE user_id = $1 AND created_at > NOW() - INTERVAL '12 hours'`,
+  // Clear today's reminder slot so the first run can claim it
+  await query(
+    `DELETE FROM report_reminder_log
+      WHERE user_id = $1
+        AND (sent_at AT TIME ZONE 'Africa/Nairobi')::date = (NOW() AT TIME ZONE 'Africa/Nairobi')::date`,
     [dev]
   );
-  const { rows: fresh } = await query(`SELECT 1 FROM users WHERE id = $1 AND created_at > NOW() - INTERVAL '12 hours'`, [dev]);
-  if (recent.length || fresh.length) return; // not overdue in this database
+  const { rows: todayReport } = await query(
+    `SELECT 1 FROM daily_reports
+      WHERE user_id = $1
+        AND (created_at AT TIME ZONE 'Africa/Nairobi')::date = (NOW() AT TIME ZONE 'Africa/Nairobi')::date`,
+    [dev]
+  );
+  if (todayReport.length) {
+    // Already filed today → must not get a new reminder, and leftover notifs are evicted
+    await query(
+      `INSERT INTO notifications (user_id, type, content, meta)
+       VALUES ($1, 'report_reminder', 'stale reminder for test', '{}'::jsonb)`,
+      [dev]
+    );
+    const cleared = await clearReportRemindersForFilers();
+    assert.ok(cleared.clearedNotifications >= 1);
+    const r = await remindMissingReports({ force: true });
+    assert.equal(r.reminded, 0);
+    return;
+  }
 
   await remindMissingReports({ force: true });
   const again = await remindMissingReports({ force: true });
   const { rows } = await query(
-    `SELECT id FROM report_reminder_log WHERE user_id = $1 AND sent_at > NOW() - INTERVAL '5 minutes'`,
+    `SELECT id FROM report_reminder_log
+      WHERE user_id = $1
+        AND (sent_at AT TIME ZONE 'Africa/Nairobi')::date = (NOW() AT TIME ZONE 'Africa/Nairobi')::date`,
     [dev]
   );
   cleanup.reminders.push(...rows.map((r) => r.id));
-  assert.equal(rows.length, 1, 'exactly one reminder in the window');
-  assert.ok(again.reminded === 0 || again.candidates >= 0);
+  assert.equal(rows.length, 1, 'exactly one reminder for Nairobi today');
+  assert.equal(again.reminded, 0);
 });
 
 test('staff can file a delay reason; PM sees it; others cannot read it', async () => {
